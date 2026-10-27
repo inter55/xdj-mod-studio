@@ -11,11 +11,14 @@ OUT=${VF_OUT:-$ROOT/build/xflac}
 SH=$ROOT/work/sh-tools/bin
 BASE=${VF_BASE:-0x09970000}
 LIMIT=0x09A00000
-O=$ROOT/work/opus/opus-1.5.2
 mkdir -p "$OUT"
-SRC="$ROOT/tools/xflac/vfile.c"
+# $SRC/$INC/$DEFS are word-split lists: keep them relative to $ROOT so a
+# checkout path with spaces still builds
+cd "$ROOT"
+O=work/opus/opus-1.5.2
+SRC="tools/xflac/vfile.c"
 DEFS="-DXF_FREESTANDING"
-INC="-I$ROOT/tools/xopus/libc -I$ROOT/work/drflac"
+INC="-Itools/xopus/libc -Iwork/drflac"
 if [ "${VF_OPUS:-1}" = 1 ]; then
   # same libopus build as tools/xopus/build.sh (patched celt/arch.h there)
   grep -q "ifdef OPUS_FAST_INT64" "$O/celt/arch.h" || sh "$ROOT/tools/xopus/build.sh" >/dev/null
@@ -46,5 +49,5 @@ N=$("$SH/sh-elf-objdump" -d "$OUT/vfile.elf" | awk -F'\t' 'NF>=3{print $3}' | gr
 echo "FPU instructions: $N (must be 0)"; [ "$N" = 0 ]
 # Mac test binary: libopus' 32-bit multiply path like the deck
 cc -O2 -w -DVF_NATIVE -DOPUS_FAST_INT64=0 $(echo $DEFS | sed 's/-DXF_FREESTANDING//') \
-  $(echo $INC | sed "s|-I$ROOT/tools/xopus/libc||") \
+  $(echo $INC | sed "s|-Itools/xopus/libc||") \
   -o "$OUT/vfile_native" "$ROOT/tools/xflac/vfile_native_test.c" $SRC

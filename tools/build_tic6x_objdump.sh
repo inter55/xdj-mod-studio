@@ -6,6 +6,9 @@
 set -e
 ROOT=$(cd "$(dirname "$0")/.." && pwd)
 W=$ROOT/work/tic6x-build
+# GNU configure/make can't build in a path with spaces (the sub-configures
+# split it): build elsewhere then, the result is still copied into work/
+case $W in *" "*) W=${TMPDIR:-/tmp}/xdj-tic6x-build ;; esac
 mkdir -p "$W" "$ROOT/work/tic6x"
 cd "$W"
 [ -f binutils-2.43.1.tar.xz ] || curl -sSLO https://ftp.gnu.org/gnu/binutils/binutils-2.43.1.tar.xz

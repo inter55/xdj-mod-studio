@@ -658,9 +658,19 @@ dialog h2 { font-size: 16px; margin-bottom: 6px; }
       <div class="row"><button class="btn primary" id="stickbtn">Use this folder</button><span class="small dim" id="stickmsg"></span></div>
     </div>
     <div class="panel stack" style="gap:10px">
-      <div><h2>Project folder</h2><div class="small dim">Holds the firmware (<code>XDJ700.UPD</code> or <code>FIRMWARE</code>), <code>mods</code>, <code>cache</code> and <code>build</code>. The firmware is yours to provide; it is never bundled.</div></div>
-      <div class="row"><input class="field" id="project" type="text" spellcheck="false" autocomplete="off"><button class="btn" id="projpick">Choose…</button></div>
-      <div class="row"><button class="btn" id="projbtn">Use this folder</button><span class="small dim" id="projmsg"></span></div>
+      <div><h2>Project folder</h2><div class="small dim">Holds your themes (<code>mods/themes.py</code>), the mod tools, the prebuilt deck modules, <code>cache</code> and <code>build</code>, and your official update file. Studio works from the folder inside the app by default; a folder of your own keeps your themes and firmware where you can see and back them up.</div></div>
+      <div class="small dim">Default folder (<span id="projkind">the folder inside the app</span>): <code id="projdefault"></code> <span id="projstate"></span></div>
+      <div class="small dim" style="line-height:1.55"><b>Your own project folder in four steps</b>
+        <ol style="margin:4px 0 0 18px;padding:0">
+          <li>Make an empty folder anywhere, for example <code>Documents/XDJ Project</code>.</li>
+          <li>Type or choose its path below and press <b>Set up this folder</b>: Studio copies the mods, tools, prebuilt deck modules and the audio-chip disassembler into it (nothing you already have there is overwritten).</li>
+          <li>Put your official XDJ-700 v1.15 update file in that folder as <code>XDJ700.UPD</code> (or <code>FIRMWARE/XDJ700_stock_v1.15.UPD</code>). Studio copies it for you when it already knows the file from the Permanent firmware page. It is never bundled with the app.</li>
+          <li>Quit and reopen Studio. <b>Reset to default</b> goes back to the folder inside the app at any time; your own folder is left untouched.</li>
+        </ol>
+      </div>
+      <div class="row"><input class="field" id="project" type="text" spellcheck="false" autocomplete="off" placeholder="/Users/you/Documents/XDJ Project"><button class="btn" id="projpick">Choose…</button></div>
+      <div class="row"><button class="btn primary" id="projsetup">Set up this folder</button><button class="btn" id="projbtn">Use this folder</button><button class="btn quiet" id="projreset" hidden>Reset to default</button></div>
+      <div class="small dim" id="projmsg"></div>
     </div>
     <div class="panel stack" style="gap:8px">
       <h2>Stem separation</h2>
@@ -675,7 +685,7 @@ dialog h2 { font-size: 16px; margin-bottom: 6px; }
 <div id="act"><div class="acth">Activity <button class="btn sm quiet" id="actx">Close</button></div><div id="jobs"><div class="empty">Nothing has run yet.</div></div></div>
 <div id="toast" aria-live="polite"></div>
 
-<dialog id="dlg"><h2 id="dtitle"></h2><div class="dim" id="dbody"></div><div id="dextra"></div>
+<dialog id="dlg"><h2 id="dtitle"></h2><div class="dim" id="dbody" style="white-space:pre-line"></div><div id="dextra"></div>
   <div class="dlgfoot"><button class="btn" id="dno">Cancel</button><button class="btn primary" id="dyes">OK</button></div></dialog>
 
 <script>
@@ -1270,7 +1280,11 @@ $('#ix7s').onclick = async () => {
 /* ---- Settings */
 function fillSettings() {
   if (!$('#stick').value) $('#stick').value = ST.stick || '';
-  if (!$('#project').value) $('#project').value = ST.project || '';
+  if (!$('#project').value) $('#project').value = ST.project_pending || ST.project || '';
+  $('#projdefault').textContent = ST.project_default || '';
+  $('#projkind').textContent = ST.project_default_kind || 'the folder inside the app';
+  $('#projreset').hidden = !ST.project_custom;
+  $('#projstate').textContent = ST.project_custom ? (ST.project_pending === ST.project ? '— using your own folder' : '— your own folder is saved; quit and reopen Studio to use it') : '— in use';
 }
 async function setStick(p) {
   const r = await api('/api/stick', {path: p}); if (!r) return;
@@ -1281,8 +1295,30 @@ $('#stickpick').onclick = async () => { const p = await pickFolder('Choose your 
 $('#stickbtn').onclick = () => setStick($('#stick').value);
 async function setProject(p) {
   const r = await api('/api/project', {path: p}); if (!r) return;
-  $('#projmsg').textContent = !r.ok ? 'That folder has no tools folder in it.' : r.restart ? 'Saved. Quit and reopen Studio to use it.' : 'Already in use.';
+  $('#projmsg').textContent = !r.ok ? 'That folder has no tools folder in it: press “Set up this folder” to fill it first.' : r.restart ? 'Saved. Quit and reopen Studio to use it.' : 'Already in use.';
+  await state(); fillSettings();
 }
+async function setupProject(p) {
+  p = (p || '').trim();
+  if (!p) return toast('Type or choose the folder first.', true);
+  if (!await ask('Set up this folder as your project folder?',
+    `${p}\n\nStudio copies the mods, tools, prebuilt deck modules and the audio-chip disassembler into it (a few MB), plus your official update file when it knows where it is. Files already there are kept.`, 'Set up')) return;
+  const r = await api('/api/project/setup', {path: p}); if (!r) return;
+  if (!r.ok) { $('#projmsg').textContent = r.error || 'Could not set up that folder.'; return; }
+  $('#projmsg').textContent = `${r.copied} files copied${r.kept ? `, ${r.kept} already there` : ''}. ` +
+    (r.firmware ? 'Update file is in place. ' : 'Now put your XDJ700.UPD in it. ') + (r.restart ? 'Quit and reopen Studio to use it.' : '');
+  await state(); fillSettings();
+}
+async function resetProject() {
+  if (!await ask('Reset to the default project folder?',
+    `Studio goes back to the folder inside the app. Your own folder and everything in it stay where they are.`, 'Reset')) return;
+  const r = await api('/api/project/reset', {}); if (!r) return;
+  $('#project').value = r.path;
+  $('#projmsg').textContent = r.restart ? 'Reset. Quit and reopen Studio to use it.' : 'Already using the default folder.';
+  await state(); fillSettings();
+}
+$('#projsetup').onclick = () => setupProject($('#project').value);
+$('#projreset').onclick = resetProject;
 $('#projpick').onclick = async () => { const p = await pickFolder('Choose the project folder'); if (p) { $('#project').value = p; setProject(p); } };
 $('#projbtn').onclick = () => setProject($('#project').value);
 

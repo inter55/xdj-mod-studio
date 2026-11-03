@@ -1,3 +1,25 @@
+# XDJ Mod Studio v0.99.2 (XDJ-700, firmware 1.15)
+
+Small follow-up to 0.99.1: Settings › Project folder. Same requirements
+as 0.99 (your own XDJ-700 v1.15 update file; Apple Silicon Mac on macOS
+14+, or the Windows zip). Mac: see the Gatekeeper note under 0.99.1 below.
+
+## New in 0.99.2
+
+- **Project folder guide** in Settings: what the folder holds, where the
+  default one is (inside the app), and four steps to a folder of your own
+  with your firmware file (`XDJ700.UPD` in that folder, or
+  `FIRMWARE/XDJ700_stock_v1.15.UPD`).
+- **Set up this folder** button: fills an empty folder of yours with the
+  mods, tools, prebuilt deck modules and the audio-chip disassembler from
+  the app, and copies your official update file when Studio already
+  knows it. Nothing already in the folder is overwritten, so your
+  `mods/themes.py` stays yours.
+- **Reset to default** button: back to the folder inside the app; your
+  own folder is left untouched.
+
+---
+
 # XDJ Mod Studio v0.99.1 (XDJ-700, firmware 1.15)
 
 Maintenance release on top of 0.99: the Studio app only, no deck-side

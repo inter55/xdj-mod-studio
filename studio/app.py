@@ -95,7 +95,7 @@ UIHTML = os.path.join(BUNDLE, "studio", "ui.html") if FROZEN else os.path.join(H
 
 APP_SUPPORT = app_support_dir()
 # the app's own release number (GitHub release tag v<APP_VERSION>)
-APP_VERSION = "0.99.1"
+APP_VERSION = "0.99.2"
 RELEASES_API = "https://api.github.com/repos/inter55/xdj-mod-studio/releases/latest"
 RELEASES_PAGE = "https://github.com/inter55/xdj-mod-studio/releases/latest"
 SETTINGS = os.path.join(APP_SUPPORT, "studio.json")
@@ -156,6 +156,83 @@ def find_project():
             return os.path.abspath(c)
     return os.path.abspath(next((c for c in cands if c and os.path.isdir(c)),
                                 os.path.dirname(HERE)))
+
+
+def default_project():
+    """The project folder Studio uses with no choice made in Settings: the
+    repo bundled in the app, else the source checkout."""
+    for c in (_bundle_repo(), os.environ.get("XDJ_ROOT"), os.path.dirname(HERE)):
+        if c and os.path.isdir(os.path.join(c, "tools")):
+            return os.path.abspath(c)
+    return os.path.abspath(os.path.dirname(HERE))
+
+
+# what a project folder of your own needs from the default one (relative
+# paths; whole folders are copied, files are never overwritten)
+PROJECT_PARTS = ("tools", "mods", "build", "prebuilt", "work/tic6x",
+                 "TESTER_README.md")
+
+
+def project_setup(path):
+    """Make `path` a usable project folder: copy the mods, tools, prebuilt
+    deck modules and the audio-chip disassembler from the default folder,
+    and the official update file when Studio knows where it is. Existing
+    files are kept (your themes.py stays yours). Returns what happened."""
+    src = default_project()
+    path = os.path.abspath(os.path.expanduser(path))
+    if os.path.realpath(path) == os.path.realpath(src):
+        return {"ok": False, "error": "That is the default folder itself. "
+                                      "Choose an empty folder of your own."}
+    if path.startswith(os.path.realpath(src) + os.sep):
+        return {"ok": False, "error": "Choose a folder outside the app."}
+    os.makedirs(path, exist_ok=True)
+    copied = skipped = 0
+    for rel in PROJECT_PARTS:
+        s = os.path.join(src, rel)
+        d = os.path.join(path, rel)
+        if os.path.isdir(s):
+            for dp, dirs, files in os.walk(s):
+                dirs[:] = [x for x in dirs if x != "__pycache__" and not x.startswith(".")]
+                for f in files:
+                    sf = os.path.join(dp, f)
+                    df = os.path.join(d, os.path.relpath(sf, s))
+                    if os.path.exists(df):
+                        skipped += 1
+                        continue
+                    os.makedirs(os.path.dirname(df), exist_ok=True)
+                    shutil.copy2(sf, df)
+                    copied += 1
+        elif os.path.isfile(s):
+            if os.path.exists(d):
+                skipped += 1
+            else:
+                shutil.copy2(s, d)
+                copied += 1
+    for rel in ("cache", "build"):
+        os.makedirs(os.path.join(path, rel), exist_ok=True)
+    # the official update file: the one chosen on the UPD page, else one
+    # lying in the default folder (a developer checkout); never from the
+    # firmware home (that holds derived files, not the update file)
+    upd = None
+    cand = settings().get("upd")
+    if cand and os.path.isfile(os.path.expanduser(cand)):
+        upd = os.path.expanduser(cand)
+    else:
+        for c in ("XDJ700.UPD", os.path.join("build", "XDJ700.UPD")):
+            if os.path.isfile(os.path.join(src, c)):
+                upd = os.path.join(src, c)
+                break
+    fw = os.path.join(path, "XDJ700.UPD")
+    fw_copied = False
+    if upd and not os.path.exists(fw) and os.path.realpath(upd) != os.path.realpath(fw):
+        shutil.copy2(upd, fw)
+        fw_copied = True
+    s = settings()
+    s["project"] = path
+    save_settings(s)
+    return {"ok": True, "path": path, "copied": copied, "kept": skipped,
+            "firmware": fw_copied or os.path.exists(fw),
+            "restart": path != ROOT}
 
 
 ROOT = find_project()
@@ -1721,6 +1798,10 @@ class H(BaseHTTPRequestHandler):
                 return self.send({"stick": stick_path(),
                                   "stick_ok": os.path.isdir(stick_path()),
                                   "project": ROOT,
+                                  "project_default": default_project(),
+                                  "project_default_kind": "the folder inside the app" if _bundle_repo() else "the source checkout Studio runs from",
+                                  "project_custom": bool(s.get("project")),
+                                  "project_pending": s.get("project") or default_project(),
                                   "project_ok": os.path.isdir(os.path.join(ROOT, "tools")),
                                   "deck": deck_present(), "deck_err": deck_err(), "deck_multi": _DECK_N[0] > 1,
                                   "demucs": demucs_ok(),
@@ -1965,6 +2046,14 @@ class H(BaseHTTPRequestHandler):
                     s["project"] = path
                     save_settings(s)
                 return self.send({"ok": ok, "restart": ok and path != ROOT})
+            if p == "/api/project/setup":
+                return self.send(project_setup(b["path"].strip()))
+            if p == "/api/project/reset":
+                s = settings()
+                s.pop("project", None)
+                save_settings(s)
+                return self.send({"ok": True, "path": default_project(),
+                                  "restart": default_project() != ROOT})
             if p == "/api/3band":
                 return self.send({"job": job("3-band waveforms", j_3band, stick,
                                              b.get("dirs"), b.get("compute_all", False))})

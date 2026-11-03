@@ -1799,7 +1799,11 @@ class H(BaseHTTPRequestHandler):
                                   "stick_ok": os.path.isdir(stick_path()),
                                   "project": ROOT,
                                   "project_default": default_project(),
-                                  "project_default_kind": "the folder inside the app" if _bundle_repo() else "the source checkout Studio runs from",
+                                  "project_default_kind": (
+                                      ("the repo folder next to XDJ Mod Studio.exe" if WINDOWS
+                                       else "the folder inside the app") if _bundle_repo()
+                                      else "the source checkout Studio runs from"),
+                                  "windows": WINDOWS,
                                   "project_custom": bool(s.get("project")),
                                   "project_pending": s.get("project") or default_project(),
                                   "project_ok": os.path.isdir(os.path.join(ROOT, "tools")),

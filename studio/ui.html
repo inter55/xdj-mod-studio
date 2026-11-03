@@ -658,14 +658,14 @@ dialog h2 { font-size: 16px; margin-bottom: 6px; }
       <div class="row"><button class="btn primary" id="stickbtn">Use this folder</button><span class="small dim" id="stickmsg"></span></div>
     </div>
     <div class="panel stack" style="gap:10px">
-      <div><h2>Project folder</h2><div class="small dim">Holds your themes (<code>mods/themes.py</code>), the mod tools, the prebuilt deck modules, <code>cache</code> and <code>build</code>, and your official update file. Studio works from the folder inside the app by default; a folder of your own keeps your themes and firmware where you can see and back them up.</div></div>
+      <div><h2>Project folder</h2><div class="small dim">Holds your themes (<code>mods/themes.py</code>), the mod tools, the prebuilt deck modules, <code>cache</code> and <code>build</code>, and your official update file. Studio works from a default folder (inside the app on the Mac; the <code>repo</code> folder next to <code>XDJ Mod Studio.exe</code> on Windows); a folder of your own keeps your themes and firmware where you can see and back them up.</div></div>
       <div class="small dim">Default folder (<span id="projkind">the folder inside the app</span>): <code id="projdefault"></code> <span id="projstate"></span></div>
       <div class="small dim" style="line-height:1.55"><b>Your own project folder in four steps</b>
         <ol style="margin:4px 0 0 18px;padding:0">
-          <li>Make an empty folder anywhere, for example <code>Documents/XDJ Project</code>.</li>
+          <li>Make an empty folder anywhere, for example <code id="projexample">Documents/XDJ Project</code>.</li>
           <li>Type or choose its path below and press <b>Set up this folder</b>: Studio copies the mods, tools, prebuilt deck modules and the audio-chip disassembler into it (nothing you already have there is overwritten).</li>
           <li>Put your official XDJ-700 v1.15 update file in that folder as <code>XDJ700.UPD</code> (or <code>FIRMWARE/XDJ700_stock_v1.15.UPD</code>). Studio copies it for you when it already knows the file from the Permanent firmware page. It is never bundled with the app.</li>
-          <li>Quit and reopen Studio. <b>Reset to default</b> goes back to the folder inside the app at any time; your own folder is left untouched.</li>
+          <li>Quit and reopen Studio. <b>Reset to default</b> goes back to the default folder at any time; your own folder is left untouched.</li>
         </ol>
       </div>
       <div class="row"><input class="field" id="project" type="text" spellcheck="false" autocomplete="off" placeholder="/Users/you/Documents/XDJ Project"><button class="btn" id="projpick">Choose…</button></div>
@@ -1283,6 +1283,8 @@ function fillSettings() {
   if (!$('#project').value) $('#project').value = ST.project_pending || ST.project || '';
   $('#projdefault').textContent = ST.project_default || '';
   $('#projkind').textContent = ST.project_default_kind || 'the folder inside the app';
+  $('#projexample').textContent = ST.windows ? 'Documents\\XDJ Project' : 'Documents/XDJ Project';
+  $('#project').placeholder = ST.windows ? 'C:\\Users\\you\\Documents\\XDJ Project' : '/Users/you/Documents/XDJ Project';
   $('#projreset').hidden = !ST.project_custom;
   $('#projstate').textContent = ST.project_custom ? (ST.project_pending === ST.project ? '— using your own folder' : '— your own folder is saved; quit and reopen Studio to use it') : '— in use';
 }
@@ -1311,7 +1313,7 @@ async function setupProject(p) {
 }
 async function resetProject() {
   if (!await ask('Reset to the default project folder?',
-    `Studio goes back to the folder inside the app. Your own folder and everything in it stay where they are.`, 'Reset')) return;
+    `Studio goes back to ${ST.project_default_kind || 'the default folder'}. Your own folder and everything in it stay where they are.`, 'Reset')) return;
   const r = await api('/api/project/reset', {}); if (!r) return;
   $('#project').value = r.path;
   $('#projmsg').textContent = r.restart ? 'Reset. Quit and reopen Studio to use it.' : 'Already using the default folder.';

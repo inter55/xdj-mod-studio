@@ -1,3 +1,32 @@
+# XDJ Mod Studio v0.99.1 (XDJ-700, firmware 1.15)
+
+Maintenance release on top of 0.99: the Studio app only, no deck-side
+changes. Same requirements as 0.99 (your own XDJ-700 v1.15 update file;
+Apple Silicon Mac on macOS 14+, or the Windows zip).
+
+## Fixed in 0.99.1
+
+- **Theme Builder showed a black box** until the firmware was set up, with
+  no hint why. It now says so and offers the firmware setup right there;
+  the preview appears by itself once setup finishes, and a failed render
+  shows its reason instead of a broken image.
+- **Long freezes with a big USB library.** Rescanning 1000+ tracks took
+  half a minute and happened far too often: on nearly every theme preview,
+  on every setup check and on the app's first screen. The library is now
+  scanned once and refreshed in the background; previews, tab switches
+  and the Home page answer at once.
+- **Audio preview in Track Builder** now supports seeking (byte-range
+  requests), which the Mac app's web view needs to play files reliably.
+- The **Custom colour** swatch no longer shows under every waveform style,
+  and the unfinished Appearance setting is hidden again until 1.0.
+- **First-run firmware setup** from a source checkout failed late with a
+  traceback when the audio-chip disassembler was missing; it now checks
+  up front and tells you what to build. Developer README updated.
+- The public Mac build no longer needs the SH-4 cross compiler on the
+  build Mac: without it, the committed prebuilt deck modules ship.
+
+---
+
 # XDJ Mod Studio v0.99 (XDJ-700, firmware 1.15)
 
 Open-source mods for the Pioneer DJ XDJ-700, loaded into the deck's memory

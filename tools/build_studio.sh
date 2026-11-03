@@ -72,19 +72,32 @@ if [ -f build/phasemeter/pm.bin ]; then
   mkdir -p "$REPO/build/phasemeter"
   cp build/phasemeter/pm.bin build/phasemeter/pm.syms "$REPO/build/phasemeter/"
 fi
+# Deck code (our own SH-4 / C674x C). With the cross compiler on this Mac
+# (tools/build_sh_gcc.sh -> work/sh-tools) every module is rebuilt; without
+# it the committed prebuilt/deck/ modules are staged into build/ instead
+# (the same files tools/shbuild.py gives the app from a plain checkout).
+if [ -x work/sh-tools/bin/sh-elf-gcc ]; then
+  SHCC=1
+else
+  SHCC=0
+  echo "no work/sh-tools/bin/sh-elf-gcc: shipping prebuilt/deck modules"
+  .venv/bin/python -c "import sys;sys.path[:0]=['tools'];import shbuild;print('staged', len(shbuild.stage_prebuilt('.', force=True)), 'prebuilt files')"
+fi
 # FLAC-only decoder build (Studio installs it unless the stick has .opus)
-VF_OPUS=0 VF_OUT="$PWD/build/xflac_flac" sh tools/xflac/build_vfile.sh >/dev/null
+[ "$SHCC" = 1 ] && VF_OPUS=0 VF_OUT="$PWD/build/xflac_flac" sh tools/xflac/build_vfile.sh >/dev/null
 mkdir -p "$REPO/build/xflac_flac"
 cp build/xflac_flac/vfile.bin build/xflac_flac/vfile.syms "$REPO/build/xflac_flac/"
 # UTILITY mod rows (our C)
-sh tools/utility/build.sh >/dev/null
+[ "$SHCC" = 1 ] && sh tools/utility/build.sh >/dev/null
 mkdir -p "$REPO/build/utility"
 cp build/utility/ut.bin build/utility/ut.syms "$REPO/build/utility/"
 # 8 hot cue pages (our C; build needs the SH compiler on this Mac)
-HCPAGE=$(.venv/bin/python -c "import sys;sys.path[:0]=['tools'];import perform_pads as P;print(hex(P.HCPAGE))")
-PMODE=$(.venv/bin/python -c "import sys;sys.path[:0]=['tools'];import perform_pads as P;print(hex(P.PST+2))")
-MSOFF=$(.venv/bin/python -c "import sys;sys.path[:0]=['tools'];import mysettings as M;print(hex(M.MSOFF))")
-HCPAGE=$HCPAGE PMODE=$PMODE MSOFF=$MSOFF sh tools/hotcue8/build.sh >/dev/null
+if [ "$SHCC" = 1 ]; then
+  HCPAGE=$(.venv/bin/python -c "import sys;sys.path[:0]=['tools'];import perform_pads as P;print(hex(P.HCPAGE))")
+  PMODE=$(.venv/bin/python -c "import sys;sys.path[:0]=['tools'];import perform_pads as P;print(hex(P.PST+2))")
+  MSOFF=$(.venv/bin/python -c "import sys;sys.path[:0]=['tools'];import mysettings as M;print(hex(M.MSOFF))")
+  HCPAGE=$HCPAGE PMODE=$PMODE MSOFF=$MSOFF sh tools/hotcue8/build.sh >/dev/null
+fi
 mkdir -p "$REPO/build/hotcue8"
 cp build/hotcue8/hc.bin build/hotcue8/hc.syms "$REPO/build/hotcue8/"
 # on-deck theme switching: our C always ships; the colour tables carry
@@ -92,9 +105,11 @@ cp build/hotcue8/hc.bin build/hotcue8/hc.syms "$REPO/build/hotcue8/"
 # (emu/fwhome.py builds them from the user's own firmware)
 mkdir -p "$REPO/build/themesw"
 if [ "$PUBLIC" = 1 ]; then
-  MSTNAME=$(.venv/bin/python -c "import sys;sys.path[:0]=['tools'];import mysettings as M;print(hex(M.MSTNAME))") \
-  MSTAPP=$(.venv/bin/python -c "import sys;sys.path[:0]=['tools'];import mysettings as M;print(hex(M.MSTAPP))") \
-    sh tools/themesw/build.sh >/dev/null
+  if [ "$SHCC" = 1 ]; then
+    MSTNAME=$(.venv/bin/python -c "import sys;sys.path[:0]=['tools'];import mysettings as M;print(hex(M.MSTNAME))") \
+    MSTAPP=$(.venv/bin/python -c "import sys;sys.path[:0]=['tools'];import mysettings as M;print(hex(M.MSTAPP))") \
+      sh tools/themesw/build.sh >/dev/null
+  fi
   cp build/themesw/ts.bin build/themesw/ts.syms "$REPO/build/themesw/"
   printf '0x9770000 0x9779000\n' > "$REPO/build/themesw/layout.txt"
 else
@@ -107,12 +122,12 @@ mkdir -p "$REPO/build/xflac"
 cp build/xflac/vfile.bin build/xflac/vfile.syms "$REPO/build/xflac/"
 # live stems mixer + live key shift (our C; the deck installers read these)
 # -- 2026-10-18: were missing, so Studio's stems/key-shift deck steps failed
-sh tools/keyshift_dsp/build_ksh.sh >/dev/null
+[ "$SHCC" = 1 ] && sh tools/keyshift_dsp/build_ksh.sh >/dev/null
 mkdir -p "$REPO/build/stems" "$REPO/build/keyshift"
 cp build/stems/sm.bin build/stems/sm.syms "$REPO/build/stems/"
 cp build/keyshift/ksh.bin build/keyshift/ksh.syms build/keyshift/ks.bin build/keyshift/ks.syms "$REPO/build/keyshift/"
 # centre waveform colour module (our C): RGB / 3-band per-row colours
-.venv/bin/python -c "import sys;sys.path[:0]=['.','tools'];import rgb_detail as R;R.cw_build()"
+[ "$SHCC" = 1 ] && .venv/bin/python -c "import sys;sys.path[:0]=['.','tools'];import rgb_detail as R;R.cw_build()"
 mkdir -p "$REPO/build/centre"
 cp build/centre/cw.bin build/centre/cw.syms "$REPO/build/centre/"
 cp TESTER_README.md "$REPO/" 2>/dev/null || true

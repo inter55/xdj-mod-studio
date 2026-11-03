@@ -293,17 +293,50 @@ def run_tool_main(argv):
 
 # --------------------------------------------------------------- tracks ---
 _SCAN = {}
+_SCAN_BUSY = set()
+_SCAN_LOCK = threading.Lock()
+SCAN_TTL = 60
 
 
 def scan(stick):
-    """Library scan, cached for a few seconds (the previews and the track
-    list all ask for it); jobs invalidate it when they finish."""
-    hit = _SCAN.get(stick)
-    if hit and time.time() - hit[0] < 20:
-        return hit[1]
-    res = _scan(stick)
-    _SCAN[stick] = (time.time(), res)
-    return res
+    """Library scan (the previews and the track list all ask for it).
+    A full scan reads every track's analysis file and tails every audio
+    file: ~35 s for 1100 tracks on a USB stick. So: the first call blocks
+    (single-flight), later calls answer from the cache at once and refresh
+    it in the background once it is older than SCAN_TTL. Jobs clear the
+    cache when they finish (their results must show right away)."""
+    with _SCAN_LOCK:
+        hit = _SCAN.get(stick)
+        if hit:
+            if time.time() - hit[0] >= SCAN_TTL and stick not in _SCAN_BUSY:
+                _SCAN_BUSY.add(stick)
+                threading.Thread(target=_rescan, args=(stick,), daemon=True).start()
+            return hit[1]
+        if stick in _SCAN_BUSY:            # another request is scanning: wait
+            busy = True
+        else:
+            _SCAN_BUSY.add(stick)
+            busy = False
+    if busy:
+        while True:
+            time.sleep(0.1)
+            with _SCAN_LOCK:
+                hit = _SCAN.get(stick)
+                if hit or stick not in _SCAN_BUSY:
+                    break
+        return hit[1] if hit else scan(stick)
+    return _rescan(stick)
+
+
+def _rescan(stick):
+    try:
+        res = _scan(stick)
+        with _SCAN_LOCK:
+            _SCAN[stick] = (time.time(), res)
+        return res
+    finally:
+        with _SCAN_LOCK:
+            _SCAN_BUSY.discard(stick)
 
 
 def _scan(stick):
@@ -789,7 +822,22 @@ def demo_track(stick):
     longest audio file. Deterministic. Falls back to any usable track."""
     import make_3band as M3
     tracks = scan(stick)["tracks"]
+    # Reading every track's ANLZ .DAT + .EXT (a few MB each) over USB took
+    # minutes on a 1100-track stick, on EVERY preview: the Theme Builder
+    # showed a black box forever. Remember the pick per library (the
+    # track count is the cheap "has it changed" key, in memory and on disk)
+    # and stop looking once enough complete tracks have been seen.
+    ck = f"{stick}|{len(tracks)}"
+    hit = _DEMO_CACHE.get(ck)
+    if hit is not None:
+        return hit or None
+    disk = _read_json(DEMO_CACHE_FILE, {})
+    if disk.get("key") == ck and (not disk.get("dir") or os.path.isdir(
+            os.path.join(stick, disk["dir"]))):
+        _DEMO_CACHE[ck] = disk.get("dir") or ""
+        return disk.get("dir") or None
     best = None
+    complete = 0
     for r in tracks:
         if not r["exists"]:
             continue
@@ -812,12 +860,24 @@ def demo_track(stick):
         key = (score, size)
         if best is None or key > best[0]:
             best = (key, r["dir"])
-    if best:
-        return best[1]
-    for r in tracks:
-        if r["exists"]:
-            return r["dir"]
-    return None
+        if score == 4:
+            complete += 1
+            if complete >= DEMO_CANDIDATES:
+                break
+    out = best[1] if best else next((r["dir"] for r in tracks if r["exists"]), None)
+    _DEMO_CACHE[ck] = out or ""
+    try:
+        os.makedirs(os.path.dirname(DEMO_CACHE_FILE), exist_ok=True)
+        with open(DEMO_CACHE_FILE, "w") as f:
+            json.dump({"key": ck, "dir": out or ""}, f)
+    except OSError:
+        pass
+    return out
+
+
+_DEMO_CACHE = {}
+DEMO_CANDIDATES = 24        # complete tracks to compare before picking
+DEMO_CACHE_FILE = os.path.join(APP_SUPPORT, "cache", "demo_track.json")
 
 
 STOCK_DETAIL = (0x09F1, 0x0AF7, 0x037F, 0x0D5E, 0x55BE, 0x757F, 0x757F, 0xCF3F)
@@ -1000,7 +1060,12 @@ def screens():
         else:
             base = HERE
         from emu import fwhome
-        z = np.load(fwhome.path("screens.npz"))   # user's firmware home
+        p = fwhome.path("screens.npz")             # user's firmware home
+        if not os.path.exists(p):
+            raise RuntimeError("Firmware not set up yet: add the official "
+                               "XDJ-700 v1.15 update file on Home (Setup › "
+                               "Firmware › Add) to see the theme preview.")
+        z = np.load(p)
         _SCREENS = {k: z[k] for k in z.files}
     return _SCREENS
 
@@ -1442,6 +1507,8 @@ def j_upd_build(log, prog, upd, mode, pads, versions, banner, extras=()):
 
 
 _FMT_CACHE = {}
+_FMT_BUSY = set()
+_FMT_LOCK = threading.Lock()
 
 
 def lib_formats(root):
@@ -1450,22 +1517,39 @@ def lib_formats(root):
     installs Opus only for .opus files. {'flac': None} = no stick."""
     if not root or not os.path.isdir(root):
         return {"flac": None, "opus": None}
-    hit = _FMT_CACHE.get(root)
-    if hit and time.time() - hit[0] < 60:
-        return hit[1]
+    with _FMT_LOCK:
+        hit = _FMT_CACHE.get(root)
+        fresh = bool(hit and time.time() - hit[0] < 300)
+        if not fresh and root not in _FMT_BUSY:
+            # Never walk the stick on the request thread: a big USB library
+            # took /api/state (polled every 6 s) ~30 s on a cold start and
+            # froze the whole UI on "Checking your setup...". Count in the
+            # background; answer with the last count (or 0s) meanwhile.
+            _FMT_BUSY.add(root)
+            threading.Thread(target=_lib_formats_walk, args=(root,),
+                             daemon=True).start()
+        if hit:
+            return hit[1]
+    return {"flac": 0, "opus": 0}
+
+
+def _lib_formats_walk(root):
     n = {"flac": 0, "opus": 0}
     seen = 0
-    for d, dirs, files in os.walk(root):
-        dirs[:] = [x for x in dirs if not x.startswith(".") and x != "PIONEER"]
-        for f in files:
-            ext = f.rsplit(".", 1)[-1].lower() if "." in f else ""
-            if ext in ("flac", "opus"):
-                n[ext] += 1
-            seen += 1
-        if seen > 50000:
-            break
-    _FMT_CACHE[root] = (time.time(), n)
-    return n
+    try:
+        for d, dirs, files in os.walk(root):
+            dirs[:] = [x for x in dirs if not x.startswith(".") and x != "PIONEER"]
+            for f in files:
+                ext = f.rsplit(".", 1)[-1].lower() if "." in f else ""
+                if ext in ("flac", "opus"):
+                    n[ext] += 1
+                seen += 1
+            if seen > 50000:
+                break
+    finally:
+        with _FMT_LOCK:
+            _FMT_CACHE[root] = (time.time(), n)
+            _FMT_BUSY.discard(root)
 
 
 UPD_EXTRAS = ("centre", "phasemeter", "hotcue8", "stems", "keyshift", "utility")  # utility: always baked (1.0)
@@ -1683,8 +1767,38 @@ class H(BaseHTTPRequestHandler):
         ext = os.path.splitext(p)[1].lower()
         ct = {".mp3": "audio/mpeg", ".wav": "audio/wav", ".m4a": "audio/mp4",
               ".aif": "audio/aiff", ".aiff": "audio/aiff", ".flac": "audio/flac"}
+        # Honour byte ranges: WebKit (the Mac app's window) and Chrome seek
+        # with Range requests and may refuse to play a stream that answers
+        # them with the whole file (no Accept-Ranges).
+        size = os.path.getsize(p)
+        start, end = 0, size - 1
+        m = re.match(r"bytes=(\d*)-(\d*)$", self.headers.get("Range") or "")
+        partial = bool(m) and size > 0
+        if partial:
+            a, b = m.group(1), m.group(2)
+            if a:
+                start, end = int(a), (int(b) if b else size - 1)
+            elif b:                            # suffix: last N bytes
+                start = max(0, size - int(b))
+            end = min(end, size - 1)
+            if start > end:
+                self.send_response(416)
+                self.send_header("Content-Range", f"bytes */{size}")
+                self.send_header("Content-Length", "0")
+                self.end_headers()
+                return
         with open(p, "rb") as f:
-            return self.send(f.read(), ct.get(ext, "application/octet-stream"))
+            f.seek(start)
+            body = f.read(end - start + 1)
+        self.send_response(206 if partial else 200)
+        self.send_header("Content-Type", ct.get(ext, "application/octet-stream"))
+        self.send_header("Content-Length", str(len(body)))
+        self.send_header("Accept-Ranges", "bytes")
+        if partial:
+            self.send_header("Content-Range", f"bytes {start}-{end}/{size}")
+        self.send_header("Cache-Control", "no-store")
+        self.end_headers()
+        self.wfile.write(body)
 
     def _x7k(self, q):
         """.x7k key version as WAV (decoded on the Mac): proof-of-concept

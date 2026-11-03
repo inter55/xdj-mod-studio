@@ -102,8 +102,14 @@ rekordbox exports.
 
 ```bash
 python3 -m venv .venv && .venv/bin/pip install numpy pillow capstone hidapi pygame
+sh tools/build_tic6x_objdump.sh      # TI C6x disassembler for the audio-chip emulator (once, ~10 min)
 .venv/bin/python -m emu.fwhome setup /path/to/XDJ700_v1.15.UPD --dev
 ```
+
+The firmware setup boots the deck twice (plain, then with the real audio
+chip) and needs `work/tic6x/objdump` from the step above; the packaged
+app ships it. `XDJ_TIC6X_OBJDUMP=/path/to/objdump` points at another copy.
+The OneLibrary converter test also needs `pip install sqlcipher3-wheels`.
 
 `--dev` also places the generated files at the paths the research tools
 expect (`work/`, `cache/`, `studio/assets/`, `tools/data/`, all git-ignored).

@@ -77,6 +77,10 @@ main { flex: 1; min-height: 0; position: relative; }
 .pad { padding: 16px; }
 .row { display: flex; align-items: center; gap: 10px; }
 .stack { display: flex; flex-direction: column; gap: 14px; }
+/* `hidden` must win over the display:flex classes above (it does not by
+   default: the Custom colour row and the Appearance panel showed while
+   hidden) */
+[hidden] { display: none !important; }
 .notice { gap: 10px; align-items: flex-start; padding: 10px 12px; border-radius: 8px; background: #2a2210; border: 1px solid #5a4514; color: #ffd98a; }
 .notice:not([hidden]) { display: flex; }
 .notice.bad { background: #2b1416; border-color: #6a2a2e; color: #ffb3b3; }
@@ -155,8 +159,11 @@ main { flex: 1; min-height: 0; position: relative; }
 .sw[aria-pressed=true] i { border-color: var(--text); } .sw[aria-pressed=true] { color: var(--text); }
 .ctl { display: grid; grid-template-columns: 84px 1fr 38px; align-items: center; gap: 10px; margin-top: 9px; color: var(--dim); }
 .ctl output { text-align: right; font-variant-numeric: tabular-nums; color: var(--text); font-size: 12px; }
-.screen { border-radius: 8px; overflow: hidden; background: #000; aspect-ratio: 5 / 3; border: 1px solid var(--line); }
+.screen { position: relative; border-radius: 8px; overflow: hidden; background: #000; aspect-ratio: 5 / 3; border: 1px solid var(--line); }
 .screen img { display: block; width: 100%; height: 100%; object-fit: cover; }
+.screen img:not([src]) { visibility: hidden; }
+.pmsg { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; text-align: center; padding: 24px; color: var(--dim); font-size: 13px; line-height: 1.5; }
+.pmsg:not([hidden]) { display: flex; }
 .actionbar { flex: none; display: flex; align-items: center; gap: 12px; padding: 12px 16px; border-top: 1px solid var(--line); background: var(--panel); }
 .kv { display: grid; grid-template-columns: auto 1fr; gap: 4px 14px; }
 .kv dt { color: var(--dim); } .kv dd { margin: 0; text-align: right; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
@@ -438,6 +445,7 @@ dialog h2 { font-size: 16px; margin-bottom: 6px; }
 <section class="page" id="p-builder" role="tabpanel">
   <div class="builder-body">
     <div class="panel pad scroll">
+      <div id="nofw" class="notice" hidden style="margin-bottom:12px"><div class="grow"><b>Firmware not set up.</b><div class="small">The preview draws the deck's own screens, built once from your official XDJ-700 v1.15 update file (about 3 minutes). Themes still save; the emulator needs it too.</div></div><button class="btn sm" id="nofwadd">Add firmware</button></div>
       <div id="nothemes" class="notice bad" hidden style="margin-bottom:12px"><div><b>No theme presets loaded.</b><div id="themeerr" class="small" style="user-select:text"></div><div class="small">Project folder: <code id="themeroot"></code>. Presets live in its <code>mods/themes.py</code>; point Settings at the folder that has it.</div></div></div>
       <div class="sec first">
         <h2>Theme</h2>
@@ -470,7 +478,7 @@ dialog h2 { font-size: 16px; margin-bottom: 6px; }
           <div class="seg" id="pscreen"><button data-v="main">Player</button><button data-v="perform">Perform</button></div>
           <span class="small faint grow" id="ptrack" style="text-align:right;overflow:hidden;text-overflow:ellipsis;white-space:nowrap"></span>
         </div>
-        <div class="screen"><img id="pimg" alt="Theme preview of the deck screen"></div>
+        <div class="screen"><img id="pimg" alt="Theme preview of the deck screen"><div id="pmsg" class="pmsg" hidden></div></div>
         <div class="small faint" style="margin-top:8px">Preview uses the deck's own colour maths. Waveforms follow the track picked in Track Builder.</div>
       </div>
     </div>
@@ -746,7 +754,9 @@ $('#actbtn').onclick = () => $('#act').classList.toggle('on');
 $('#actx').onclick = () => $('#act').classList.remove('on');
 
 async function state() {
-  const s = await api('/api/state'); if (!s) return; ST = s;
+  const s = await api('/api/state'); if (!s) return;
+  const fwWas = ST.fw_ready; ST = s;
+  if (fwWas !== undefined && fwWas !== s.fw_ready) preview();   // firmware setup just finished
   if (s.upd && !$('#updpath').value) { $('#updpath').value = s.upd; updReady(); }
   $('#deckdot').className = 'dot ' + (s.deck ? 'ok' : ''); $('#decktxt').textContent = s.deck ? 'Deck connected' : 'No deck';
   $$('[data-cable]').forEach(el => { el.classList.toggle('on', !!s.deck);
@@ -935,14 +945,35 @@ function preview() {
   $('#wcustom').hidden = MOD.wave !== 'custom';
   $('#wnote').textContent = {blue: 'Stock XDJ-700 blue waveform.', rgb: 'Each track shows its own rekordbox colours.', '3band': 'Lows in the core, mids, then highs on the outside -- on both the overview and the centre waveform.',
     custom: 'Your colour, stock waveform shape.'}[MOD.wave];
+  $('#nofw').hidden = ST.fw_ready !== false;
   clearTimeout(pt);
-  pt = setTimeout(() => {
-    const p = MOD.theme === 'stock' ? {hue: 'stock'} : spec();
-    $('#pimg').src = '/api/preview?' + new URLSearchParams({...p, ...wopts(), screen: pscreen, wave: 0, track: CUR || ''});
+  pt = setTimeout(async () => {
     const t = CUR && track(CUR);
     $('#ptrack').textContent = t ? t.title : 'Pick a track in Track Builder to preview its waveforms';
+    if (ST.fw_ready === false) return previewMsg('Add your XDJ-700 firmware file (Home › Setup) to see the deck screen here.');
+    const p = MOD.theme === 'stock' ? {hue: 'stock'} : spec();
+    const url = '/api/preview?' + new URLSearchParams({...p, ...wopts(), screen: pscreen, wave: 0, track: CUR || ''});
+    const my = ++PREVIEW_N;
+    // the first render scans the library for a demo track: say so instead of a black box
+    const slow = setTimeout(() => { if (my === PREVIEW_N && !$('#pimg').getAttribute('src')) previewMsg('Rendering the deck screen… the first one reads your library.'); }, 600);
+    try {
+      // fetch (not <img src>): a server error is JSON text we can show,
+      // not a broken-image icon on a black box
+      const r = await fetch(url);
+      if (my !== PREVIEW_N) return;
+      if (!r.ok) { let m = `Preview failed (${r.status}).`; try { m = (await r.json()).error || m; } catch (_) {} return previewMsg(m); }
+      const b = await r.blob(); if (my !== PREVIEW_N) return;
+      const img = $('#pimg'), old = img.dataset.blob;
+      img.src = img.dataset.blob = URL.createObjectURL(b);
+      if (old) URL.revokeObjectURL(old);
+      previewMsg('');
+    } catch (e) { if (my === PREVIEW_N) previewMsg('Studio is not responding.'); }
+    finally { clearTimeout(slow); }
   }, 90);
 }
+let PREVIEW_N = 0;
+function previewMsg(m) { const el = $('#pmsg'); el.hidden = !m; el.textContent = m; if (m) $('#pimg').removeAttribute('src'); }
+$('#nofwadd').onclick = addFirmware;
 SL.forEach(k => $('#' + k).oninput = () => { MOD.theme = 'custom'; MOD.touched = true; swatches(); preview(); markDirty(); });
 $$('#wstyle button').forEach(b => b.onclick = () => { MOD.wave = b.dataset.v; MOD.touched = true; segSet('wstyle', MOD.wave); preview(); markDirty(); });
 $('#customc').oninput = e => { MOD.custom = e.target.value; try { localStorage.setItem('wave_custom', MOD.custom); } catch (_) {} MOD.touched = true; preview(); markDirty(); };

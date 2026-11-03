@@ -33,11 +33,19 @@ MAGIC = 0x08000118
 def main():
     code = assemble(SRC)
     print(f"assembled {len(code)} bytes:", code.hex(" "))
-    m = Machine.load(sys.argv[1] if len(sys.argv) > 1 else
-                     "/root/emu-ckpt/emu_clean3.pkl", core="py")
     import os
-    ckpt = sys.argv[1] if len(sys.argv) > 1 else \
-        os.path.expanduser("~/emu-ckpt/emu_clean3.pkl")
+    if len(sys.argv) > 1:
+        ckpt = sys.argv[1]
+    else:
+        # the user's own firmware home (emu.fwhome), falling back to the
+        # old research checkpoint for machines that still have it
+        from emu import fwhome
+        ckpt = fwhome.path("mainscreen.pkl.gz")
+        if not os.path.exists(ckpt):
+            ckpt = os.path.expanduser("~/emu-ckpt/emu_clean3.pkl")
+    if not os.path.exists(ckpt):
+        sys.exit(f"no emulator snapshot at {ckpt}: run "
+                 "`python -m emu.fwhome setup XDJ700.UPD` first, or pass a .pkl")
     m = Machine.load(ckpt, core="py")
     c, mem = m.cpu, m.mem
     for i, b in enumerate(code):

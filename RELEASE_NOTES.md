@@ -4,6 +4,22 @@ Maintenance release on top of 0.99: the Studio app only, no deck-side
 changes. Same requirements as 0.99 (your own XDJ-700 v1.15 update file;
 Apple Silicon Mac on macOS 14+, or the Windows zip).
 
+## Mac: "XDJ Mod Studio is damaged and can't be opened"
+
+The app is signed but not notarized with Apple (no paid developer
+account), so a downloaded copy is blocked by Gatekeeper. On macOS 15 and
+later the message is "damaged" and right-click › Open no longer offers a
+way in.
+The app is fine; remove the download quarantine mark once:
+
+```bash
+xattr -dr com.apple.quarantine "/Applications/XDJ Mod Studio.app"
+```
+
+(adjust the path to wherever you put the app), then open it normally.
+Alternative: try to open it once, then System Settings › Privacy &
+Security › scroll down › **Open Anyway**.
+
 ## Fixed in 0.99.1
 
 - **Theme Builder showed a black box** until the firmware was set up, with

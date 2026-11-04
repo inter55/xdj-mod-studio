@@ -18,12 +18,12 @@ mount it, then check
   * flac: the pack also carries the FLAC + Opus layer; the same stick holds
     generated FLAC and Opus files; after the install the deck lists them
     with their durations (the stock WAV parser read the layer's header),
-    opens each through the layer (vf_stats) and streams the Opus. Known
-    (2026-11-04, not the pack: the same with flac_apply's direct install,
-    tools/vfile_emu_test.py, on the shipped main-screen snapshot): loading
-    a FLAC from folder view ends in E-8302 (300E) after the deck's tail
-    probe at EOF, while the Opus loads; the old emu_realusb snapshot
-    loaded FLACs. Open item for the deck / that snapshot.
+    opens each through the layer (vf_stats) and LOADS each one (the deck's
+    mode word goes to "at cue" / "playing"). This case runs on the real-DSP
+    snapshot (firmware home dspsound.pkl.gz): the instant main-screen
+    snapshot has no DSP and cannot finish ANY track load (E-8302 300E/300A
+    for WAV, Opus and FLAC alike -- 2026-11-04, a wasted afternoon), so it
+    is only used for the good/badarm cases.
 Screenshots: screenshots/usbpack/.
 Usage: .venv/bin/python tools/usbpack_test.py [good|badarm|flac|all]
 """
@@ -43,6 +43,18 @@ OUT = "build/usbloader"
 S2ST = ["IDLE", "NOFILE", "SHORT", "MAGIC", "COUNT", "SURVEY", "EXPSUM", "BADREC",
         "SUM", "ARMSTOCK", "DONE"]
 SHOTS = "screenshots/usbpack"
+
+
+def checkpoint_dsp():
+    """the real-DSP snapshot (tracks load and play), else the plain one"""
+    if os.environ.get("CKPT"):
+        return os.environ["CKPT"]
+    from emu import fwhome
+    p = fwhome.path("dspsound.pkl.gz")
+    return p if os.path.exists(p) else UT.checkpoint()
+
+
+MODE = 0x0B6C4264                 # deck mode word: 3 at cue, 5 playing (hledsp)
 
 
 def names():
@@ -166,14 +178,16 @@ def flac_loads(m, stick, log):
 
     OPS = {1: "read", 2: "seek", 3: "tell", 4: "eof", 5: "size", 6: "close", 7: "dread"}
 
-    def oplog():
+    def oplog(start=None):
         n = mem.r32(s["vf_logi"])
-        for k in range(max(0, n - 24), n):
+        lo = max(0, n - 64) if start is None else max(start, n - 64)
+        for k in range(lo, n):
             e = [mem.r32(s["vf_log"] + ((k % 64) * 5 + j) * 4) for j in range(5)]
             log(f"      {OPS.get(e[0], e[0])}: fp {e[1]:#x} a {e[2]:#x} b {e[3]:#x} -> {e[4]:#x}")
 
     for band, tag, idx in ((0, "a_flac", 1), (1, "b_opus", 4), (2, "c_flac", 1)):
         before = st()
+        logi0 = mem.r32(s["vf_logi"])
         b = browse_to(band, tag)
         if b is None and tag == "a_flac":
             # the deck sorts files into types when the stick mounts; if that
@@ -182,22 +196,21 @@ def flac_loads(m, stick, log):
             press("Browse")
             mount(m, stick)
             b = browse_to(band, tag)
-        VT.key(m, "RotaryPush", 120_000_000)        # load
-        for _ in range(6):                          # decoding in the emulated SH is slow
-            if mem.r32(0x0BA3C050):
-                break
-            m.cpu.run(limit=100_000_000)
+        VT.key(m, "RotaryPush", 100_000_000)        # load
+        waited = 100
+        while mem.r32(MODE) not in (3, 5) and waited < 2500:   # FLAC decode on the
+            m.cpu.run(limit=100_000_000)                        # emulated SH is slow
+            waited += 100
         fb_png(m, f"{SHOTS}/flac_{tag}_loaded.png")
         after = st()
         opened = after[idx] - before[idx]
+        mode = mem.r32(MODE)
         log(f"[flac] {tag}: cursor band {b}, layer opens +{opened}, vreads "
             f"+{after[2] - before[2]}, decodes +{after[3] - before[3]}, "
-            f"track length {mem.r32(0x0BA3C050)}")
-        ok &= opened > 0
-        if idx == 4:                                # Opus: the deck streams it
-            ok &= after[2] - before[2] >= 10
-        if not mem.r32(0x0BA3C050):
-            oplog()
+            f"mode {mode} after {waited}M steps ({'LOADED' if mode in (3, 5) else 'not loaded'})")
+        ok &= opened > 0 and mode in (3, 5)
+        if os.environ.get("OPLOG"):
+            oplog(logi0)
         VT.key(m, "Browse", 60_000_000)             # back to the main screen
     return ok
 
@@ -221,7 +234,9 @@ def run_case(case, log=print):
     pack = UP.encode(recs)
     log(f"[{case}] pack: {len(pack):,} B, {len(recs)} records")
     s = UT.syms()
-    m = Machine.load(UT.checkpoint())
+    ck = checkpoint_dsp() if case == "flac" else UT.checkpoint()
+    log(f"[{case}] snapshot: {ck}")
+    m = Machine.load(ck)
     mem, dev = m.mem, m.mem.dev
     base = s["ul_head"]
     img = open(os.path.join(OUT, "ul.bin"), "rb").read()

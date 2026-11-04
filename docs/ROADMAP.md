@@ -285,12 +285,13 @@ overview, beat jump, key shift, stems, extended hot cues all worked.
   (541 KB home surveyed, 157 KB image, chain words from the live read
   slots, JPEG->OPUS as an expected-sum write, type halfwords + six slots
   as arms, read hooks last): 91 records, 355 KB, 30 arms. usbpack_test.py
-  flac: the deck lists generated FLAC/Opus files with their durations,
-  opens each through the layer, streams the Opus. FOUND (not the pack:
-  flac_apply's direct install does the same on the shipped main-screen
-  snapshot): loading a FLAC from folder view ends in E-8302 (300E) after
-  the deck's tail probe at EOF; Opus loads. The old emu_realusb snapshot
-  loaded FLACs -- needs that snapshot or the deck to settle.
+  flac (real-DSP snapshot): the deck lists generated FLAC/Opus files with
+  their durations, opens each through the layer and loads them (mode word
+  at cue / playing). LESSON (2026-11-04): the instant main-screen snapshot
+  has no DSP and cannot finish ANY track load -- WAV, Opus and FLAC all end
+  in E-8302 (300E in the first list row, 300A once streaming); an
+  afternoon went into "FLAC fails" before a plain WAV control showed it.
+  Track-load tests belong on dspsound.pkl.gz.
   Not yet: key shift (needs the hot DSP patch), the pack builder in the
   Studio, the RAM-only rehearsal on the deck, the UPD with the loader as a
   permanent_build extra.

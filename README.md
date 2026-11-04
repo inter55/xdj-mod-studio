@@ -15,6 +15,23 @@ on and it is completely stock again.
 > "rekordbox" are trademarks of their owners and are used only to describe
 > compatibility. Use at your own risk.
 
+## On a real XDJ-700
+
+Photos from a real deck running Mod Studio v0.99.5, with the NEON PURPLE
+theme and RGB waveforms:
+
+| | | |
+| :---: | :---: | :---: |
+| <img src="docs/photos/rgb-waveform.jpg" width="260" alt="Main screen with RGB waveforms and the NEON PURPLE theme"> | <img src="docs/photos/perform-beat-jump.jpg" width="260" alt="PERFORM screen, BEAT JUMP pads"> | <img src="docs/photos/perform-key-shift.jpg" width="260" alt="PERFORM screen, KEY SHIFT"> |
+| Main screen: RGB waveforms, NEON PURPLE theme | PERFORM › BEAT JUMP | PERFORM › KEY SHIFT |
+| <img src="docs/photos/perform-stems.jpg" width="260" alt="PERFORM screen, STEMS pads"> | <img src="docs/photos/utility-theme.jpg" width="260" alt="UTILITY menu with the mod settings rows"> | |
+| PERFORM › STEMS | UTILITY: mod settings and theme | |
+
+**v0.99.5 test status (2026-11-04).** Tested on a real XDJ-700 with an Apple
+Silicon Mac: everything except **FLAC playback** and **stems**, which have
+not been tried with this release yet. The **Windows** build of v0.99.5 has
+not been tested yet.
+
 ## What works
 
 **Tested on a real deck**

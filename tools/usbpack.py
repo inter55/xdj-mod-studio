@@ -285,6 +285,24 @@ def write_stick(stick, pack, log=print):
     return d
 
 
+MARKER_AT = 0x09770000          # the theme switcher's home: 128 KB, zero on the deck
+MARKER_SIZE = 4096
+
+
+def marker_ops(size=MARKER_SIZE, at=MARKER_AT):
+    """The deck rehearsal's cache test (no arms, nothing goes live): one
+    surveyed zero home gets `size` bytes of a known pattern through the
+    whole stage-2 path (fread -> staging -> P2 copy -> purge). Read the
+    bytes back over the cable (usbloader_apply.py --check-marker): byte-
+    exact = the copy-back cache handling is right on silicon."""
+    data = marker_bytes(size)
+    return [(at, 0x20000, F_ZERO | F_SURVEY, 0, b""), (at, size, 0, 0, data)]
+
+
+def marker_bytes(size=MARKER_SIZE):
+    return bytes(((i * 7 + 3) ^ (i >> 8)) & 0xFF for i in range(size))
+
+
 def encode(recs):
     body = bytearray()
     for dst, ln, fl, exp, data in recs:
@@ -335,12 +353,19 @@ def main():
     ap.add_argument("--no-themes", action="store_true", help="no theme switching")
     ap.add_argument("--stick", default="",
                     help="also write PIONEER/MODS/MODS.BIN + PACK.BIN to this stick folder")
+    ap.add_argument("--marker", action="store_true",
+                    help="the deck rehearsal's cache-test pack instead of mods: no arms, "
+                         f"{MARKER_SIZE} B of a known pattern into a zero home")
     a = ap.parse_args()
     import theme_switch as TS
     names = TS.theme_names(a.themes) if a.themes else None
-    mem, recs = build_ops(a.mode, names, () if a.no_extras else EXTRAS, flac=a.flac,
-                          custom=parse_colours(a.colours), pads=not a.no_pads,
-                          themes=not a.no_themes)
+    if a.marker:
+        recs = marker_ops()
+        print(f"marker pack: {MARKER_SIZE} B of pattern at {MARKER_AT:#x}, no arms")
+    else:
+        mem, recs = build_ops(a.mode, names, () if a.no_extras else EXTRAS, flac=a.flac,
+                              custom=parse_colours(a.colours), pads=not a.no_pads,
+                              themes=not a.no_themes)
     blob = encode(recs)
     assert decode(blob) == recs
     os.makedirs(os.path.dirname(a.out) or ".", exist_ok=True)

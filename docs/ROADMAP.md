@@ -315,6 +315,15 @@ overview, beat jump, key shift, stems, extended hot cues all worked.
   the written files. Still needed before it is useful: the stage-1 loader
   on the deck (RAM-only rehearsal over the cable, then a permanent_build
   extra), and key shift / brake / phase meter in the pack.
+  Rehearsal tooling (2026-11-04): tools/usbloader_apply.py (--survey,
+  install+arm with fastload + LW self-test, --status, --check-marker,
+  --rearm, --revert) and usbpack.py --marker (a no-arm pack: 4 KB of a
+  known pattern into the theme switcher's zero home = the copy-back cache
+  test the emulator cannot do). Rehearsal order on the deck: --survey;
+  install (2-3 short sessions); plain stick -> --status NOFILE; stick
+  with MODS.BIN + the marker PACK.BIN -> --check-marker PASS; the Studio's
+  real pack -> use the mods; power cycle = stock. Proven on the mock deck
+  (tools/mock) against the emulator; not yet on hardware.
 - The new 3-mode app (cable / USB stick / firmware UPD).
 - Bug list proven on the deck: FLAC load freeze, key shift right-channel
   noise on AIFF, BJ 32/64, lit-button theme stripes (+ light mode, 8 hot

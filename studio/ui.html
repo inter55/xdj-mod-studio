@@ -486,13 +486,18 @@ dialog h2 { font-size: 16px; margin-bottom: 6px; }
         <div class="row" id="wcustom" hidden style="margin-top:8px;gap:8px;align-items:center"><span class="small dim">Colours</span><div class="seg" id="wncol"><button data-v="1" class="on">1</button><button data-v="2">2</button><button data-v="3">3</button></div><input type="color" id="customc" value="#6ba3f0" title="Colour 1: quiet / bottom" aria-label="Colour 1"><input type="color" id="customc2" value="#c86bf0" title="Colour 2" aria-label="Colour 2"><input type="color" id="customc3" value="#f06b8a" title="Colour 3: loud / top" aria-label="Colour 3"></div>
         <div class="small dim" id="wnote" style="margin-top:8px"></div>
       </div>
+      <div class="sec">
+        <h2>Lit buttons</h2>
+        <div class="row" style="gap:8px;align-items:center"><div class="seg" id="litmode"><button data-v="stock">Stock</button><button data-v="colour">Your colour</button></div><input type="color" id="litc" value="#ff40c0" aria-label="Lit button colour" hidden></div>
+        <div class="small dim" id="litnote" style="margin-top:8px"></div>
+      </div>
       <div class="sec" hidden></div>
     </div>
 
     <div class="stack scroll" style="min-height:0">
       <div class="panel pad">
         <div class="row" style="margin-bottom:10px">
-          <div class="seg" id="pscreen"><button data-v="main">Player</button><button data-v="perform">Perform</button></div>
+          <div class="seg" id="pscreen"><button data-v="main">Player</button><button data-v="lit">Lit buttons</button><button data-v="perform">Perform</button></div>
           <span class="small faint grow" id="ptrack" style="text-align:right;overflow:hidden;text-overflow:ellipsis;white-space:nowrap"></span>
         </div>
         <div class="screen"><img id="pimg" alt="Theme preview of the deck screen"><div id="pmsg" class="pmsg" hidden></div></div>
@@ -950,7 +955,8 @@ const SL = ['hue', 'vivid', 'lift', 'sat', 'val', 'spread'];
 const DEF = {hue: 210, vivid: 0, lift: 0, sat: 1, val: 1, spread: 0.5};
 const MOD = {theme: 'stock', wave: 'blue', custom: localStorage.getItem('wave_custom') || '#6ba3f0',
   custom2: localStorage.getItem('wave_custom2') || '#c86bf0', custom3: localStorage.getItem('wave_custom3') || '#f06b8a',
-  ncol: Math.min(3, Math.max(1, +localStorage.getItem('wave_ncol') || 1)), touched: false};
+  ncol: Math.min(3, Math.max(1, +localStorage.getItem('wave_ncol') || 1)),
+  litOn: localStorage.getItem('lit_on') === '1', lit: localStorage.getItem('lit_colour') || '#ff40c0', touched: false};
 // custom waveform colours as /api/wave + /api/preview params: 1-3 colours,
 // blended from quiet (bottom) to loud (top) when there are 2 or 3
 function customParams() {
@@ -1003,6 +1009,11 @@ function preview() {
   $('#customc2').value = MOD.custom2; $('#customc3').value = MOD.custom3;
   $('#customc2').hidden = MOD.ncol < 2; $('#customc3').hidden = MOD.ncol < 3;
   segSet('wncol', String(MOD.ncol));
+  segSet('litmode', MOD.litOn ? 'colour' : 'stock');
+  $('#litc').hidden = !MOD.litOn; $('#litc').value = MOD.lit;
+  $('#litnote').textContent = MOD.litOn
+    ? 'QUANTIZE, MASTER, SYNC, SLIP and VINYL BRAKE light up in your colour. Preview only for now: the deck and the emulator keep the stock lit colours.'
+    : 'QUANTIZE red, MASTER orange, SLIP and VINYL BRAKE in the theme colour. See them under Lit buttons in the preview.';
   $('#wcustom').hidden = MOD.wave !== 'custom';
   $('#wnote').textContent = {blue: 'Stock XDJ-700 blue waveform.', rgb: 'Each track shows its own rekordbox colours.', '3band': 'Lows in the core, mids, then highs on the outside -- on both the overview and the centre waveform.',
     custom: MOD.ncol === 1 ? 'Your colour, stock waveform shape.' : `${MOD.ncol} colours blended from quiet to loud (first swatch to last), stock waveform shape.`}[MOD.wave];
@@ -1013,7 +1024,7 @@ function preview() {
     $('#ptrack').textContent = t ? t.title : 'Pick a track in Track Builder to preview its waveforms';
     if (ST.fw_ready === false) return previewMsg('Add your XDJ-700 firmware file (Home › Setup) to see the deck screen here.');
     const p = MOD.theme === 'stock' ? {hue: 'stock'} : spec();
-    const url = '/api/preview?' + new URLSearchParams({...p, ...wopts(), screen: pscreen, wave: 0, track: CUR || ''});
+    const url = '/api/preview?' + new URLSearchParams({...p, ...wopts(), ...(MOD.litOn ? {lit: MOD.lit} : {}), screen: pscreen, wave: 0, track: CUR || ''});
     const my = ++PREVIEW_N;
     // the first render scans the library for a demo track: say so instead of a black box
     const slow = setTimeout(() => { if (my === PREVIEW_N && !$('#pimg').getAttribute('src')) previewMsg('Rendering the deck screen… the first one reads your library.'); }, 600);
@@ -1041,6 +1052,12 @@ $$('#wstyle button').forEach(b => b.onclick = () => { MOD.wave = b.dataset.v; MO
   $('#' + id).oninput = e => { MOD[k] = e.target.value; try { localStorage.setItem(ls, MOD[k]); } catch (_) {} MOD.touched = true; preview(); markDirty(); });
 $$('#wncol button').forEach(b => b.onclick = () => { MOD.ncol = +b.dataset.v; try { localStorage.setItem('wave_ncol', MOD.ncol); } catch (_) {} MOD.touched = true; preview(); markDirty(); });
 $$('#pscreen button').forEach(b => b.onclick = () => { pscreen = b.dataset.v; segSet('pscreen', pscreen); preview(); });
+// lit-button colour: preview only (not sent to the emulator or the deck yet)
+const showLit = () => { if (pscreen !== 'lit') { pscreen = 'lit'; segSet('pscreen', pscreen); } };
+$$('#litmode button').forEach(b => b.onclick = () => {
+  MOD.litOn = b.dataset.v === 'colour'; try { localStorage.setItem('lit_on', MOD.litOn ? '1' : '0'); } catch (_) {}
+  showLit(); preview(); });
+$('#litc').oninput = e => { MOD.lit = e.target.value; try { localStorage.setItem('lit_colour', MOD.lit); } catch (_) {} showLit(); preview(); };
 
 $('#tsave').onclick = async () => {
   const name = $('#tname').value.trim().toLowerCase();

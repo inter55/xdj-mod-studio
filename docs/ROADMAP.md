@@ -300,3 +300,29 @@ overview, beat jump, key shift, stems, extended hot cues all worked.
 
 ## Not planned
 - StreamingDirectPlay (partner logins/DRM). Other decks: XDJ-700 only.
+
+## Colour mods (user ideas, 2026-11-04)
+Order agreed: lit-button colour first, then button borders/frames.
+- **Lit-button colour** (PREVIEW DONE 2026-11-04: studio/app.py LIT_BUTTONS,
+  lit_recolour; deck part next). Lit touch buttons are 72x53 RGB565
+  sprites, 4 per button (lit, lit-pressed, unlit, unlit-pressed):
+  QUANTIZE 0x0826AAF0.. (red), MASTER 0x088647E0/0x088665B0 (orange),
+  SLIP 0x0886BF20/0x0886DCF0 (blue), VINYL BRAKE 0x0887E940/0x08880710
+  (blue) + brake 0x088824E0/0x088842B0 (red); SYNC lit is neutral grey.
+  The deck switcher (tools/themesw/ts.c) maps colours with ONE global
+  table, and lit SLIP / brake / QUANTIZE share their exact colours with
+  other artwork (MASTER 95 % and VINYL 82 % own colours), so a separate
+  lit colour needs a second, region-only table in ts.c (+ hardware test).
+- Button borders / frames (grey chrome of the touch buttons): pictures,
+  same method.
+- Cue / loop / hot-cue marker colours: probably colour tables; research.
+- Text colours (track name, time, BPM) and background tint: drawn by code
+  (2DG fills carry a colour word) -- research item, also needed for the
+  light theme.
+- **Own picture instead of the big rekordbox logo** (no-track splash on
+  the player screen): it is a blitted picture, so a same-size RGB565
+  replacement written to RAM by the installer (like the theme switcher
+  writes pixels) looks possible; size, transparency key 0xF81F and the
+  fingerprint safety check to be measured first.
+- Physical button LEDs: single-colour LEDs, colour cannot change (only
+  on / off / blink).

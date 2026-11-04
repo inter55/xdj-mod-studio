@@ -294,8 +294,8 @@ dialog h2 { font-size: 16px; margin-bottom: 6px; }
     <button role="tab" data-p="home" aria-selected="true">Home</button>
     <button role="tab" data-p="mod" aria-selected="false">Mod</button>
     <button role="tab" data-p="builder" aria-selected="false">Theme Builder</button>
-    <button role="tab" data-p="tracks" aria-selected="false">Track Builder</button>
     <button role="tab" data-p="emu" aria-selected="false">Emulator <span class="faint">(beta)</span></button>
+    <button role="tab" data-p="tracks" aria-selected="false">Track Builder</button>
     <button role="tab" data-p="settings" aria-selected="false">Settings</button>
   </nav>
   <div class="right">
@@ -567,7 +567,10 @@ dialog h2 { font-size: 16px; margin-bottom: 6px; }
         <dt>Waveform</dt><dd id="a-wave">stock</dd>
         <dt hidden>Beat jump</dt><dd id="a-bj" hidden>gone</dd>
       </dl>
-      <div id="dirty" class="row small" style="margin-top:10px" hidden><span class="dim grow">Mods tab has changes.</span><button class="btn sm primary" id="applymods">Apply</button></div>
+      <div class="small dim" id="modsline" style="margin-top:10px"></div>
+      <div class="row" style="margin-top:8px"><button class="btn sm primary" id="applymods">Apply from Theme Builder</button></div>
+      <div id="dirty" class="small" style="margin-top:6px;color:#ffd98a" hidden>Theme Builder has changes that are not in the emulator yet.</div>
+      <div id="modsnote" class="small faint" style="margin-top:6px"></div>
     </div>
     <div class="panel">
       <h2>Keyboard</h2>
@@ -1006,9 +1009,17 @@ function draftMods() {
 async function applyMods() {
   const d = draftMods();
   const r = await api('/api/emu/cmd', {cmd: 'mods', ...d}); if (!r) return false;
-  applied = JSON.stringify(d); markDirty(); return true;
+  applied = JSON.stringify(d); markDirty();
+  $('#modsnote').textContent = 'Applying to the emulator…';
+  if (TAB === 'emu') emuPoll();
+  return true;
 }
-function markDirty() { $('#dirty').hidden = applied === null || applied === JSON.stringify(draftMods()); }
+function markDirty() {
+  const d = draftMods(), same = applied === JSON.stringify(d);
+  $('#dirty').hidden = applied === null || same;
+  const wn = {blue: 'Blue', rgb: 'RGB', '3band': '3-Band', custom: 'Custom (preview only)'}[d.wave] || d.wave;
+  $('#modsline').textContent = `Theme Builder now: ${d.theme ? d.theme.name : 'stock'} · ${wn}` + (applied === null ? ' — not sent to the emulator yet' : same ? ' — in the emulator' : '');
+}
 $('#testemu').onclick = async () => { if (await applyMods()) showTab('emu'); };
 $('#applymods').onclick = applyMods;
 
@@ -1072,6 +1083,8 @@ async function emuPoll() {
   $('#a-theme').textContent = s.theme || 'stock';
   $('#a-wave').textContent = s.stock ? (s.wave === 'blue' ? 'stock' : s.wave) : 'from the build';
   $('#a-bj') && ($('#a-bj').textContent = '');
+  $('#modsnote').textContent = s.mods_note || '';
+  $('#applymods').disabled = !!s.mods_busy;
   const nm = p => (p || '').split('/').filter(Boolean).pop();
   $('#usbline').textContent = s.usb ? `Inserted: ${nm(s.usb)}` : (ST.stick_ok ? `Library: ${nm(ST.stick)}` : 'No library folder chosen yet.');
   $('#usbbtn').textContent = s.usb ? 'Eject' : 'Insert library'; $('#usbbtn').dataset.in = s.usb ? '1' : '';

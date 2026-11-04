@@ -1,3 +1,29 @@
+# XDJ Mod Studio v0.99.3 (XDJ-700, firmware 1.15)
+
+Follow-up to 0.99.2: Theme Builder ↔ Emulator. Same requirements as 0.99
+(your own XDJ-700 v1.15 update file; Apple Silicon Mac on macOS 14+, or
+the Windows zip). Mac: see the Gatekeeper note under 0.99.1 below.
+
+## New in 0.99.3
+
+- **Emulator tab sits next to Theme Builder** (Track Builder moved one
+  place right), since theme work bounces between the two.
+- **Apply from Theme Builder** button in the emulator's "Mods in the
+  emulator" panel, always visible: sends the current Theme Builder theme
+  and waveform style to the running emulator. The panel shows what Theme
+  Builder holds right now, warns when that differs from what the
+  emulator has, and reports what happened to the last apply.
+- **Test in Emulator could silently do nothing**: the apply gave up after
+  two minutes if the deck was still booting (a boot from reset takes
+  longer) and said nothing, so the panel kept saying "stock". It now
+  waits for the deck and reports success, "waiting for the deck", or the
+  reason it could not apply (for example a built update file selected
+  under Firmware, which carries its own mods).
+- Screens the deck has not redrawn keep their old colours until you leave
+  and re-enter them; the panel now says so.
+
+---
+
 # XDJ Mod Studio v0.99.2 (XDJ-700, firmware 1.15)
 
 Small follow-up to 0.99.1: Settings › Project folder. Same requirements

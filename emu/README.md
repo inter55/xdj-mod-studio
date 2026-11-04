@@ -22,6 +22,27 @@ trace hook (`cpu.trace`, `Machine.run(stop_on_pc=...)`) runs on it
 automatically. `tools/core_lockstep.py CHECKPOINT` runs both cores side by
 side and compares every register after every instruction.
 
+The audio chip (C674x, `emu/c6x/c6xcore.c`) spends most of its time in
+two busy-wait loops of its idle task: 0xC004C8CC while the deck is stopped,
+0xC0048C2E while a track plays (ten channel polls per 2,237-cycle pass,
+about 75 % of its cycles). When a pass ends in exactly the state it began
+in, the core jumps whole passes instead of running them, so the result is
+cycle-exact. Measured on Apple Silicon (2026-11-04): playing 83 → 232 M
+DSP cycles/s, stopped 90 → 505 M. `tools/dsp_idle_equiv.py SNAPSHOT`
+proves it on any snapshot with the real DSP (same final state with and
+without the skip). `XDJ_DSP_IDLE=0` turns all skipping off,
+`XDJ_DSP_IDLE_PLAY=0` only the playing deck's loop.
+
+The app ties the audio chip's clock to the SH's cycle counter at 300/500
+(`XDJ_DSP_RATIO`, default 0.6). The SH model counts about 28.6 M cycles
+per second of deck time (0.48 M per 60 Hz frame), so the chip gets about
+17 M cycles per deck second instead of 300 M, and makes about 6 % of
+real-time audio. That ratio, not the chip's speed, is why emulator sound
+stutters. `XDJ_DSP_RATIO=10.5` gives the chip its real share: real-time
+audio on a stopped deck at 60 frames/s, but a playing deck then holds the
+SH back to about 15-17 frames/s (the chip gets about 135 M cycles/s inside
+the app, 232 M alone). Not the default yet.
+
 ## The window
 
 - **Firmware menu** (toolbar): the stock snapshot, stock from reset, or any

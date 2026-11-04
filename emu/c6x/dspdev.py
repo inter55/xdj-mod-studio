@@ -420,7 +420,11 @@ class DspDevice:
     def _arm_idle(self):
         if os.environ.get("XDJ_DSP_IDLE", "1") != "0":
             from .cfast import set_idle_loop
-            set_idle_loop(self.cpu, 0xC004C8CC, 0x11804AE0, 0x11805C00)
+            # 0xC004C8CC: the stopped deck's idle loop; 0xC0048C2E: the
+            # playing deck's (ten channel polls per 2237-cycle pass, ~75 %
+            # of the DSP's cycles while a track plays, 2026-11-04)
+            more = () if os.environ.get("XDJ_DSP_IDLE_PLAY", "1") == "0" else (0xC0048C2E,)
+            set_idle_loop(self.cpu, 0xC004C8CC, 0x11804AE0, 0x11805C00, more)
 
     def _ensure_code(self, pc):
         pg = pc >> 16

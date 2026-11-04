@@ -198,7 +198,17 @@ kbd { font: 11px var(--mono); background: var(--raise2); border: 1px solid var(-
 .tag { display: inline-flex; align-items: center; gap: 6px; font-size: 12px; }
 .tag i { width: 7px; height: 7px; border-radius: 50%; background: var(--faint); }
 .tag.ok i { background: var(--green); } .tag.rb i { background: var(--blue); } .tag.no i { background: var(--amber); }
-.selbar { display: flex; align-items: center; gap: 8px; padding-top: 10px; border-top: 1px solid var(--line); }
+.selbar { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; padding-top: 10px; border-top: 1px solid var(--line); }
+.selbar .selhint { flex: 1 1 220px; min-width: 0; }
+.selbar .selbtns { display: flex; gap: 8px; margin-left: auto; flex: none; }
+.wf img:not([src]) { background: var(--raise); cursor: default; }
+/* narrow window: library above the track panel, the page scrolls */
+@media (max-width: 900px) {
+  #p-tracks.on { flex-direction: column; overflow: auto; }
+  #p-tracks .lib { flex: none; height: max(420px, 70vh); }
+  #p-tracks .insp { width: auto; overflow: visible; }
+  #p-tracks .lib .seg { flex-wrap: wrap; }
+}
 .insp { width: 340px; flex: none; padding: 16px; display: flex; flex-direction: column; gap: 12px; overflow: auto; }
 .meta { display: flex; gap: 6px; flex-wrap: wrap; }
 .meta span { background: var(--raise); border-radius: 6px; padding: 2px 8px; font-size: 12px; color: var(--dim); }
@@ -473,7 +483,7 @@ dialog h2 { font-size: 16px; margin-bottom: 6px; }
       <div class="sec">
         <h2>Waveform</h2>
         <div class="seg" id="wstyle"><button data-v="blue" class="on">Blue</button><button data-v="rgb">RGB</button><button data-v="3band">3-Band</button><button data-v="custom">Custom</button></div>
-        <div class="row" id="wcustom" hidden style="margin-top:8px"><label class="small dim" for="customc">Custom colour</label><input type="color" id="customc" value="#6ba3f0"></div>
+        <div class="row" id="wcustom" hidden style="margin-top:8px;gap:8px;align-items:center"><span class="small dim">Colours</span><div class="seg" id="wncol"><button data-v="1" class="on">1</button><button data-v="2">2</button><button data-v="3">3</button></div><input type="color" id="customc" value="#6ba3f0" title="Colour 1: quiet / bottom" aria-label="Colour 1"><input type="color" id="customc2" value="#c86bf0" title="Colour 2" aria-label="Colour 2"><input type="color" id="customc3" value="#f06b8a" title="Colour 3: loud / top" aria-label="Colour 3"></div>
         <div class="small dim" id="wnote" style="margin-top:8px"></div>
       </div>
       <div class="sec" hidden></div>
@@ -502,13 +512,13 @@ dialog h2 { font-size: 16px; margin-bottom: 6px; }
     <div id="callout" class="notice" hidden style="margin-bottom:10px"><span id="ctitle"></span><button class="btn sm" id="fixall">Add to all</button></div>
     <div class="chips">
       <div class="seg" id="filters"><button data-f="all">All tracks</button><button data-f="need3">Needs 3-band</button><button data-f="vers">Stems files</button></div>
-      <input class="field" id="search" type="text" placeholder="Search" style="margin-left:auto;width:200px" autocomplete="off">
+      <input class="field" id="search" type="text" placeholder="Search" style="margin-left:auto;flex:1 1 140px;max-width:220px;min-width:0" autocomplete="off">
     </div>
     <div class="list" id="list"></div>
     <div class="selbar">
-      <span class="dim" id="selc">Nothing selected</span><span class="grow"></span>
-      <span class="small faint" style="margin-right:10px">Stems files are saved next to the original track as <code>Title (STEMS)</code>. On the deck: BROWSE › FOLDER.</span>
-      <button class="btn" id="b3">Add 3-band</button><button class="btn primary" id="bstems">Make stems</button>
+      <span class="dim" id="selc">Nothing selected</span>
+      <span class="small faint selhint">Stems files are saved next to the original track as <code>Title (STEMS)</code>. On the deck: BROWSE › FOLDER.</span>
+      <span class="selbtns"><button class="btn" id="b3">Add 3-band</button><button class="btn primary" id="bstems">Make stems</button></span>
     </div>
   </div>
   <div class="panel insp" id="insp">
@@ -938,7 +948,17 @@ $('#deckgo').onclick = async () => {
 /* ---- Theme Builder */
 const SL = ['hue', 'vivid', 'lift', 'sat', 'val', 'spread'];
 const DEF = {hue: 210, vivid: 0, lift: 0, sat: 1, val: 1, spread: 0.5};
-const MOD = {theme: 'stock', wave: 'blue', custom: localStorage.getItem('wave_custom') || '#6ba3f0', touched: false};
+const MOD = {theme: 'stock', wave: 'blue', custom: localStorage.getItem('wave_custom') || '#6ba3f0',
+  custom2: localStorage.getItem('wave_custom2') || '#c86bf0', custom3: localStorage.getItem('wave_custom3') || '#f06b8a',
+  ncol: Math.min(3, Math.max(1, +localStorage.getItem('wave_ncol') || 1)), touched: false};
+// custom waveform colours as /api/wave + /api/preview params: 1-3 colours,
+// blended from quiet (bottom) to loud (top) when there are 2 or 3
+function customParams() {
+  const p = {custom: MOD.custom || '#6ba3f0'};
+  if (MOD.ncol >= 2) p.custom2 = MOD.custom2;
+  if (MOD.ncol >= 3) p.custom3 = MOD.custom3;
+  return p;
+}
 let pscreen = 'main', pt = null, applied = null;
 const spec = () => Object.fromEntries(SL.map(k => [k, +$('#' + k).value]));
 
@@ -973,16 +993,19 @@ function usePreset() {
   preview();
 }
 function wopts() {
-  if (MOD.wave === 'custom') return {style: 'custom', custom: MOD.custom};
+  if (MOD.wave === 'custom') return {style: 'custom', ...customParams()};
   return {style: MOD.wave};
 }
 function preview() {
   if (TAB !== 'builder') return;
   SL.forEach(k => $('#o-' + k).textContent = k === 'hue' ? Math.round($('#' + k).value) + '°' : (+$('#' + k).value).toFixed(2));
   if ($('#customc') && MOD.custom) $('#customc').value = MOD.custom;
+  $('#customc2').value = MOD.custom2; $('#customc3').value = MOD.custom3;
+  $('#customc2').hidden = MOD.ncol < 2; $('#customc3').hidden = MOD.ncol < 3;
+  segSet('wncol', String(MOD.ncol));
   $('#wcustom').hidden = MOD.wave !== 'custom';
   $('#wnote').textContent = {blue: 'Stock XDJ-700 blue waveform.', rgb: 'Each track shows its own rekordbox colours.', '3band': 'Lows in the core, mids, then highs on the outside -- on both the overview and the centre waveform.',
-    custom: 'Your colour, stock waveform shape.'}[MOD.wave];
+    custom: MOD.ncol === 1 ? 'Your colour, stock waveform shape.' : `${MOD.ncol} colours blended from quiet to loud (first swatch to last), stock waveform shape.`}[MOD.wave];
   $('#nofw').hidden = ST.fw_ready !== false;
   clearTimeout(pt);
   pt = setTimeout(async () => {
@@ -1014,7 +1037,9 @@ function previewMsg(m) { const el = $('#pmsg'); el.hidden = !m; el.textContent =
 $('#nofwadd').onclick = addFirmware;
 SL.forEach(k => $('#' + k).oninput = () => { MOD.theme = 'custom'; MOD.touched = true; swatches(); preview(); markDirty(); });
 $$('#wstyle button').forEach(b => b.onclick = () => { MOD.wave = b.dataset.v; MOD.touched = true; segSet('wstyle', MOD.wave); preview(); markDirty(); });
-$('#customc').oninput = e => { MOD.custom = e.target.value; try { localStorage.setItem('wave_custom', MOD.custom); } catch (_) {} MOD.touched = true; preview(); markDirty(); };
+[['customc', 'custom', 'wave_custom'], ['customc2', 'custom2', 'wave_custom2'], ['customc3', 'custom3', 'wave_custom3']].forEach(([id, k, ls]) =>
+  $('#' + id).oninput = e => { MOD[k] = e.target.value; try { localStorage.setItem(ls, MOD[k]); } catch (_) {} MOD.touched = true; preview(); markDirty(); });
+$$('#wncol button').forEach(b => b.onclick = () => { MOD.ncol = +b.dataset.v; try { localStorage.setItem('wave_ncol', MOD.ncol); } catch (_) {} MOD.touched = true; preview(); markDirty(); });
 $$('#pscreen button').forEach(b => b.onclick = () => { pscreen = b.dataset.v; segSet('pscreen', pscreen); preview(); });
 
 $('#tsave').onclick = async () => {
@@ -1254,7 +1279,7 @@ function pick(d) {
   $('#imeta').innerHTML = [t.artist, t.bpm && t.bpm.toFixed(1) + ' BPM', fmtT(t.duration), t.three_band ? '3-band ready' : t.has_2ex ? '3-band in rekordbox' : 'no 3-band yet']
     .filter(Boolean).map(x => `<span>${esc(x)}</span>`).join('');
   ['rgb', '3band', 'blue'].forEach(s => $('#w-' + s).src = `/api/wave?dir=${encodeURIComponent(d)}&style=${s}&tint=stock`);
-  $('#w-custom').src = `/api/wave?dir=${encodeURIComponent(d)}&style=custom&custom=${encodeURIComponent(MOD.custom || '#6ba3f0')}`;
+  $('#w-custom').src = `/api/wave?dir=${encodeURIComponent(d)}&` + new URLSearchParams({style: 'custom', ...customParams()});
   const showx7s = false;   // sidecar -> key/stem VERSION file retired 2026-10-19 (stems = STEMS-4 only)
   $('#x7srow').hidden = !showx7s;
   $('#x7krow').hidden = !(t.exists && t.duration);

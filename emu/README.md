@@ -33,15 +33,20 @@ proves it on any snapshot with the real DSP (same final state with and
 without the skip). `XDJ_DSP_IDLE=0` turns all skipping off,
 `XDJ_DSP_IDLE_PLAY=0` only the playing deck's loop.
 
-The app ties the audio chip's clock to the SH's cycle counter at 300/500
-(`XDJ_DSP_RATIO`, default 0.6). The SH model counts about 28.6 M cycles
-per second of deck time (0.48 M per 60 Hz frame), so the chip gets about
-17 M cycles per deck second instead of 300 M, and makes about 6 % of
-real-time audio. That ratio, not the chip's speed, is why emulator sound
-stutters. `XDJ_DSP_RATIO=10.5` gives the chip its real share: real-time
-audio on a stopped deck at 60 frames/s, but a playing deck then holds the
-SH back to about 15-17 frames/s (the chip gets about 135 M cycles/s inside
-the app, 232 M alone). Not the default yet.
+The app ties the audio chip's clock to the SH's cycle counter
+(`XDJ_DSP_RATIO` DSP cycles per SH cycle, default 3; was 0.6 before 0.99.6).
+The SH model counts about 28.6 M cycles per second of deck time (0.48 M per
+60 Hz frame), so the chip gets about 86 M cycles per deck second instead of
+the real 300 M and makes about 30 % of real-time audio (0.6 gave 6 %). That
+ratio, not the chip's speed, is why emulator sound stutters. Measured on
+Apple Silicon (2026-11-04, `XDJ_PLAY=1`): ratio 3 keeps a stopped deck at
+60 frames/s and a playing deck at 30-35 frames/s, the same as 0.6 (25-31).
+Inside the app's fast-forward bursts (stick mount,
+track load, the window after a button press) it stays at the old 0.6
+(`XDJ_DSP_LOAD_RATIO`): there ratio 3 doubled a track load's wall time.
+`XDJ_DSP_RATIO=10.5` gives the chip its real share: real-time audio on a
+stopped deck, but a playing deck then holds the SH back to about 15-17
+frames/s.
 
 ## The window
 

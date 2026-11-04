@@ -813,6 +813,35 @@ def hex565(h):
     return ((r >> 3) << 11) | ((g >> 2) << 5) | (b >> 3)
 
 
+def custom_colours(w):
+    """The custom waveform's 1-3 colours (RGB565), from w["custom"],
+    w["custom2"], w["custom3"]; missing or bad ones are skipped."""
+    out = []
+    for k in ("custom", "custom2", "custom3"):
+        v = w.get(k)
+        if isinstance(v, str) and v:
+            try:
+                out.append(hex565(v))
+            except Exception:
+                pass
+    return out or [hex565("#6ba3f0")]
+
+
+def grad565(cols, t):
+    """Colour at t (0..1) on a straight RGB blend through cols (RGB565)."""
+    if len(cols) == 1:
+        return cols[0]
+    t = min(1.0, max(0.0, t)) * (len(cols) - 1)
+    i = min(int(t), len(cols) - 2)
+    f = t - i
+    a, b = cols[i], cols[i + 1]
+
+    def ch(sh, mask):
+        x, y = (a >> sh) & mask, (b >> sh) & mask
+        return int(round(x + (y - x) * f)) << sh
+    return (ch(11, 31) | ch(5, 63) | ch(0, 31)) or 0x0821   # 0 = empty pixel
+
+
 def wave_cols(stick, d, style, w):
     """[col][k] RGB565 (k = 0 bottom) exactly like the deck's overview.
 
@@ -848,11 +877,12 @@ def wave_cols(stick, d, style, w):
     if not pw:
         return None
     col = STOCK_BLUE
+    grad = None
     if style == "custom":
-        try:
-            col = hex565(w.get("custom") or "#6ba3f0")
-        except Exception:
-            col = STOCK_BLUE
+        cc = custom_colours(w)
+        col = cc[0]
+        if len(cc) > 1:               # 2-3 colours: bottom -> top of the bar
+            grad = [grad565(cc, k / (RO.ROWS - 1)) for k in range(RO.ROWS)]
     elif style == "blue":
         # Legacy compat: very old saved themes stored a custom tint under
         # style=blue + tint=#hex. Honour it so old previews still render;
@@ -870,7 +900,7 @@ def wave_cols(stick, d, style, w):
     for c in range(RO.COLS):
         b = pw[c * len(pw) // RO.COLS]
         h = (b & 31) * RO.ROWS // 31
-        out.append([col if k < h else 0 for k in range(RO.ROWS)])
+        out.append([(grad[k] if grad else col) if k < h else 0 for k in range(RO.ROWS)])
     return out
 
 
@@ -1022,9 +1052,23 @@ def centre_cols(stick, d, style, w, pos_frac=0.4, step=2):
         return None
     import themes as T
     pal = np.array(STOCK_DETAIL, np.uint16)
+    cc = custom_colours(w) if style == "custom" else []
+    if len(cc) > 1:
+        # 2-3 colours: centre line -> peak, like the overview's bottom -> top
+        ramp = [grad565(cc, k / 30) for k in range(31)]
+        n = len(p3)
+        pos = int(n * pos_frac)
+        for x in range(500):
+            i0 = pos + (x - 250) * step
+            if i0 < 0 or i0 >= n:
+                out.append((0, 0))
+                continue
+            h = max(1, max(b & 31 for b in p3[i0:i0 + step]))
+            out.append((ramp[:h], h))
+        return out
     if style == "custom":
         try:
-            pal = T.map_colours(pal, _tint_spec(hex565(w.get("custom") or "#6ba3f0")))
+            pal = T.map_colours(pal, _tint_spec(cc[0]))
         except Exception:
             pass
     elif style == "blue" and isinstance(w.get("tint"), str) and w.get("tint", "").startswith("#"):
@@ -2036,7 +2080,7 @@ class H(BaseHTTPRequestHandler):
     def _render(self, path, q):
         if path == "/api/wave":
             stick = stick_path()
-            w = {k: q.get(k) for k in ("tint", "low", "mid", "high", "custom")}
+            w = {k: q.get(k) for k in ("tint", "low", "mid", "high", "custom", "custom2", "custom3")}
             return self.send(wave_png(stick, q["dir"], q.get("style", "blue"), w), "image/png")
         spec = None
         if q.get("hue") not in (None, "", "stock"):
@@ -2044,7 +2088,7 @@ class H(BaseHTTPRequestHandler):
             for k in ("vivid", "lift"):
                 if q.get(k) not in (None, "", "0"):
                     spec[k] = float(q[k])
-        wopts = {k: q.get(k) for k in ("style", "tint", "low", "mid", "high", "custom")}
+        wopts = {k: q.get(k) for k in ("style", "tint", "low", "mid", "high", "custom", "custom2", "custom3")}
         return self.send(preview_png(spec, q.get("screen", "main"),
                                      q.get("wave") == "1", wopts,
                                      q.get("track") or None), "image/png")

@@ -30,7 +30,11 @@ from .isa import Unimplemented
 UHPI = 0x01E10000
 GPIO = 0x01E26000
 SPI1 = 0x01E12000
-DSP_PER_SH = float(os.environ.get("XDJ_DSP_RATIO", "0.6"))   # 300 / 500 MHz
+DSP_PER_SH = float(os.environ.get("XDJ_DSP_RATIO", "3"))   # real share: 10.5 (300 MHz / 28.6 M SH cyc/s)
+# Inside the app's fast-forward bursts (stick mount, track load, the window
+# after an input) the old 0.6: there every DSP cycle costs wall time the
+# load is waiting on (ratio 3 doubled a track load), and nobody listens.
+DSP_LOAD_RATIO = float(os.environ.get("XDJ_DSP_LOAD_RATIO", "0.6"))
 # The SH core runs in slices of up to millions of cycles between ticks, so a
 # host handshake (set a command code on the GPIO pins, poll the DSP's busy
 # pin, clear the code) can finish inside one slice before the DSP has run

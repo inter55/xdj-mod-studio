@@ -1,3 +1,28 @@
+# XDJ Mod Studio -- next (not released yet)
+
+## New
+
+- **Custom waveform: 1, 2 or 3 colours.** Theme Builder › Waveform ›
+  Custom › Colours 1 / 2 / 3. With 2 or 3 colours the waveform blends
+  from the first colour (quiet, bottom / centre line) to the last (loud,
+  top / peaks), on both the overview and the centre waveform. Preview only,
+  like the one-colour custom waveform: the deck and the emulator still use
+  Blue, RGB or 3-Band.
+- **Emulator: 5x more audio.** The audio chip now gets 3 DSP cycles per SH
+  cycle instead of 0.6 (about 30 % of real-time sound instead of 6 %), with
+  no frame-rate loss: stopped deck 60 frames/s, playing deck 30-35. During
+  a stick mount or track load it stays at 0.6, so loads are as fast as
+  before. `XDJ_DSP_RATIO` / `XDJ_DSP_LOAD_RATIO` override.
+- **Emulator: faster audio chip.** The playing deck's busy-wait loop is
+  skipped cycle-exactly (83 -> 232 M DSP cycles/s on Apple Silicon);
+  `tools/dsp_idle_equiv.py` proves the result is identical.
+
+## Fixed
+
+- Track Builder in a narrow window: the library now sits above the track
+  panel instead of squeezing both side by side (one visible row, tabs past
+  the edge, the stems hint one word per line, a clipped Make stems button).
+
 # XDJ Mod Studio v0.99.5 (XDJ-700, firmware 1.15)
 
 Follow-up to 0.99.4: window sizes and the Activity log. Same requirements

@@ -37,6 +37,7 @@ ROOT = repo_root()
 from . import deck
 from .deck import DECK_W, DECK_H, SCR_X, SCR_Y, SCR_W, SCR_H
 from . import simplay
+from .c6x.dspdev import DSP_PER_SH, DSP_LOAD_RATIO
 
 TB_H = 48                     # toolbar height (canvas px)
 CAN_W, CAN_H = DECK_W, DECK_H + TB_H
@@ -453,6 +454,9 @@ class EmuApp:
                 # firmware-side wait (dialog timers, handshakes) then took
                 # tens of seconds of wall clock. Pacing is unchanged: the
                 # loop still sleeps to the 60 Hz frame clock.
+                de = getattr(dev, "dspemu", None)
+                if de is not None:          # audio share: see dspdev.DSP_LOAD_RATIO
+                    de.ratio = DSP_LOAD_RATIO if self.bursting() else DSP_PER_SH
                 m.run(limit=1_000_000)
                 self._burst_sound(m, dev)
                 if self.burst_until is not None and m.cpu.steps >= self.burst_until:

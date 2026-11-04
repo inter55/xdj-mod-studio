@@ -2,7 +2,9 @@
 """usbloader_test.py -- the USB-stick mods loader (tools/usbloader) in the
 emulated XDJ-700. Nothing here touches a deck.
 
-From cache/emu_realusb.pkl (booted, HLE, C core): write build/usbloader/
+From cache/emu_realusb.pkl if present, else the shipped main-screen
+snapshot in the firmware home (mainscreen.pkl.gz: booted, HLE, C core,
+USB host up, no stick), or $CKPT: write build/usbloader/
 ul.bin at its link address, point the MYSETTING.DAT mount reader's open
 pool word 0x08DE39A4 at ul_open, then mount a scratch stick that carries
 PIONEER/MODS/MODS.BIN and check the loader's state block:
@@ -40,6 +42,15 @@ def syms():
     return s
 
 
+def checkpoint():
+    if os.environ.get("CKPT"):
+        return os.environ["CKPT"]
+    if os.path.exists("cache/emu_realusb.pkl"):
+        return "cache/emu_realusb.pkl"
+    from emu import fwhome
+    return fwhome.path("mainscreen.pkl.gz")
+
+
 def modsbin(payload, bad=False):
     sm = sum(payload) & 0xFFFFFFFF
     if bad:
@@ -64,7 +75,7 @@ def run_case(case):
     from emu.usbhost import MassStorage
     from emu import panl
     s = syms()
-    m = Machine.load(os.environ.get("CKPT", "cache/emu_realusb.pkl"))
+    m = Machine.load(checkpoint())
     mem, dev = m.mem, m.mem.dev
     base, st = s["ul_head"], s["ul_state"]
     img = open(os.path.join(OUT, "ul.bin"), "rb").read()
@@ -112,6 +123,7 @@ def run_case(case):
 def main():
     arg = sys.argv[1] if len(sys.argv) > 1 else "all"
     cases = ["good", "badsum", "nofile"] if arg == "all" else [arg]
+    print("snapshot:", checkpoint())
     ok = all([run_case(c) for c in cases])
     print("RESULT:", "PASS" if ok else "FAIL")
     return 0 if ok else 1

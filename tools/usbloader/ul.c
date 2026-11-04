@@ -10,9 +10,14 @@
  * entry_off, u32 sum (32-bit sum of payload bytes), u32 rsv[3]} + len
  * bytes of position-independent SH code. The payload is read into UL_PAY,
  * checked, and called through the uncached P2 alias (no I-cache state can
- * be stale; operand cache purged before / invalidated after the read in
- * case the stack's read path uses DMA) with r4 = &ul_state. Any problem =
- * close + error code, never a call.
+ * be stale) with r4 = &ul_state. The operand cache is copy-back on the
+ * deck (CCR 0x105), so the buffer is PURGED (ocbp = write back dirty lines
+ * + invalidate) before the read and again after it: before, so no old line
+ * can be written back over DMA data later; after, so data the stack copied
+ * in with the CPU reaches RAM before the P2 (uncached) checksum and call.
+ * (2026-11-04 fix: the after-read pass was ocbi = invalidate WITHOUT write
+ * back, which threw away a CPU-copied payload.) Any problem = close +
+ * error code, never a call.
  */
 typedef unsigned char u8;
 typedef unsigned short u16;
@@ -49,12 +54,12 @@ struct ul_state {
 static const u16 MODPATH[] = {'C', ':', '/', 'P', 'I', 'O', 'N', 'E', 'E', 'R',
     '/', 'M', 'O', 'D', 'S', '/', 'M', 'O', 'D', 'S', '.', 'B', 'I', 'N', 0};
 
-static void cache_range(u32 a, u32 n, int purge)
+/* ocbp every 32-B line of [a, a+n): dirty lines go to RAM, all leave the
+ * cache. Never ocbi here: it drops dirty data. */
+static void cache_purge(u32 a, u32 n)
 {
-    for (u32 p = a & ~31u; p < a + n; p += 32) {
-        if (purge) __asm__ volatile("ocbp @%0" : : "r"(p) : "memory");
-        else __asm__ volatile("ocbi @%0" : : "r"(p) : "memory");
-    }
+    for (u32 p = a & ~31u; p < a + n; p += 32)
+        __asm__ volatile("ocbp @%0" : : "r"(p) : "memory");
 }
 
 /* the handle must be a USB (device type 3) file: same lookup as the
@@ -83,9 +88,9 @@ static void load(const u16 *path, const void *mode, void *ctx)
     if (hd[0] != 0x444F4D58u || hd[1] != 1) { ul_state.status = ST_MAGIC; goto out; }
     u32 len = hd[2], eo = hd[3];
     if (!len || len > PAY_MAX || eo >= len || (eo & 1)) { ul_state.status = ST_SIZE; goto out; }
-    cache_range(UL_PAY, len, 1);
+    cache_purge(UL_PAY, len);
     int got = STOCK_FREAD((void *)UL_PAY, 1, (int)len, h);
-    cache_range(UL_PAY, len, 0);
+    cache_purge(UL_PAY, len);
     if (got != (int)len) { ul_state.status = ST_SHORT; goto out; }
     const volatile u8 *b = (const volatile u8 *)(UL_PAY | 0xA0000000u);
     u32 s = 0;

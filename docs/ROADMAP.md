@@ -265,6 +265,14 @@ overview, beat jump, key shift, stems, extended hot cues all worked.
   pack" builder. One-time flash approved "if u can guarantee it works":
   exhaustive emulator proof, recovery path written down first, careful
   first deck flash with a boot test.
+  2026-11-04: loader cache bug fixed (the after-read pass was ocbi, which
+  drops a CPU-copied payload on the deck's copy-back cache; now ocbp, and
+  build.sh fails on any ocbi). Built with tools/build_sh_gcc.sh (GCC
+  14.2.0); tools/usbloader_test.py good/badsum/nofile PASS on the shipped
+  main-screen snapshot. The emulator has no cache model, so the cache fix
+  itself is checked by disassembly, not by the emulator run. Next: MODS.BIN
+  as a stage-2 installer (a full pack is 46-157 KB, the buffer is 60 KB),
+  then a RAM-only rehearsal on the deck before any UPD.
 - The new 3-mode app (cable / USB stick / firmware UPD).
 - Bug list proven on the deck: FLAC load freeze, key shift right-channel
   noise on AIFF, BJ 32/64, lit-button theme stripes (+ light mode, 8 hot

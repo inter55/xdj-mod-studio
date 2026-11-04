@@ -23,6 +23,12 @@ cd "$ROOT/tools/usbloader"
 "$SH/sh-elf-size" "$OUT/ul.elf"
 N=$("$SH/sh-elf-objdump" -d "$OUT/ul.elf" | awk -F'\t' 'NF>=3{print $3}' | grep -cE '^(f[a-z.]+|frchg|fschg)\s|fpscr|fpul' || true)
 echo "FPU instructions: $N (must be 0)"; [ "$N" = 0 ]
+# copy-back operand cache: the payload buffer must only ever be PURGED
+# (ocbp); an ocbi would drop the bytes fread just copied in
+D=$("$SH/sh-elf-objdump" -d "$OUT/ul.elf")
+NI=$(printf '%s\n' "$D" | grep -c 'ocbi' || true)
+NP=$(printf '%s\n' "$D" | grep -c 'ocbp' || true)
+echo "ocbi: $NI (must be 0), ocbp: $NP (must be >= 1)"; [ "$NI" = 0 ] && [ "$NP" -ge 1 ]
 END=$("$SH/sh-elf-nm" "$OUT/ul.elf" | awk '$3=="_end"{print $1}')
 [ $((0x$END)) -le $((PAY)) ] || { echo "ERROR: end 0x$END reaches the payload buffer"; exit 1; }
 echo "UL_PAY $PAY..$PEND"

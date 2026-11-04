@@ -169,9 +169,9 @@ class EmuHost:
     # ---------------------------------------------------------------- mods
     def apply_mods(self, mods):
         """mods: {"theme": {"name", "spec"} | None, "wave": "blue|rgb|3band
-        |custom" | None}. Applied to the stock firmware
-        as soon as it is running; re-applied after every firmware switch.
-        Custom is preview-only (no deck cave): the emulator keeps stock."""
+        |custom" | None, "wave_colours": ["#rrggbb", ..] for custom}.
+        Applied to the stock firmware as soon as it is running; re-applied
+        after every firmware switch."""
         self.start()
         self._mods = dict(mods)
         self._mods_gen += 1
@@ -209,8 +209,13 @@ class EmuHost:
                 if app.status.startswith("theme preview failed") or app.status.startswith("theme preview needs"):
                     self.mods_note = "Not applied: " + app.status
                     return
-                if m.get("wave") in ("blue", "rgb", "3band"):
-                    app.apply_wave(m["wave"])
+                if m.get("wave") in ("blue", "rgb", "3band", "custom"):
+                    cols = None
+                    if m.get("wave") == "custom":
+                        import rgb_overview as RO
+                        cols = [RO.hex565(c) for c in (m.get("wave_colours") or [])
+                                if isinstance(c, str)]
+                    app.apply_wave(m["wave"], cols)
                     if app.status.startswith("waveform") and "not applied" in app.status:
                         self.mods_note = f"Theme {tname} applied; {app.status}"
                         return

@@ -56,7 +56,14 @@ COPY5 = CAVE + 0x2800 + 0x100   # rgb_detail.py snapshot routine
 SNAP = int(os.environ.get("SNAP", "0x0972B000"), 0)  # snapshot area
 SLOT4, SLOT6, SNAP_HASH, SLOT5 = SNAP, SNAP + 0x2000, SNAP + 0x3000, SNAP + 0x4000
 SLOT4_MAX, SLOT6_MAX, SLOT5_MAX = 0x2000, 0x1000, 0x40000
-MODES = {"blue": 0, "rgb": 1, "3band": 2}
+MODES = {"blue": 0, "rgb": 1, "3band": 2, "custom": 3}
+STOCK_BLUE = 0x6D1E         # the stock overview bar colour (emu-sampled; one colour)
+# 2026-11-04 custom mode (3): the stock painter draws its mono bar, then the
+# cave recolours every STOCK_BLUE pixel with CUSTOM_TAB[row] (34 RGB565,
+# row 0 = bottom): a 1-3 colour gradient the Studio chose -- exactly the
+# preview's maths (custom_table). The frame, beat marks and playhead are
+# other colours and stay.
+CUSTOM_TAB = CAVE + 0x780   # u16[34], ends 0x7C4 (mode byte at 0x7F0)
 C_LOW, C_MID, C_HIGH = 0x1B1A, 0xE4A5, 0xEF18   # 3-band blue/orange/cream
 THEME_FLAG = MODE_ADDR + 1  # u8: 1 = run theme pass once (tools/theme_deck.py)
 P5FLAG = MODE_ADDR + 2      # u8: this paint draws RGB from PWV5 (centre look)
@@ -104,6 +111,8 @@ nothm:
   extu.b r0,r0
   tst r0,r0                 ; mode 0 = stock blue: leave it
   bt x1
+  cmp/eq #3,r0              ; mode 3 = custom colours over the stock bar
+  bt x3
   cmp/eq #2,r0
   bt t6
   mov.l @({TAG_PWV4:#x},pc),r3
@@ -121,6 +130,9 @@ tagok:
   nop
 x1:
   bra done
+  nop
+x3:
+  bra custom
   nop
 ffound:
   tst r10,r10
@@ -605,7 +617,75 @@ bput:
   bf bloop
   bra cnext
   nop
+custom:                     ; recolour the stock bar: 500 cols x 34 rows
+  mov #33,r0
+  mulu.w r0,r8
+  sts macl,r0
+  add r0,r9                 ; r9 = bottom row (33) base
+  mov.l @({CUSTOM_TAB:#x},pc),r10
+  mov.l @({STOCK_BLUE:#x},pc),r13
+  mov #0,r11                ; col
+ccol:
+  mov r11,r0
+  add r0,r0
+  add r9,r0
+  mov r0,r6                 ; bottom pixel of this column
+  mov r10,r7                ; table: row 0 first
+  mov #34,r2
+crow:
+  mov.w @r6,r0
+  extu.w r0,r0
+  cmp/eq r13,r0
+  bf cskip
+  mov.w @r7,r0
+  mov.w r0,@r6
+cskip:
+  add #2,r7
+  sub r8,r6
+  dt r2
+  bf crow
+  add #1,r11
+  mov.l @({COLS:#x},pc),r0
+  cmp/hs r0,r11
+  bf ccol
+  bra done
+  nop
 """
+
+
+def hex565(h):
+    """'#rrggbb' -> RGB565 (the Studio's colour strings)"""
+    h = h.lstrip("#")
+    r, g, b = int(h[0:2], 16), int(h[2:4], 16), int(h[4:6], 16)
+    return _pack(r, g, b)
+
+
+def grad565(cols, t):
+    """Colour at t (0..1) on a straight RGB blend through cols (RGB565) --
+    the Studio preview's maths (studio/app.py imports this one)."""
+    if len(cols) == 1:
+        return cols[0]
+    t = min(1.0, max(0.0, t)) * (len(cols) - 1)
+    i = min(int(t), len(cols) - 2)
+    f = t - i
+    a, b = cols[i], cols[i + 1]
+
+    def ch(sh, mask):
+        x, y = (a >> sh) & mask, (b >> sh) & mask
+        return int(round(x + (y - x) * f)) << sh
+    return (ch(11, 31) | ch(5, 63) | ch(0, 31)) or 0x0821   # 0 = empty pixel
+
+
+def custom_table(cols):
+    """CUSTOM_TAB contents for 1-3 RGB565 colours: row k (0 = bottom) ->
+    grad565(cols, k / 33); one colour = a solid bar."""
+    cols = list(cols)[:3] or [STOCK_BLUE]
+    return [grad565(cols, k / (ROWS - 1)) for k in range(ROWS)]
+
+
+def custom_writes(cols):
+    tab = struct.pack(f"<{ROWS}H", *custom_table(cols))
+    return [(CUSTOM_TAB + i, b) for i, b in enumerate(tab)]
 
 
 def cave_bytes():
@@ -771,10 +851,17 @@ def extra_writes():
     return [(COPY5 + i, b) for i, b in enumerate(rgb_detail.copy_bytes())]
 
 
-def plan(mode=1):
+def plan(mode=1, custom=None):
+    """custom: 1-3 RGB565 colours for mode 3 (table written before the mode
+    byte); without it mode 3 would recolour with whatever the table holds"""
     code = cave_bytes()
     assert len(code) <= MODE_ADDR - CAVE, f"cave {len(code)} B overlaps mode byte"
+    assert len(code) <= CUSTOM_TAB - CAVE, f"cave {len(code)} B overlaps the custom table"
     out = [(CAVE + i, b) for i, b in enumerate(code)]
+    if custom:
+        out += custom_writes(custom)
+    elif mode == MODES["custom"]:
+        raise ValueError("custom mode needs its colours")
     out.append((MODE_ADDR, mode))
     out += extra_writes()
     out += [(HOOK_POOL + i, b) for i, b in

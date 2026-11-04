@@ -170,6 +170,58 @@ def dcave2_bytes():
     return code
 
 
+# ---- custom colours (mode 3, 2026-11-04) ----------------------------------
+# The stock centre palette (8 RGB565 by "whiteness", RD.PALETTE at boot) --
+# the Studio preview and the deck's 1-colour tint share this one copy.
+STOCK_DETAIL = (0x09F1, 0x0AF7, 0x037F, 0x0D5E, 0x55BE, 0x757F, 0x757F, 0xCF3F)
+CW_ROWS = 55                            # cw.c ROWS: centre line -> peak
+
+
+def tint_spec(c565):
+    """A theme spec that moves the stock blue onto colour c565 (the
+    1-colour custom centre: the stock palette tinted, not flat)."""
+    import colorsys
+    r, g, b = ((c565 >> 11) & 31) / 31, ((c565 >> 5) & 63) / 63, (c565 & 31) / 31
+    h, sat, v = colorsys.rgb_to_hsv(r, g, b)
+    return {"hue": h * 360, "sat": 1.0 + sat, "val": 0.6 + v * 0.5,
+            "spread": 0.3, "vivid": sat * 0.6}
+
+
+def custom_tables(cols):
+    """-> (kind, ramp[CW_ROWS], pal[8]) for 1-3 RGB565 colours, exactly the
+    preview's maths: 2-3 colours = a centre-line -> peak ramp (kind 1),
+    1 colour = the stock palette tinted toward it (kind 0)."""
+    cols = list(cols)[:3]
+    if len(cols) > 1:
+        ramp = [RO.grad565(cols, k / (CW_ROWS - 1)) for k in range(CW_ROWS)]
+        return 1, ramp, list(STOCK_DETAIL)
+    import numpy as np
+    import themes as T
+    pal = [int(c) for c in T.map_colours(np.array(STOCK_DETAIL, np.uint16),
+                                         tint_spec(cols[0] if cols else RO.STOCK_BLUE))]
+    return 0, [pal[7]] * CW_ROWS, pal
+
+
+def custom_writes(cols, syms=None):
+    """(addr, byte) writes that fill the module's custom tables (inside
+    CW_BASE..end, so every installer's region already covers them)"""
+    syms = syms or cw_build()[1]
+    kind, ramp, pal = custom_tables(cols)
+    out = []
+    for i, b in enumerate(struct.pack("<I", kind)):
+        out.append((syms["cw_cust_kind"] + i, b))
+    for i, b in enumerate(struct.pack(f"<{CW_ROWS}H", *ramp)):
+        out.append((syms["cw_cust_ramp"] + i, b))
+    for i, b in enumerate(struct.pack("<8H", *pal)):
+        out.append((syms["cw_cust_pal"] + i, b))
+    return out
+
+
+def install_custom(mem, cols):
+    for a_, b_ in custom_writes(cols):
+        mem.w8(a_, b_)
+
+
 def install(mem):
     """emulator install (same bytes/order as the deck installer): C module,
     shim, then pool + the two painter instructions"""

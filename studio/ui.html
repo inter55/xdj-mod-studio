@@ -408,7 +408,7 @@ dialog h2 { font-size: 16px; margin-bottom: 6px; }
       <h2>Pick your mods</h2>
       <div class="pick" id="pk-wave">
         <input type="checkbox" id="pk-wave-on" checked>
-        <div class="body"><b>Colour Waveforms</b><div class="d">RGB and 3-band colours for the overview strip and the big centre waveform. You pick the style on the deck: hold MENU › UTILITY › WAVEFORM COLOR.</div></div>
+        <div class="body"><b>Colour Waveforms</b><div class="d">RGB, 3-band and your own 1–3 colours (Theme Builder › Waveform › Custom) for the overview strip and the big centre waveform. The style picked in Theme Builder is installed; on the deck you can still switch: hold MENU › UTILITY › WAVEFORM COLOR (BLUE / RGB / 3-BAND / CUSTOM).</div></div>
       </div>
       <div class="pick" id="pk-pads">
         <input type="checkbox" id="pk-pads-on" checked>
@@ -633,7 +633,7 @@ dialog h2 { font-size: 16px; margin-bottom: 6px; }
           <button class="btn sm" id="updpre-all">Everything</button>
           <button class="btn sm" id="updpre-pm">Phase meter only</button>
           <button class="btn sm" id="updpre-wave">Waveform colours only</button></div></div>
-      <div class="row"><span class="dim" style="width:150px">Overview waveform</span><div class="seg" id="updwave"><button data-v="blue">Blue</button><button data-v="rgb" aria-pressed="true">RGB</button><button data-v="3band">3-Band</button></div></div>
+      <div class="row"><span class="dim" style="width:150px">Overview waveform</span><div class="seg" id="updwave"><button data-v="blue">Blue</button><button data-v="rgb" aria-pressed="true">RGB</button><button data-v="3band">3-Band</button><button data-v="custom" title="The 1-3 colours from Theme Builder > Waveform > Custom">Custom</button></div></div>
       <label class="row"><input type="checkbox" id="updpads" checked> PERFORM pads: HOT CUE / BEAT JUMP / KEY SHIFT / STEMS tabs, beat jump 1–64</label>
       <div class="small dim">Extras: the file carries them and a small start-up routine copies them into the deck's memory every time it switches on.</div>
       <label class="row"><input type="checkbox" class="updx" data-x="centre" checked> RGB / 3-band centre waveform</label>
@@ -791,6 +791,7 @@ $('#actx').onclick = () => $('#act').classList.remove('on');
 async function state() {
   const s = await api('/api/state'); if (!s) return;
   const fwWas = ST.fw_ready; ST = s;
+  customFromServer(s.wave_colours);
   if (fwWas !== undefined && fwWas !== s.fw_ready) preview();   // firmware setup just finished
   if (s.upd && !$('#updpath').value) { $('#updpath').value = s.upd; updReady(); }
   $('#deckdot').className = 'dot ' + (s.deck ? 'ok' : ''); $('#decktxt').textContent = s.deck ? 'Deck connected' : 'No deck';
@@ -910,6 +911,7 @@ $('#updbtn').onclick = async () => {
   if (!ok) return;
   const ack = {}; $$('.updack').forEach(c => ack[c.dataset.k] = c.checked);
   const r = await api('/api/upd/build', {path: $('#updpath').value.trim(), mode: UPD.wave,
+    wave_colours: UPD.wave === 'custom' ? customList() : undefined,
     pads: $('#updpads').checked, versions: false, ack,
     extras: $$('.updx').filter(c => c.checked && !c.disabled).map(c => c.dataset.x)});
   if (r) { toast('Building + boot-testing — about 5 minutes.'); watch(); }
@@ -923,7 +925,7 @@ function renderPick() {
     if (cb && !cb.disabled) pk.classList.toggle('off', !cb.checked);
   });
   const parts = [];
-  if ($('#pk-wave-on').checked) parts.push('Colour waveforms');
+  if ($('#pk-wave-on').checked) parts.push(MOD.wave === 'custom' ? 'Custom colour waveforms' : MOD.wave === '3band' ? '3-band waveforms' : 'Colour waveforms');
   if ($('#pk-pads-on').checked) parts.push('PERFORM pads');
   if ($('#pk-themes-on').checked) parts.push('Themes');
   if ($('#pk-liveks-on').checked) parts.push('Live key shift');
@@ -933,11 +935,14 @@ function renderPick() {
 }
 $$('#p-mods .pick input[type=checkbox]').forEach(cb => cb.onchange = () => { PICK.touched = true; renderPick(); });
 $('#deckgo').onclick = async () => {
-  const wave = $('#pk-wave-on').checked ? 'rgb' : 'blue';
+  // the style picked in Theme Builder > Waveform (RGB / 3-Band / Custom) is
+  // what goes on the deck; Blue there still means the RGB waveforms here
+  const wave = $('#pk-wave-on').checked ? (MOD.wave === 'blue' ? 'rgb' : MOD.wave) : 'blue';
   const pads = $('#pk-pads-on').checked;
   const themes = $('#pk-themes-on').checked, liveks = $('#pk-liveks-on').checked, phase = $('#pk-phase-on').checked && pads;
   const flac = $('#pk-flac-on').checked, opus = flac && !!(ST.lib_formats || {}).opus;
-  const parts = [wave === 'rgb' ? 'colour waveforms' : 'stock waveforms'];
+  const parts = [wave === 'custom' ? 'custom colour waveforms (' + customList().join(', ') + ')'
+    : wave === 'rgb' ? 'colour waveforms' : wave === '3band' ? '3-band waveforms' : 'stock waveforms'];
   if (pads) parts.push('PERFORM pads');
   if (themes) parts.push('themes');
   if (liveks) parts.push('live key shift');
@@ -947,7 +952,8 @@ $('#deckgo').onclick = async () => {
   const mins = Math.round(((ST.surveyed ? 1 : 5) + 3 + 1 + 1 + 1 + 1 + 2 + (pads ? 3 : 0) + (themes ? 4 : 0) + (liveks ? 2 : 0) + (phase ? 3 : 0) + (flac ? (opus ? 5 : 2) : 0)) * 70 / 60);
   if (await ask('Install mods on the deck?',
     `${parts.join(' · ')}. It takes about ${mins} minutes, plus the moment you eject the stick when asked. Keep the USB stick out of the deck until the log asks for it. Power-cycle the deck any time to go back to stock.`, 'Install'))
-    api('/api/deck/install', {mode: wave, pads, themes, liveks, phase, flac, opus}).then(r => r && watch());
+    api('/api/deck/install', {mode: wave, pads, themes, liveks, phase, flac, opus,
+      wave_colours: wave === 'custom' ? customList() : undefined}).then(r => r && watch());
 };
 
 /* ---- Theme Builder */
@@ -964,6 +970,24 @@ function customParams() {
   if (MOD.ncol >= 2) p.custom2 = MOD.custom2;
   if (MOD.ncol >= 3) p.custom3 = MOD.custom3;
   return p;
+}
+// the same 1-3 colours as a list: what the emulator, the deck installer and
+// the UPD builder get (tools/rgb_overview.py custom mode, 2026-11-04). One
+// set for the app, kept in studio.json by the server (state.wave_colours).
+function customList() {
+  const l = [MOD.custom || '#6ba3f0'];
+  if (MOD.ncol >= 2) l.push(MOD.custom2);
+  if (MOD.ncol >= 3) l.push(MOD.custom3);
+  return l;
+}
+let WAVE_FROM_SERVER = false;
+function customFromServer(list) {
+  if (WAVE_FROM_SERVER || !Array.isArray(list) || !list.length) return;
+  WAVE_FROM_SERVER = true;
+  [MOD.custom, MOD.custom2, MOD.custom3] = [list[0] || MOD.custom, list[1] || MOD.custom2, list[2] || MOD.custom3];
+  MOD.ncol = Math.min(3, Math.max(1, list.length));
+  try { localStorage.setItem('wave_custom', MOD.custom); localStorage.setItem('wave_custom2', MOD.custom2);
+        localStorage.setItem('wave_custom3', MOD.custom3); localStorage.setItem('wave_ncol', String(MOD.ncol)); } catch (_) {}
 }
 let pscreen = 'main', pt = null, applied = null;
 const spec = () => Object.fromEntries(SL.map(k => [k, +$('#' + k).value]));
@@ -1091,7 +1115,7 @@ $('#tsave').onclick = async () => {
 function draftMods() {
   const t = MOD.theme !== 'stock' ? {name: MOD.theme, spec: specLit()}
     : MOD.litOn ? {name: 'stock', spec: {lit: MOD.lit}} : null;   // stock + lit buttons
-  return {theme: t, wave: MOD.wave};
+  return {theme: t, wave: MOD.wave, wave_colours: MOD.wave === 'custom' ? customList() : undefined};
 }
 async function applyMods() {
   const d = draftMods();
@@ -1104,7 +1128,7 @@ async function applyMods() {
 function markDirty() {
   const d = draftMods(), same = applied === JSON.stringify(d);
   $('#dirty').hidden = applied === null || same;
-  const wn = {blue: 'Blue', rgb: 'RGB', '3band': '3-Band', custom: 'Custom (preview only)'}[d.wave] || d.wave;
+  const wn = {blue: 'Blue', rgb: 'RGB', '3band': '3-Band', custom: 'Custom colours'}[d.wave] || d.wave;
   $('#modsline').textContent = `Theme Builder now: ${d.theme ? d.theme.name : 'stock'}${MOD.litOn ? ' · lit ' + MOD.lit : ''} · ${wn}` + (applied === null ? ' — not sent to the emulator yet' : same ? ' — in the emulator' : '');
 }
 $('#testemu').onclick = async () => { if (await applyMods()) showTab('emu'); };
@@ -1503,7 +1527,8 @@ async function reinstall() {
   const m = savedMods(); if (!m) return;
   const js = await api('/api/jobs') || [];
   if (js.some(j => j.state === 'running')) return toast('Something is already running: wait for it to finish.', true);
-  api('/api/deck/install', {mode: m.mode, pads: m.pads, themes: m.themes, liveks: m.liveks, phase: m.phase, brake: m.brake}).then(r => r && watch());
+  api('/api/deck/install', {mode: m.mode, pads: m.pads, themes: m.themes, liveks: m.liveks, phase: m.phase, brake: m.brake,
+    wave_colours: m.mode === 'custom' ? (m.colours || customList()) : undefined}).then(r => r && watch());
 }
 async function offerReinstall() {
   const m = savedMods(); if (!m) return;

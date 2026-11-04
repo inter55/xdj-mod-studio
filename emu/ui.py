@@ -609,11 +609,13 @@ class EmuApp:
         self._start(m, self.fw_name)
 
     # -- waveform styles ----------------------------------------------------
-    def apply_wave(self, name):
-        """Overview waveform style: blue (stock) / rgb / 3band. Installs the
-        tools/rgb_overview.py cave + hook (same bytes as the deck tool) and
-        sets its mode byte. Takes effect on the next track load (the stock
-        painter only redraws the overview when a track loads)."""
+    def apply_wave(self, name, colours=None):
+        """Overview waveform style: blue (stock) / rgb / 3band / custom.
+        Installs the tools/rgb_overview.py cave + hook (same bytes as the
+        deck tool) and sets its mode byte. custom: colours = 1-3 RGB565
+        (the Studio's 1-3 colour gradient; 2026-11-04 on the deck too),
+        kept for later menu picks. Takes effect on the next track load (the
+        stock painter only redraws the overview when a track loads)."""
         m = self.machine
         if m is None or not self.fw_name.startswith("Stock"):
             self.status = "waveform styles need the stock firmware running"
@@ -621,7 +623,13 @@ class EmuApp:
         import sys as _sys
         _sys.path.insert(0, os.path.join(ROOT, "tools"))
         import rgb_overview as RO
-        code, writes = RO.plan(RO.MODES[name])
+        if colours:
+            self.wave_colours = list(colours)
+        if name == "custom" and not getattr(self, "wave_colours", None):
+            self.status = "custom waveform needs its colours (Theme Builder > Waveform > Custom)"
+            return
+        code, writes = RO.plan(RO.MODES[name],
+                               self.wave_colours if name == "custom" else None)
         hook = m.mem.r32(RO.HOOK_POOL)
         if hook not in (RO.ORIG_RELEASE, RO.CAVE):
             self.status = f"waveform hook site unexpected ({hook:#x}) - not applied"
@@ -634,6 +642,8 @@ class EmuApp:
         if m.mem.r32(RD.POOL) in (RD.PALETTE, RD.DCAVE) and \
                 m.mem.r16(RD.INSN) in (RD.INSN_OLD, RD.INSN_NEW):
             RD.install(m.mem)            # C colour module + shim + row patch
+            if name == "custom":
+                RD.install_custom(m.mem, self.wave_colours)
         # the rest of the deck set: version switching + the mod settings in
         # UTILITY (same bytes as tools/deck_session.py installs; 1.0: no
         # MY SETTINGS rows any more)

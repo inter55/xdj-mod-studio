@@ -148,7 +148,14 @@ def flac_ops(mem, kind, log):
         f"chains read {mem.r32(s['vf_read_prev']):#x} / direct {mem.r32(s['vf_direct_prev']):#x})")
 
 
-def build_ops(mode="rgb", names=None, extras=EXTRAS, log=print, flac=None):
+def parse_colours(arg):
+    """'#rrggbb,#rrggbb' -> [RGB565, ..] (1-3), None for empty"""
+    import rgb_overview as RO
+    cols = [RO.hex565(c.strip()) for c in (arg or "").split(",") if c.strip()]
+    return cols[:3] or None
+
+
+def build_ops(mode="rgb", names=None, extras=EXTRAS, log=print, flac=None, custom=None):
     """-> (mem, records) where records = [(dst, len, flags, expect, data)]"""
     from emu import fw as FW
     import rgb_overview as RO
@@ -174,7 +181,8 @@ def build_ops(mode="rgb", names=None, extras=EXTRAS, log=print, flac=None):
     saved = PB.BAKERS["utility"]
     PB.BAKERS["utility"] = lambda mem_, log_: None
     try:
-        PB.apply_mods(mem, mode, True, True, log, tuple(e for e in extras if e != "utility"))
+        PB.apply_mods(mem, mode, True, True, log, tuple(e for e in extras if e != "utility"),
+                      custom=custom)
     finally:
         PB.BAKERS["utility"] = saved
     # PERFORM pads: the cable tool arms blit first, touch last
@@ -271,7 +279,9 @@ def summary(recs, log=print):
 
 def main():
     ap = argparse.ArgumentParser()
-    ap.add_argument("--mode", default="rgb", choices=["rgb", "3band", "blue"])
+    ap.add_argument("--mode", default="rgb", choices=["rgb", "3band", "blue", "custom"])
+    ap.add_argument("--colours", default="",
+                    help="custom mode: 1-3 colours '#rrggbb,#rrggbb,#rrggbb'")
     ap.add_argument("--themes", nargs="*", default=None)
     ap.add_argument("--no-extras", action="store_true")
     ap.add_argument("--flac", choices=["opus", "flac"], default=None,
@@ -281,7 +291,8 @@ def main():
     a = ap.parse_args()
     import theme_switch as TS
     names = TS.theme_names(a.themes) if a.themes else None
-    mem, recs = build_ops(a.mode, names, () if a.no_extras else EXTRAS, flac=a.flac)
+    mem, recs = build_ops(a.mode, names, () if a.no_extras else EXTRAS, flac=a.flac,
+                          custom=parse_colours(a.colours))
     blob = encode(recs)
     assert decode(blob) == recs
     os.makedirs(os.path.dirname(a.out) or ".", exist_ok=True)

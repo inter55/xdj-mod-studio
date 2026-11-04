@@ -295,6 +295,18 @@ overview, beat jump, key shift, stems, extended hot cues all worked.
   Not yet: key shift (needs the hot DSP patch), the pack builder in the
   Studio, the RAM-only rehearsal on the deck, the UPD with the loader as a
   permanent_build extra.
+- Custom waveform colours on the deck (2026-11-04, user-asked before the
+  Studio's stick button): overview cave mode 3 recolours the stock bar
+  row by row from a 34-entry table at CAVE+0x780 (rgb_overview.custom_table
+  = the preview's grad565 ramp); the centre module (tools/centre/cw.c)
+  mode 3 reads a 55-row ramp or a tinted 8-entry palette shipped in its
+  own bss (rgb_detail.custom_tables / install_custom); UTILITY WAVEFORM
+  COLOR = 4 values. Carried by rgb_overview_apply / rgb_detail_apply
+  --colours, deck_session --colours, permanent_build --colours, usbpack
+  --colours, emu apply_wave(name, colours) and the Studio (settings
+  wave_colours; Theme Builder style drives the cable install). Proof:
+  tools/custom_wave_emu_test.py on the real-DSP snapshot. Next: the real
+  deck (cable, RAM-only), then the Studio's pack-to-stick button.
 - The new 3-mode app (cable / USB stick / firmware UPD).
 - Bug list proven on the deck: FLAC load freeze, key shift right-channel
   noise on AIFF, BJ 32/64, lit-button theme stripes (+ light mode, 8 hot

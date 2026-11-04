@@ -25,6 +25,8 @@ import hid
 from xdj700_usb_shell import PIONEER_VID, open_deck, drain
 from rgb_overview_apply import br, bw, read_block, send, CHUNK_B
 from rgb_overview import HOOK_POOL, CAVE
+import rgb_overview as RO
+from rgb_detail import custom_writes
 from rgb_detail import (POOL2, PALETTE2, INSN2, INSN2_NEW, ROWINC2, DCAVE2,
                         dcave2_bytes)
 from rgb_detail import (POOL, PALETTE, INSN, INSN_OLD, INSN_NEW, DCAVE,
@@ -43,7 +45,13 @@ def rd16(h, a):
 
 
 def main():
-    revert = sys.argv[1:] == ["--revert"]
+    args = sys.argv[1:]
+    cols = None
+    if "--colours" in args:                   # custom waveform: 1-3 '#rrggbb'
+        i = args.index("--colours")
+        cols = [RO.hex565(c) for c in args[i + 1].split(",") if c.strip()][:3]
+        del args[i:i + 2]
+    revert = args == ["--revert"]
     code = dcave_bytes()
     cands = [d for d in hid.enumerate()
              if d["vendor_id"] == PIONEER_VID and d["usage"] == 0x01]
@@ -93,6 +101,18 @@ def main():
         if left:
             print(f"RESULT: PARTIAL ({left} B left) - run again")
             return 0
+        if cols:                              # custom colour tables (ours: any
+            cw_ = custom_writes(cols, syms)   # earlier set may be there)
+            lo, hi = cw_[0][0], cw_[-1][0] + 1
+            tab = bytearray(hi - lo)
+            for a_, b_ in cw_:
+                tab[a_ - lo] = b_
+            left = fastload.install_region(h, lo, bytes(tab), fastload.SESSION_BUDGET,
+                                           allow_live=list(range(lo, hi)))
+            if left:
+                print(f"RESULT: PARTIAL (colour tables, {left} B left) - run again")
+                return 0
+            print(f"custom colour tables written ({hi - lo} B)")
         live = read_block(h, DCAVE, DSCRATCH + 2 - DCAVE)
         img = bytearray(code + bytes(DSCRATCH + 2 - DCAVE - len(code)))
         cp = copy_bytes()                      # snapshot routine (written

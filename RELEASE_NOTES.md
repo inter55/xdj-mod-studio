@@ -2,12 +2,18 @@
 
 ## New
 
-- **Custom waveform: 1, 2 or 3 colours.** Theme Builder › Waveform ›
-  Custom › Colours 1 / 2 / 3. With 2 or 3 colours the waveform blends
-  from the first colour (quiet, bottom / centre line) to the last (loud,
-  top / peaks), on both the overview and the centre waveform. Preview only,
-  like the one-colour custom waveform: the deck and the emulator still use
-  Blue, RGB or 3-Band.
+- **Custom waveform: 1, 2 or 3 colours -- on the deck too.** Theme Builder ›
+  Waveform › Custom › Colours 1 / 2 / 3. With 2 or 3 colours the waveform
+  blends from the first colour (quiet, bottom / centre line) to the last
+  (loud, top / peaks), on both the overview and the centre waveform. The
+  colours now go wherever the mods go (2026-11-04): the emulator (Test in
+  Emulator), the cable install (the style picked in Theme Builder is what
+  "Colour Waveforms" installs), the permanent update file and the USB-stick
+  pack. On the deck, UTILITY › WAVEFORM COLOR gained CUSTOM next to BLUE /
+  RGB / 3-BAND. The app keeps the one set of colours in its settings
+  (studio.json), so they survive a browser reset; changing them replaces
+  the previous set. Emulator-proven pixel for pixel
+  (tools/custom_wave_emu_test.py); not yet seen on a real deck.
 - **Lit buttons in your colour (preview, emulator, deck).** Theme Builder ›
   Lit buttons › Your colour: QUANTIZE, MASTER, SYNC, SLIP and VINYL BRAKE
   light up in one colour of your choice (also when pressed, and VINYL BRAKE

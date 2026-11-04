@@ -139,7 +139,10 @@ def until_pass(args, label, max_runs=40):
 
 def main():
     ap = argparse.ArgumentParser()
-    ap.add_argument("--mode", default="rgb", choices=["rgb", "3band", "blue"])
+    ap.add_argument("--mode", default="rgb", choices=["rgb", "3band", "blue", "custom"])
+    ap.add_argument("--colours", default="",
+                    help="--mode custom: 1-3 colours '#rrggbb,#rrggbb,#rrggbb' "
+                         "(overview gradient bottom -> top, centre line -> peak)")
     ap.add_argument("--skip-survey", action="store_true")
     ap.add_argument("--no-versions", action="store_true",
                     help="(kept for compatibility, ignored)")
@@ -165,6 +168,9 @@ def main():
                     help="also 5k: real-time key shift (live patch of the audio "
                          "chip, no restart; opt-in until proven on hardware)")
     a = ap.parse_args()
+    if a.mode == "custom" and not a.colours:
+        sys.exit("--mode custom needs --colours #rrggbb[,#rrggbb[,#rrggbb]]")
+    colour_args = ["--colours", a.colours] if a.mode == "custom" else []
     # public checkouts have no build/ output (gitignored): stage the
     # committed prebuilt deck modules so the *apply tools find them
     try:
@@ -228,7 +234,7 @@ def main():
                 sys.exit("STOP: safety check failed (memory not empty, or the USB "
                          "link dropped) - nothing installed." + POWER)
     print(f"2/5 waveform overview ({a.mode}) + snapshot routine")
-    r = until_pass(["tools/rgb_overview_apply.py", a.mode], "overview")
+    r = until_pass(["tools/rgb_overview_apply.py", a.mode] + colour_args, "overview")
     if r is not True:
         sys.exit("STOP: overview install failed - switch the deck off and on, then install again (once).")
     print("2b  read-only survey of the version-switch + settings code area")
@@ -252,13 +258,13 @@ def main():
     print("4/5 EJECT THE USB STICK from the deck now (no track loaded).")
     print("    Waiting for the deck to report no track ...", flush=True)
     while True:
-        out = run(["tools/rgb_detail_apply.py"])
+        out = run(["tools/rgb_detail_apply.py"] + colour_args)
         if "REFUSED" not in out:
             break
         time.sleep(15)
     if "RESULT: PASS" not in out:
         print("5/5 centre waveform")
-        r = until_pass(["tools/rgb_detail_apply.py"], "centre")
+        r = until_pass(["tools/rgb_detail_apply.py"] + colour_args, "centre")
         if r is not True:
             sys.exit("STOP: centre install failed - switch the deck off and on, then install again (once).")
     print("5b  stems version switching (per-stem deck file) -- always on")

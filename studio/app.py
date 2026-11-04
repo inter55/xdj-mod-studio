@@ -828,18 +828,10 @@ def custom_colours(w):
 
 
 def grad565(cols, t):
-    """Colour at t (0..1) on a straight RGB blend through cols (RGB565)."""
-    if len(cols) == 1:
-        return cols[0]
-    t = min(1.0, max(0.0, t)) * (len(cols) - 1)
-    i = min(int(t), len(cols) - 2)
-    f = t - i
-    a, b = cols[i], cols[i + 1]
-
-    def ch(sh, mask):
-        x, y = (a >> sh) & mask, (b >> sh) & mask
-        return int(round(x + (y - x) * f)) << sh
-    return (ch(11, 31) | ch(5, 63) | ch(0, 31)) or 0x0821   # 0 = empty pixel
+    """Colour at t (0..1) on a straight RGB blend through cols (RGB565):
+    the deck's table maths (tools/rgb_overview.py), one source"""
+    import rgb_overview as RO
+    return RO.grad565(cols, t)
 
 
 def wave_cols(stick, d, style, w):
@@ -989,18 +981,16 @@ DEMO_CANDIDATES = 24        # complete tracks to compare before picking
 DEMO_CACHE_FILE = os.path.join(APP_SUPPORT, "cache", "demo_track.json")
 
 
-STOCK_DETAIL = (0x09F1, 0x0AF7, 0x037F, 0x0D5E, 0x55BE, 0x757F, 0x757F, 0xCF3F)
+STOCK_DETAIL = (0x09F1, 0x0AF7, 0x037F, 0x0D5E, 0x55BE, 0x757F, 0x757F, 0xCF3F)  # == rgb_detail.STOCK_DETAIL
 CENTRE = {"main": dict(x0=116, cx=366, cy=240, rmax=55),      # playhead x 366
           "perform": dict(x0=116, cx=366, cy=100, rmax=34)}
 
 
 def _tint_spec(c565):
-    """A theme spec that moves the stock blue onto colour c565."""
-    import colorsys
-    r, g, b = ((c565 >> 11) & 31) / 31, ((c565 >> 5) & 63) / 63, (c565 & 31) / 31
-    h, sat, v = colorsys.rgb_to_hsv(r, g, b)
-    return {"hue": h * 360, "sat": 1.0 + sat, "val": 0.6 + v * 0.5,
-            "spread": 0.3, "vivid": sat * 0.6}
+    """A theme spec that moves the stock blue onto colour c565 (the deck's
+    1-colour centre tint, tools/rgb_detail.py: one source)."""
+    import rgb_detail as RD
+    return RD.tint_spec(c565)
 
 
 def centre_cols(stick, d, style, w, pos_frac=0.4, step=2):
@@ -1574,20 +1564,31 @@ INSTALL_STEPS = [          # sessions per step (mock-deck measured 2026-10-12)
 SESSION_S = 55.0            # per session incl. 30 s cool-down (mock-deck model)
 
 
+def wave_colour_args(mode, colours):
+    """['--colours', '#a,#b'] for the custom waveform, [] otherwise"""
+    if mode != "custom":
+        return []
+    cols = [c for c in (colours or []) if isinstance(c, str) and re.fullmatch(r"#[0-9a-fA-F]{6}", c)][:3]
+    if not cols:
+        raise RuntimeError("Custom waveform: pick 1-3 colours in Theme Builder > Waveform > Custom first.")
+    return ["--colours", ",".join(c.lower() for c in cols)]
+
+
 def j_deck_install(log, prog, mode, pads=True,
                    themes=True, liveks=False, phase=False, brake=0.0, flac=True,
-                   opus=False):
+                   opus=False, colours=None):
     if deck_ready():
         raise RuntimeError(deck_ready())
     try:
         s = settings()
         s["mods"] = {"mode": mode, "pads": bool(pads), "themes": bool(themes),
                      "liveks": bool(liveks), "phase": bool(phase),
-                     "brake": float(brake or 0), "flac": bool(flac)}
+                     "brake": float(brake or 0), "flac": bool(flac),
+                     "colours": list(colours or [])[:3] if mode == "custom" else None}
         save_settings(s)
     except Exception:
         pass
-    args = ["tools/deck_session.py", "--mode", mode]
+    args = ["tools/deck_session.py", "--mode", mode] + wave_colour_args(mode, colours)
     if not pads:
         args.append("--no-pads")
     if not themes:
@@ -1692,7 +1693,7 @@ def j_deck_install(log, prog, mode, pads=True,
 UPD_ACKS = ("brick", "recovery", "power")
 
 
-def j_upd_build(log, prog, upd, mode, pads, versions, banner, extras=()):
+def j_upd_build(log, prog, upd, mode, pads, versions, banner, extras=(), colours=None):
     """PERMANENT mode: build a modded update file from the user's OWN
     official XDJ-700 v1.15 .UPD (tools/permanent_build.py), then boot it in
     the emulator from reset. Writes a file only -- the app never flashes."""
@@ -1700,7 +1701,7 @@ def j_upd_build(log, prog, upd, mode, pads, versions, banner, extras=()):
     os.makedirs(out_dir, exist_ok=True)
     out = os.path.join(out_dir, "XDJ700.UPD")
     args = ["tools/permanent_build.py", upd, out, "--mode", mode,
-            "--banner", banner, "--i-know-flashing-can-brick"]
+            "--banner", banner, "--i-know-flashing-can-brick"] + wave_colour_args(mode, colours)
     if not pads:
         args.append("--no-pads")
     if not versions:
@@ -1886,7 +1887,14 @@ def emu_cmd(b):
     elif c == "restart":
         h.restart()
     elif c == "mods":
-        m = {"wave": b.get("wave") or None}
+        m = {"wave": b.get("wave") or None, "wave_colours": b.get("wave_colours") or None}
+        if m["wave_colours"]:                    # the one set, kept with the app
+            try:                                 # (not just in the browser)
+                s_ = settings()
+                s_["wave_colours"] = [str(c) for c in m["wave_colours"]][:3]
+                save_settings(s_)
+            except Exception:
+                pass
         th = b.get("theme")
         if th and th.get("spec"):
             m["theme"] = {"name": th.get("name") or "custom", "spec": th["spec"]}
@@ -1961,6 +1969,7 @@ class H(BaseHTTPRequestHandler):
                                   "demucs": demucs_ok(),
                                   "ffmpeg": bool(shutil.which("ffmpeg") and shutil.which("ffprobe")),
                                   "mods": s.get("mods", {}),
+                                  "wave_colours": s.get("wave_colours"),
                                   "themes": themes,
                                   "themes_ok": bool(themes), "themes_err": _THEME_ERR[0],
                                   "firmware": _firmware_labels(),
@@ -2246,7 +2255,7 @@ class H(BaseHTTPRequestHandler):
                 return self.send({"job": job("Build permanent update (UPD)", j_upd_build,
                                              upd, b.get("mode", "rgb"), pads,
                                              bool(b.get("versions", True)), banner,
-                                             extras)})
+                                             extras, b.get("wave_colours"))})
             if p == "/api/deck/install":
                 return self.send({"job": job("Install mods on deck", j_deck_install,
                                              b.get("mode", "rgb"),
@@ -2256,7 +2265,8 @@ class H(BaseHTTPRequestHandler):
                                              bool(b.get("phase", False)),
                                              float(b.get("brake") or 0),
                                              bool(b.get("flac", False)),
-                                             bool(b.get("opus", False)))})
+                                             bool(b.get("opus", False)),
+                                             b.get("wave_colours"))})
         except (BrokenPipeError, ConnectionResetError):
             raise
         except Exception as e:

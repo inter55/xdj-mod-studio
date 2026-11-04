@@ -165,7 +165,7 @@ def emu():
     w0 = mem.r8(RO.MODE_ADDR)
     edit(3, 1, "wave")
     print("WAVEFORM:", w0, "->", mem.r8(RO.MODE_ADDR), "commits", mem.r32(s["ut_commits"]))
-    ok &= chk("waveform +1", mem.r8(RO.MODE_ADDR) == (w0 + 1) % 3)
+    ok &= chk("waveform +1", mem.r8(RO.MODE_ADDR) == (w0 + 1) % 4)
     edit(2, 2, "brake")
     print("BRAKE:", mem.r8(MS.MSBRAKE), mem.r32(MS.BRAKE_LIT))
     ok &= chk("brake 4X", mem.r8(MS.MSBRAKE) == 2 and mem.r32(MS.BRAKE_LIT) == 4 * MS.BRAKE_STOCK)

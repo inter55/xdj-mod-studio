@@ -429,14 +429,19 @@ def boot_tail(mem, img_len):
 
 
 def apply_mods(mem, mode="rgb", versions=True, pads=True, log=print,
-               extras=()):
+               extras=(), custom=None):
+    """custom: 1-3 RGB565 colours for mode "custom" (overview table in the
+    cave, centre tables in the colour module when "centre" is an extra)"""
     import rgb_overview as RO
     import rgb_detail as RD
     import vredirect as VR
     import mysettings as MS
-    for a, b in RO.plan(RO.MODES[mode])[1]:
+    if mode == "custom" and not custom:
+        raise SystemExit("REFUSED: --mode custom needs --colours #rrggbb[,#rrggbb[,#rrggbb]]")
+    for a, b in RO.plan(RO.MODES[mode], custom if mode == "custom" else None)[1]:
         mem.w8(a, b)
-    log(f"overview waveform: {mode} (+ snapshot routine)")
+    log(f"overview waveform: {mode} (+ snapshot routine)"
+        + (f", colours {', '.join(f'{c:#06x}' for c in custom)}" if mode == "custom" else ""))
     if "centre" not in extras:
         # its colour module lives outside the image (boot-copied only
         # when baked as an extra): keep the stock blue centre
@@ -468,10 +473,13 @@ def apply_mods(mem, mode="rgb", versions=True, pads=True, log=print,
     for e in EXTRAS:                    # fixed order: pm chains pads, hc chains pm
         if e in extras:
             BAKERS[e](mem, log)
+            if e == "centre" and mode == "custom":
+                RD.install_custom(mem, custom)
+                log("centre waveform: custom colour tables")
 
 
 def build(stock, out, mode="rgb", banner="1.16", versions=True,
-          pads=True, log=print, extras=()):
+          pads=True, log=print, extras=(), custom=None):
     h = hashlib.sha256(open(stock, "rb").read()).hexdigest()
     if h != OFFICIAL:
         raise SystemExit("REFUSED: not the official XDJ-700 v1.15 update file")
@@ -483,7 +491,7 @@ def build(stock, out, mode="rgb", banner="1.16", versions=True,
     dec = bytearray(L.decode(bytes(main.img[hdr + 4:hdr + 4 + ln])))
     stock_dec = bytes(dec)
     mem = SplitMem(dec)
-    apply_mods(mem, mode, versions, pads, log, extras)
+    apply_mods(mem, mode, versions, pads, log, extras, custom)
     if mem.regions:
         if (mem.r32(ENTRY_POOL) != ENTRY_STUB or mem.r16(ENTRY_STUB) != 0x000B
                 or mem.r16(ENTRY_STUB + 2) != 0x0009):
@@ -740,7 +748,9 @@ def emu_check(upd, steps=6_000_000_000, log=print):
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("files", nargs="+")
-    ap.add_argument("--mode", default="rgb", choices=["rgb", "3band", "blue"])
+    ap.add_argument("--mode", default="rgb", choices=["rgb", "3band", "blue", "custom"])
+    ap.add_argument("--colours", default="",
+                    help="--mode custom: 1-3 colours '#rrggbb,#rrggbb,#rrggbb'")
     ap.add_argument("--banner", default="1.16")
     ap.add_argument("--no-pads", action="store_true")
     ap.add_argument("--no-versions", action="store_true")
@@ -761,8 +771,10 @@ def main():
         ap.error("refusing to write: re-run with --i-know-flashing-can-brick "
                  "after reading the warnings at the top of this tool")
     extras = EXTRAS if a.extras == "all" else tuple(x for x in a.extras.split(",") if x)
+    import usbpack
+    custom = usbpack.parse_colours(a.colours)
     build(a.files[0], a.files[1], a.mode, a.banner,
-          not a.no_versions, not a.no_pads, extras=extras)
+          not a.no_versions, not a.no_pads, extras=extras, custom=custom)
     print("RESULT: built (NOT flash-tested). Boot-test: permanent_build.py --emu", a.files[1])
     return 0
 

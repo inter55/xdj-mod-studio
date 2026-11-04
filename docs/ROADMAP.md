@@ -270,9 +270,20 @@ overview, beat jump, key shift, stems, extended hot cues all worked.
   build.sh fails on any ocbi). Built with tools/build_sh_gcc.sh (GCC
   14.2.0); tools/usbloader_test.py good/badsum/nofile PASS on the shipped
   main-screen snapshot. The emulator has no cache model, so the cache fix
-  itself is checked by disassembly, not by the emulator run. Next: MODS.BIN
-  as a stage-2 installer (a full pack is 46-157 KB, the buffer is 60 KB),
-  then a RAM-only rehearsal on the deck before any UPD.
+  itself is checked by disassembly, not by the emulator run.
+  Stage-2 (same day): MODS.BIN = tools/usbloader/s2.c, a 1.4 KB installer
+  that streams PIONEER/MODS/PACK.BIN (tools/usbpack.py: the UPD baker's
+  installers + theme switching run against a recording memory; records =
+  surveyed zero homes, data runs, lit pictures as expected-sum writes, arm
+  words LAST with the stock value each must still hold) straight into RAM
+  through the P2 alias, purging lines before/after, I-cache invalidated
+  before the arms; the arms are written only after the whole file summed
+  right. tools/usbpack_test.py: full pack (overview, versions, pads,
+  centre, phase meter, 8 hot cues, stems, UTILITY, 8 themes + 1 lit) on
+  the emulated deck; PERFORM + theme push work live. Not yet: key shift
+  (needs the hot DSP patch), FLAC/Opus (a second file, same mechanism), the
+  pack builder in the Studio, the RAM-only rehearsal on the deck, the UPD
+  with the loader as a permanent_build extra.
 - The new 3-mode app (cable / USB stick / firmware UPD).
 - Bug list proven on the deck: FLAC load freeze, key shift right-channel
   noise on AIFF, BJ 32/64, lit-button theme stripes (+ light mode, 8 hot

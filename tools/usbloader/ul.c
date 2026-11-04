@@ -10,7 +10,8 @@
  * entry_off, u32 sum (32-bit sum of payload bytes), u32 rsv[3]} + len
  * bytes of position-independent SH code. The payload is read into UL_PAY,
  * checked, and called through the uncached P2 alias (no I-cache state can
- * be stale) with r4 = &ul_state. The operand cache is copy-back on the
+ * be stale) with r4 = &ul_state (which carries the caller's drive, open
+ * mode and ctx, so a stage-2 payload can open more files). The operand cache is copy-back on the
  * deck (CCR 0x105), so the buffer is PURGED (ocbp = write back dirty lines
  * + invalidate) before the read and again after it: before, so no old line
  * can be written back over DMA data later; after, so data the stack copied
@@ -49,6 +50,9 @@ struct ul_state {
     u32 tries, loads; /* attempts / successful payload calls */
     u32 len, sum;     /* last payload */
     u32 done;         /* 1 = a payload ran this boot (one-shot) */
+    u32 drive;        /* the mounting caller's drive letter (UTF-16) */
+    u32 mode, ctx;    /* its open mode + context: a payload opens more
+                         files with STOCK_OPEN(path, mode, ctx) */
 } ul_state = { 0x54534C55 };
 
 static const u16 MODPATH[] = {'C', ':', '/', 'P', 'I', 'O', 'N', 'E', 'E', 'R',
@@ -80,6 +84,9 @@ static void load(const u16 *path, const void *mode, void *ctx)
     for (u32 i = 0; i < sizeof MODPATH / 2; i++) p[i] = MODPATH[i];
     if (path && path[0]) p[0] = path[0];          /* the caller's drive */
     ul_state.tries++;
+    ul_state.drive = p[0];
+    ul_state.mode = (u32)mode;
+    ul_state.ctx = (u32)ctx;
     void *h = STOCK_OPEN(p, mode, ctx);
     if (!h) { ul_state.status = ST_NOFILE; return; }
     if (!usb_handle(h)) { ul_state.status = ST_BADDEV; STOCK_CLOSE(h, ctx); return; }

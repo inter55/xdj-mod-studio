@@ -1,3 +1,25 @@
+# XDJ Mod Studio v0.99.5 (XDJ-700, firmware 1.15)
+
+Follow-up to 0.99.4: window sizes and the Activity log. Same requirements
+as 0.99 (your own XDJ-700 v1.15 update file; Apple Silicon Mac on macOS
+14+, or the Windows zip). Mac: see the Gatekeeper note under 0.99.1 below.
+
+## Fixed in 0.99.5
+
+- **Text disappeared in a narrower window.** "How it works", the Home
+  setup checks, the mods list and the emulator panel cut their text to
+  "…"; the tab bar wrapped its labels onto two lines; the Track Builder
+  filter chips broke mid-word and the track list squeezed titles to
+  nothing. Text now wraps, the tab bar stays on one line (the brand
+  name and "(beta)" give way first), chips wrap as whole chips, and the
+  track list scrolls sideways instead of crushing its columns.
+- **Details in a running job closed by itself.** The Activity card is
+  redrawn every second while a job runs, and that snapped the Details
+  log shut. It stays open now, keeps its scroll position, and shows the
+  last 40 lines (was 14) in a taller box.
+
+---
+
 # XDJ Mod Studio v0.99.4 (XDJ-700, firmware 1.15)
 
 Follow-up to 0.99.3: saved themes. Same requirements as 0.99 (your own

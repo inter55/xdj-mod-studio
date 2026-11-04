@@ -37,9 +37,12 @@ h2 { font-size: 13px; font-weight: 650; margin: 0 0 10px; }
 .grow { flex: 1; min-width: 0; }
 
 .bar { background-image: linear-gradient(180deg, #1c1e24, #14161a) !important; box-shadow: inset 0 -1px 0 #000, 0 1px 0 #ffffff08; display: flex; align-items: center; height: 52px; padding: 0 16px; flex: none; border-bottom: 1px solid var(--line); background: var(--panel); gap: 16px; }
-.brand { display: flex; align-items: center; gap: 9px; font-weight: 650; letter-spacing: -.01em; width: 190px; }
+.brand { display: flex; align-items: center; gap: 9px; font-weight: 650; letter-spacing: -.01em; width: 190px; white-space: nowrap; }
 .tabs { display: flex; gap: 2px; align-self: stretch; }
-.tabs button { border: 0; background: none; padding: 0 14px; cursor: pointer; color: var(--dim); font-weight: 560; position: relative; }
+.tabs button { border: 0; background: none; padding: 0 14px; cursor: pointer; color: var(--dim); font-weight: 560; position: relative; white-space: nowrap; }
+/* narrow window: the bar stays one line (labels never wrap onto two) */
+@media (max-width: 1040px) { .brand { width: auto; margin-right: 6px; } .tabs button { padding: 0 9px; } .bar { gap: 10px; } }
+@media (max-width: 860px) { .tabs button .faint { display: none; } .brand span { display: none; } #decktxt { display: none; } }
 .tabs button:hover { color: var(--text); }
 .tabs button[aria-selected=true] { color: var(--text); }
 .tabs button[aria-selected=true]::after { content: ""; position: absolute; left: 12px; right: 12px; bottom: -1px; height: 2px; background: var(--blue); border-radius: 2px 2px 0 0; box-shadow: 0 0 12px 1px #3d8bffaa; }
@@ -62,7 +65,7 @@ h2 { font-size: 13px; font-weight: 650; margin: 0 0 10px; }
 select, .field { background: var(--raise); border: 1px solid var(--line2); border-radius: 7px; padding: 6px 9px; color: var(--text); max-width: 100%; }
 .field { width: 100%; }
 .seg { display: inline-flex; background: var(--raise); border: 1px solid var(--line); border-radius: 8px; padding: 2px; gap: 2px; }
-.seg button { border: 0; background: none; padding: 4px 12px; border-radius: 6px; cursor: pointer; color: var(--dim); font-weight: 560; }
+.seg button { border: 0; background: none; padding: 4px 12px; border-radius: 6px; cursor: pointer; color: var(--dim); font-weight: 560; white-space: nowrap; }
 .seg button[aria-pressed=true] { background: var(--raise2); color: var(--text); box-shadow: 0 0 0 1px var(--line2); }
 input[type=checkbox] { accent-color: var(--blue); width: 15px; height: 15px; margin: 0; }
 input[type=range] { width: 100%; accent-color: var(--blue); }
@@ -96,7 +99,7 @@ main { flex: 1; min-height: 0; position: relative; }
 .modrow { display: flex; align-items: center; gap: 12px; padding: 11px 0; border-top: 1px solid var(--line); }
 .modrow:first-child { border-top: 0; }
 .modrow b { font-weight: 600; width: 128px; flex: none; }
-.modrow .d { color: var(--dim); flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.modrow .d { color: var(--dim); flex: 1; min-width: 0; overflow-wrap: anywhere; }
 .modrow .d.warn { color: var(--amber); }
 .modrow.click { cursor: pointer; border-radius: 8px; }
 .modrow.click:hover { background: #ffffff06; }
@@ -131,7 +134,7 @@ main { flex: 1; min-height: 0; position: relative; }
 .chk { display: flex; align-items: center; gap: 12px; padding: 11px 0; border-top: 1px solid var(--line); }
 .chk:first-child { border-top: 0; }
 .chk b { width: 130px; font-weight: 600; flex: none; }
-.chk span.d { color: var(--dim); flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.chk span.d { color: var(--dim); flex: 1; min-width: 0; overflow-wrap: anywhere; }
 
 /* Mods (the mod builder) */
 #p-mods { flex-direction: column; }
@@ -166,7 +169,9 @@ main { flex: 1; min-height: 0; position: relative; }
 .pmsg:not([hidden]) { display: flex; }
 .actionbar { flex: none; display: flex; align-items: center; gap: 12px; padding: 12px 16px; border-top: 1px solid var(--line); background: var(--panel); }
 .kv { display: grid; grid-template-columns: auto 1fr; gap: 4px 14px; }
-.kv dt { color: var(--dim); } .kv dd { margin: 0; text-align: right; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+/* values wrap instead of vanishing behind an ellipsis when the window is narrow */
+.kv dt { color: var(--dim); } .kv dd { margin: 0; text-align: right; min-width: 0; overflow-wrap: anywhere; }
+.kv.wrap { grid-template-columns: 92px 1fr; } .kv.wrap dd { text-align: left; line-height: 1.45; }
 
 #p-emu { padding: 16px; gap: 16px; }
 .stage { flex: 1; min-width: 0; position: relative; display: flex; align-items: center; justify-content: center; background: #0a0b0d; border: 1px solid var(--line); border-radius: var(--r); overflow: hidden; }
@@ -183,7 +188,8 @@ kbd { font: 11px var(--mono); background: var(--raise2); border: 1px solid var(-
 .libhead { display: flex; align-items: baseline; gap: 12px; margin-bottom: 10px; }
 .chips { display: flex; gap: 6px; align-items: center; margin-bottom: 8px; }
 .list { flex: 1; overflow: auto; border-top: 1px solid var(--line); }
-.tr { display: grid; grid-template-columns: 24px minmax(0, 2.2fr) minmax(0, 1.4fr) 62px 52px 104px 84px; gap: 10px; align-items: center; padding: 6px 8px; border-radius: 6px; }
+.tr { display: grid; grid-template-columns: 24px minmax(0, 2.2fr) minmax(0, 1.4fr) 62px 52px 104px 84px; gap: 10px; align-items: center; padding: 6px 8px; border-radius: 6px; min-width: 560px; }
+.chips { flex-wrap: wrap; row-gap: 8px; }
 .tr.h { color: var(--faint); font-size: 11.5px; position: sticky; top: 0; background: var(--panel); z-index: 1; }
 .tr:not(.h):hover { background: var(--raise); }
 .tr.sel { background: var(--raise2); box-shadow: inset 2px 0 0 var(--blue); }
@@ -255,7 +261,7 @@ code { background: var(--raise); padding: 1px 6px; border-radius: 5px; font: 12p
 @media (prefers-reduced-motion: reduce) { .pb.ind i { animation: none; } }
 .job details { margin-top: 8px; }
 .job summary { cursor: pointer; color: var(--faint); font-size: 12px; }
-.job pre { margin: 6px 0 0; font: 11px/1.45 var(--mono); color: var(--dim); white-space: pre-wrap; max-height: 140px; overflow: auto; user-select: text; }
+.job pre { margin: 6px 0 0; font: 11px/1.45 var(--mono); color: var(--dim); white-space: pre-wrap; max-height: 240px; overflow: auto; user-select: text; -webkit-user-select: text; }
 dialog { background: var(--panel); color: var(--text); border: 1px solid var(--line2); border-radius: 12px; padding: 20px; width: min(460px, calc(100vw - 32px)); }
 dialog::backdrop { background: #000a; }
 dialog h2 { font-size: 16px; margin-bottom: 6px; }
@@ -431,7 +437,7 @@ dialog h2 { font-size: 16px; margin-bottom: 6px; }
       </div>
       <div class="panel pad">
         <h2>How it works</h2>
-        <dl class="kv small" style="margin:0">
+        <dl class="kv small wrap" style="margin:0">
           <dt>Safe?</dt><dd>Nothing is flashed: mods load into the deck's memory (power-cycle = stock), every write is verified and it stops at the first surprise. Track Builder does write to your USB stick, keeping backups; the Permanent (UPD) tab is the one exception that makes a file to flash.</dd>
           <dt>Undo</dt><dd>Power-cycle the deck. That's it.</dd>
           <dt>After install</dt><dd>Hold MENU › UTILITY and scroll to the end: MODS, WAVEFORM COLOR, VINYL BRAKE LENGTH (0.5×–15×), HOT CUE GATE and THEME — push, turn, push to change, like any stock setting. If the colours or phase meter ever look gone: check WAVEFORM COLOR is not BLUE and MODS is ON there.</dd>
@@ -1390,11 +1396,26 @@ function jobCard(j) {
     note = note || 'Finished';
     meta = `took ${Math.floor(el / 60)} min ${Math.floor(el % 60)} s`;
   }
-  const log = (j.log || []).slice(-14).join('\n');
-  return `<div class="job"><div class="t"><b>${esc(j.title)}</b><span class="s ${j.state}">${j.state}</span></div>
+  const log = (j.log || []).slice(-40).join('\n');
+  // the card is re-rendered every second while a job runs: keep Details
+  // open if the user opened it (JOB_OPEN), else it snapped shut at once
+  const open = JOB_OPEN.has(j.id) ? ' open' : '';
+  return `<div class="job" data-id="${j.id}"><div class="t"><b>${esc(j.title)}</b><span class="s ${j.state}">${j.state}</span></div>
     ${note ? `<div class="note">${esc(note)}</div>` : ''}${bar}<div class="meta">${meta}</div>
-    ${log ? `<details><summary>Details</summary><pre>${esc(log)}</pre></details>` : ''}</div>`;
+    ${log ? `<details${open}><summary>Details</summary><pre>${esc(log)}</pre></details>` : ''}</div>`;
 }
+const JOB_OPEN = new Set();
+// <details> toggle does not bubble: listen in the capture phase on the containers
+for (const id of ['jobs', 'dprog']) {
+  const el = $('#' + id);
+  if (el) el.addEventListener('toggle', e => {
+    const card = e.target.closest('.job'); if (!card) return;
+    const jid = +card.dataset.id;
+    if (e.target.open) JOB_OPEN.add(jid); else JOB_OPEN.delete(jid);
+  }, true);
+}
+// replace a card's HTML only when it changed, so an open log keeps its scroll position
+function renderJobs(el, html) { if (el.dataset.html !== html) { el.dataset.html = html; el.innerHTML = html; } }
 let polling = false;
 function watch() { $('#act').classList.add('on'); if (!polling) poll(); }
 $('#dminst').onclick = async () => {
@@ -1428,9 +1449,9 @@ document.addEventListener('click', e => { if (e.target.closest('.creinst')) rein
 async function poll() {
   polling = true;
   const js = await api('/api/jobs') || [];
-  $('#jobs').innerHTML = js.length ? js.slice(0, 8).map(jobCard).join('') : '<div class="empty">Nothing has run yet.</div>';
+  renderJobs($('#jobs'), js.length ? js.slice(0, 8).map(jobCard).join('') : '<div class="empty">Nothing has run yet.</div>');
   const inst = js.find(j => j.title.startsWith('Install mods'));
-  $('#dprog').innerHTML = inst ? jobCard(inst) : '';
+  renderJobs($('#dprog'), inst ? jobCard(inst) : '');
   const running = js.some(j => j.state === 'running');
   $('#actdot').hidden = !running; $('#actdot').className = 'dot run';
   if (running) setTimeout(poll, 1000); else { polling = false; if (LIB.loaded) load(); }

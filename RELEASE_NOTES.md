@@ -44,6 +44,14 @@
 
 ## Fixed
 
+- **Write to USB stick in the packaged app.** The app was built without the
+  USB-stick loader files, so the button failed with "file not found"
+  outside a developer checkout. They ship in the app now (proven: the
+  installed app wrote MODS.BIN + PACK.BIN and read them back).
+- **Building the app on a Mac with the SH compiler.** The build stopped
+  when it tried to rebuild the FLAC-only decoder or key shift without
+  their third-party source / DSP compiler; it now ships the committed
+  prebuilt copies of those two (byte-identical) instead.
 - Track Builder in a narrow window: the library now sits above the track
   panel instead of squeezing both side by side (one visible row, tabs past
   the edge, the stems hint one word per line, a clipped Make stems button).

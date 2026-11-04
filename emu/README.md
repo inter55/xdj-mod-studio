@@ -106,5 +106,6 @@ initialised, so it is not the USB model; its source is still being traced.
 
 The emulator ships inside **XDJ Mod Studio** (Emulator tab): the same
 front-end (`emu/ui.py`), run headless by `studio/emuhost.py` and streamed
-to the tab. Build it with `sh tools/build_studio.sh`. `python -m emu.main`
+to the tab. Build it with `PUBLIC=1 sh tools/build_studio.sh` (see the
+main README, "For developers"). `python -m emu.main`
 still opens the standalone window for emulator development.

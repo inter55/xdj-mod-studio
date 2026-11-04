@@ -84,7 +84,14 @@ else
   .venv/bin/python -c "import sys;sys.path[:0]=['tools'];import shbuild;print('staged', len(shbuild.stage_prebuilt('.', force=True)), 'prebuilt files')"
 fi
 # FLAC-only decoder build (Studio installs it unless the stick has .opus)
-[ "$SHCC" = 1 ] && VF_OPUS=0 VF_OUT="$PWD/build/xflac_flac" sh tools/xflac/build_vfile.sh >/dev/null
+# rebuilt only when the third-party decoder source is here (work/drflac,
+# work/opus: not in the repo); else the committed prebuilt/deck copy
+if [ "$SHCC" = 1 ] && [ -f work/drflac/dr_flac.h ]; then
+  VF_OPUS=0 VF_OUT="$PWD/build/xflac_flac" sh tools/xflac/build_vfile.sh >/dev/null
+elif [ ! -f build/xflac_flac/vfile.bin ]; then
+  mkdir -p build/xflac_flac
+  cp prebuilt/deck/xflac_flac/vfile.bin prebuilt/deck/xflac_flac/vfile.syms build/xflac_flac/
+fi
 mkdir -p "$REPO/build/xflac_flac"
 cp build/xflac_flac/vfile.bin build/xflac_flac/vfile.syms "$REPO/build/xflac_flac/"
 # UTILITY mod rows (our C)
@@ -122,7 +129,15 @@ mkdir -p "$REPO/build/xflac"
 cp build/xflac/vfile.bin build/xflac/vfile.syms "$REPO/build/xflac/"
 # live stems mixer + live key shift (our C; the deck installers read these)
 # -- 2026-10-18: were missing, so Studio's stems/key-shift deck steps failed
-[ "$SHCC" = 1 ] && sh tools/keyshift_dsp/build_ksh.sh >/dev/null
+# (its DSP half needs the C6x compiler, work/tic6x-tools, or a built
+# tools/keyshift_dsp/ks.bin; without both the prebuilt/deck copies ship)
+if [ "$SHCC" = 1 ] && { [ -x work/tic6x-tools/bin/tic6x-elf-gcc ] || [ -f tools/keyshift_dsp/ks.bin ]; }; then
+  sh tools/keyshift_dsp/build_ksh.sh >/dev/null
+else
+  for f in stems/sm keyshift/ksh keyshift/ks; do
+    [ -f build/$f.bin ] || { mkdir -p build/${f%/*}; cp prebuilt/deck/$f.bin prebuilt/deck/$f.syms build/${f%/*}/; }
+  done
+fi
 mkdir -p "$REPO/build/stems" "$REPO/build/keyshift"
 cp build/stems/sm.bin build/stems/sm.syms "$REPO/build/stems/"
 cp build/keyshift/ksh.bin build/keyshift/ksh.syms build/keyshift/ks.bin build/keyshift/ks.syms "$REPO/build/keyshift/"
@@ -130,6 +145,15 @@ cp build/keyshift/ksh.bin build/keyshift/ksh.syms build/keyshift/ks.bin build/ke
 [ "$SHCC" = 1 ] && .venv/bin/python -c "import sys;sys.path[:0]=['.','tools'];import rgb_detail as R;R.cw_build()"
 mkdir -p "$REPO/build/centre"
 cp build/centre/cw.bin build/centre/cw.syms "$REPO/build/centre/"
+# USB-stick loader (our C): stage 1 for the deck install, stage 2 =
+# MODS.BIN the Studio's "Write to USB stick" puts on the stick
+if [ "$SHCC" = 1 ]; then
+  sh tools/usbloader/build.sh >/dev/null && sh tools/usbloader/build_s2.sh >/dev/null
+elif [ ! -f build/usbloader/s2.bin ]; then
+  mkdir -p build/usbloader && cp prebuilt/deck/usbloader/* build/usbloader/
+fi
+mkdir -p "$REPO/build/usbloader"
+cp build/usbloader/ul.bin build/usbloader/ul.syms build/usbloader/s2.bin build/usbloader/s2.syms "$REPO/build/usbloader/"
 cp TESTER_README.md "$REPO/" 2>/dev/null || true
 if [ "$PUBLIC" != 1 ]; then   # private tester build: firmware baked in
   cp work/MAIN.img "$REPO/work/"

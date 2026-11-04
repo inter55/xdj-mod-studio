@@ -310,7 +310,8 @@ overview, beat jump, key shift, stems, extended hot cues all worked.
 - Studio "Write to USB stick" (2026-11-04): Mods page button -> /api/stick/
   write -> j_stick_write -> tools/usbpack.py --stick (picks: mode +
   colours, --no-pads, --no-themes, --flac opus|flac); writes MODS.BIN (the
-  prebuilt stage-2, prebuilt/deck/usbloader) + PACK.BIN into PIONEER/MODS,
+  stage-2, build/usbloader, else prebuilt/deck/usbloader) + PACK.BIN into
+  PIONEER/MODS,
   read back and compared. usbpack_test.py stick (STICKDIR=) installs from
   the written files. Still needed before it is useful: the stage-1 loader
   on the deck (RAM-only rehearsal over the cable, then a permanent_build
@@ -324,6 +325,15 @@ overview, beat jump, key shift, stems, extended hot cues all worked.
   with MODS.BIN + the marker PACK.BIN -> --check-marker PASS; the Studio's
   real pack -> use the mods; power cycle = stock. Proven on the mock deck
   (tools/mock) against the emulator; not yet on hardware.
+  App build (2026-11-04): tools/build_studio.sh now ships build/usbloader
+  (ul + s2; the packaged app had no stage-2, so "Write to USB stick" only
+  worked from a checkout), and with work/sh-tools present it no longer
+  stops on modules it cannot rebuild here: xflac_flac needs work/drflac,
+  keyshift needs work/tic6x-tools -- both fall back to prebuilt/deck.
+  Proven: PUBLIC=1 build installed in /Applications, its bundled
+  interpreter wrote a stick folder (MODS.BIN 1,476 B, PACK.BIN 193,448 B,
+  read back). Lesson: a new deck module needs a line in build_studio.sh's
+  copy list, or the packaged app silently lacks it.
 - The new 3-mode app (cable / USB stick / firmware UPD).
 - Bug list proven on the deck: FLAC load freeze, key shift right-channel
   noise on AIFF, BJ 32/64, lit-button theme stripes (+ light mode, 8 hot

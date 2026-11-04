@@ -143,6 +143,18 @@ that must pass before it touches hardware, for example:
 .venv/bin/python tools/sh4test.py
 ```
 
+Build the Mac app with `PUBLIC=1 sh tools/build_studio.sh` (result:
+`dist/public/XDJ Mod Studio.app`; the user brings the firmware on first
+run). Without `PUBLIC=1` it is the private tester build, which bakes in
+`studio/assets/` and `emu/assets/` from a `--dev` firmware setup. With the
+SH compiler in `work/sh-tools` every deck module is rebuilt from source;
+modules whose other inputs are missing here (the FLAC-only decoder needs
+`work/drflac`, key shift needs the C6x compiler `work/tic6x-tools`) ship
+their committed `prebuilt/deck/` copies instead. Install it with
+`ditto --noextattr --norsrc` (Finder metadata on Desktop files fails the
+strict signature check), and never write files into the installed bundle:
+that breaks its signature.
+
 ### Layout
 
 | Path | What |

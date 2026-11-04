@@ -15,8 +15,17 @@ mount it, then check
     recolours the screen and comes back to stock
   * negative: a pack whose last arm expects the wrong stock value installs
     its data but arms NOTHING (status ARMSTOCK)
+  * flac: the pack also carries the FLAC + Opus layer; the same stick holds
+    generated FLAC and Opus files; after the install the deck lists them
+    with their durations (the stock WAV parser read the layer's header),
+    opens each through the layer (vf_stats) and streams the Opus. Known
+    (2026-11-04, not the pack: the same with flac_apply's direct install,
+    tools/vfile_emu_test.py, on the shipped main-screen snapshot): loading
+    a FLAC from folder view ends in E-8302 (300E) after the deck's tail
+    probe at EOF, while the Opus loads; the old emu_realusb snapshot
+    loaded FLACs. Open item for the deck / that snapshot.
 Screenshots: screenshots/usbpack/.
-Usage: .venv/bin/python tools/usbpack_test.py [good|badarm|all]
+Usage: .venv/bin/python tools/usbpack_test.py [good|badarm|flac|all]
 """
 import os
 import shutil
@@ -51,9 +60,21 @@ def s2syms():
     return s
 
 
-def make_stick(pack):
+def make_stick(pack, audio=False):
     d = tempfile.mkdtemp(prefix="packstick_")
     os.makedirs(os.path.join(d, "PIONEER", "MODS"))
+    if audio:                      # Contents/FlacTest/{a.flac, b.opus}: sines
+        import subprocess
+        f = os.path.join(d, "Contents", "FlacTest")
+        os.makedirs(f)
+        for name, src, rate, codec in (
+                ("a.flac", "sine=frequency=440:duration=8", "44100", ["-c:a", "flac"]),
+                ("b.opus", "sine=frequency=440:duration=8", "48000",
+                 ["-c:a", "libopus", "-b:a", "96k"]),
+                ("c.flac", "anoisesrc=d=8:c=pink:a=0.5", "44100", ["-c:a", "flac"])):
+            subprocess.run(["ffmpeg", "-v", "error", "-y", "-f", "lavfi", "-i", src,
+                            "-ac", "2", "-ar", rate] + codec + [os.path.join(f, name)],
+                           check=True)
     open(os.path.join(d, "PIONEER", "MYSETTING.DAT"), "wb").write(b"\0" * 160)
     s2 = open(os.path.join(OUT, "s2.bin"), "rb").read()
     open(os.path.join(d, "PIONEER", "MODS", "MODS.BIN"), "wb").write(UT.modsbin(s2))
@@ -100,13 +121,100 @@ def verify(mem, recs, log, live=()):
     return bad
 
 
+def flac_loads(m, stick, log):
+    """browse to Contents/FlacTest, load a.flac then b.opus through the
+    installed layer (vfile_emu_test's row seek by image)"""
+    import vfile_emu_test as VT
+    from ghosttap_emu import fb_png
+    mem = m.mem
+    s = PB_syms("build/xflac/vfile.syms")
+    st = lambda: [mem.r32(s["vf_stats"] + 4 * i) for i in range(7)]
+    ok = True
+
+    def press(k, hold=15_000_000, after=60_000_000):
+        m.mem.dev.panel_frame = VT.panl.build_frame(keys=[k])
+        m.cpu.run(limit=hold)
+        m.mem.dev.panel_frame = VT.panl.build_frame()
+        m.cpu.run(limit=after)
+
+    def browse_open():
+        for _ in range(2):
+            press("Browse")
+            fb_png(m, f"{SHOTS}/_band.png")
+            if VT.highlighted(f"{SHOTS}/_band.png") is not None:
+                return True
+        return False
+
+    def browse_to(band, tag):
+        if not browse_open():
+            log("[flac] browse screen did not open")
+            return None
+        mem.w16(VT.ROT, (mem.r16(VT.ROT) + 1) & 0xFFFF)
+        m.cpu.run(limit=15_000_000)
+        for _ in range(3):                          # [FOLDER] -> Contents -> FlacTest
+            VT.key(m, "RotaryPush", 30_000_000)
+        for _ in range(6):
+            m.cpu.run(limit=40_000_000)
+            fb_png(m, f"{SHOTS}/_band.png")
+            b = VT.highlighted(f"{SHOTS}/_band.png")
+            if b is None or b == band:
+                break
+            mem.w16(VT.ROT, (mem.r16(VT.ROT) + 1) & 0xFFFF)
+            m.cpu.run(limit=20_000_000)
+        fb_png(m, f"{SHOTS}/flac_{tag}_list.png")
+        return b
+
+    OPS = {1: "read", 2: "seek", 3: "tell", 4: "eof", 5: "size", 6: "close", 7: "dread"}
+
+    def oplog():
+        n = mem.r32(s["vf_logi"])
+        for k in range(max(0, n - 24), n):
+            e = [mem.r32(s["vf_log"] + ((k % 64) * 5 + j) * 4) for j in range(5)]
+            log(f"      {OPS.get(e[0], e[0])}: fp {e[1]:#x} a {e[2]:#x} b {e[3]:#x} -> {e[4]:#x}")
+
+    for band, tag, idx in ((0, "a_flac", 1), (1, "b_opus", 4), (2, "c_flac", 1)):
+        before = st()
+        b = browse_to(band, tag)
+        if b is None and tag == "a_flac":
+            # the deck sorts files into types when the stick mounts; if that
+            # ran before the type patch, a re-insert lists the FLAC
+            log("[flac] no row: re-inserting the stick (types sorted at mount)")
+            press("Browse")
+            mount(m, stick)
+            b = browse_to(band, tag)
+        VT.key(m, "RotaryPush", 120_000_000)        # load
+        for _ in range(6):                          # decoding in the emulated SH is slow
+            if mem.r32(0x0BA3C050):
+                break
+            m.cpu.run(limit=100_000_000)
+        fb_png(m, f"{SHOTS}/flac_{tag}_loaded.png")
+        after = st()
+        opened = after[idx] - before[idx]
+        log(f"[flac] {tag}: cursor band {b}, layer opens +{opened}, vreads "
+            f"+{after[2] - before[2]}, decodes +{after[3] - before[3]}, "
+            f"track length {mem.r32(0x0BA3C050)}")
+        ok &= opened > 0
+        if idx == 4:                                # Opus: the deck streams it
+            ok &= after[2] - before[2] >= 10
+        if not mem.r32(0x0BA3C050):
+            oplog()
+        VT.key(m, "Browse", 60_000_000)             # back to the main screen
+    return ok
+
+
+def PB_syms(rel):
+    import permanent_build as PB
+    return PB._syms(rel)
+
+
 def run_case(case, log=print):
     from emu import panl
     from ghosttap_emu import fb_png
     import theme_switch as TS
     import theme_switch_emu_direct as TD
     os.makedirs(SHOTS, exist_ok=True)
-    mem_, recs = UP.build_ops(names=names(), log=lambda *a: None)
+    mem_, recs = UP.build_ops(names=names(), log=lambda *a: None,
+                              flac="opus" if case == "flac" else None)
     if case == "badarm":
         d, l, f, e, x = recs[-1]
         recs = recs[:-1] + [(d, l, f, e ^ 0x10, x)]
@@ -122,7 +230,7 @@ def run_case(case, log=print):
     for i, b in enumerate(img):
         mem.w8(base + i, b)
     mem.w32(UT.POOL, s["ul_open"])
-    stick = make_stick(pack)
+    stick = make_stick(pack, audio=(case == "flac"))
     mount(m, stick)
     ul = {k: mem.r32(s["ul_state"] + 4 * i) for i, k in enumerate(
         ["magic", "calls", "mark", "status", "tries", "loads", "len", "sum", "done",
@@ -175,6 +283,11 @@ def run_case(case, log=print):
     m.cpu.run(limit=15_000_000)
     dev.panel_frame = panl.build_frame()
     m.cpu.run(limit=60_000_000)
+    if case == "flac":
+        ok &= flac_loads(m, stick, log)
+        shutil.rmtree(stick, ignore_errors=True)
+        log(f"[{case}] {'PASS' if ok else 'FAIL'}")
+        return ok
     if case != "good":
         shutil.rmtree(stick, ignore_errors=True)
         log(f"[{case}] {'PASS' if ok else 'FAIL'}")
@@ -242,7 +355,7 @@ def run_case(case, log=print):
 
 def main():
     arg = sys.argv[1] if len(sys.argv) > 1 else "all"
-    cases = ["good", "badarm"] if arg == "all" else [arg]
+    cases = ["good", "badarm", "flac"] if arg == "all" else [arg]
     ok = all([run_case(c) for c in cases])
     print("RESULT:", "PASS" if ok else "FAIL")
     return 0 if ok else 1

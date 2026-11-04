@@ -31,6 +31,7 @@ sys.path[:0] = [".", "tools", "mods"]
 import permanent_build as PB            # noqa: E402
 
 F_ZERO, F_SURVEY, F_EXPSUM, F_ARM = 1, 2, 4, 8
+FLAC_DIRS = {"opus": "build/xflac", "flac": "build/xflac_flac"}   # FLAC+Opus / FLAC only
 MAGIC = 0x314B5058                      # "XPK1"
 EXTRAS = ("centre", "phasemeter", "hotcue8", "stems")   # keyshift: hot patch, not yet
 
@@ -46,6 +47,9 @@ def arm_sites():
          RD.INSN2 & ~3, RD.ROWINC2[0] & ~3, VR.HOOK, PP.HOOK_TOUCH, PP.HOOK_BLIT,
          U.COUNT, PB.STEMS_DIRECT, TS.TS_BASE}
     s.update(U.POOLS)
+    import flac_apply as FA
+    s.update(FA.SLOTS.values())
+    s.update(a & ~3 for a in FA.TYPE_PATCH)
     return s
 
 
@@ -109,7 +113,42 @@ def stock_image():
     return FW.decode_block1(main)[2]
 
 
-def build_ops(mode="rgb", names=None, extras=EXTRAS, log=print):
+def flac_ops(mem, kind, log):
+    """FLAC (+ Ogg Opus) playback: tools/xflac vfile layer, the same steps
+    as flac_apply.py: image + 230 KB work area (surveyed), the two chain
+    words = whatever is live in the read slots (stems / versions / stock),
+    "JPEG" -> "OPUS" in the extension table while it still reads stock,
+    then the arms: five plain slots, the type halfwords, the direct read
+    slot, the read hook last"""
+    import flac_apply as FA
+    import vredirect as VR
+    d = FLAC_DIRS[kind]
+    img = PB._blob(f"{d}/vfile.bin")
+    s = PB._syms(f"{d}/vfile.syms")
+    base, end = s["vf_entry"], (s["end"] + 3) & ~3
+    mem.region(base, end, f"FLAC{'+Opus' if kind == 'opus' else ''} layer + work area")
+    mem.write(base, img)
+    mem.w32(s["vf_read_prev"], mem.r32(VR.HOOK))
+    mem.w32(s["vf_direct_prev"], mem.r32(PB.STEMS_DIRECT))
+    ext = {} if kind == "flac" else FA.EXT_PATCH
+    types = {a: v for a, v in FA.TYPE_PATCH.items() if kind == "opus" or a != 0x08BA9988}
+    for a, (old, new) in ext.items():
+        assert bytes(mem.r8(a + i) for i in range(4)) == old, hex(a)
+        mem.expsum(a, new, old)
+    for n, a in FA.SLOTS.items():
+        if n not in ("vf_fread", "vf_fread_direct"):
+            assert mem.r32(a) == FA.STOCK[n], n
+            mem.w32(a, s[n])
+    for a, (old, new) in types.items():
+        assert mem.r16(a) == old, hex(a)
+        mem.w16(a, new)
+    mem.w32(FA.SLOTS["vf_fread_direct"], s["vf_fread_direct"])
+    mem.w32(FA.SLOTS["vf_fread"], s["vf_fread"])
+    log(f"FLAC{' + Opus' if kind == 'opus' else ''} playback ({base:#x}, {len(img):,} B, "
+        f"chains read {mem.r32(s['vf_read_prev']):#x} / direct {mem.r32(s['vf_direct_prev']):#x})")
+
+
+def build_ops(mode="rgb", names=None, extras=EXTRAS, log=print, flac=None):
     """-> (mem, records) where records = [(dst, len, flags, expect, data)]"""
     from emu import fw as FW
     import rgb_overview as RO
@@ -165,6 +204,8 @@ def build_ops(mode="rgb", names=None, extras=EXTRAS, log=print):
         mem.expsum(a, pv, st)
     mem.write(MS.MSTNAME, b"OFF\0")
     mem.w32(cb, struct.unpack("<I", code[:4])[0])
+    if flac:
+        flac_ops(mem, flac, log)
     log(f"theme switching: {len(names)} themes ({', '.join(names)}), "
         f"{len(data):,} B of tables, {len(TS.lit_writes(names))} lit pictures")
     # ---- records: surveys, data (aligned, padded from the final memory), arms
@@ -233,11 +274,14 @@ def main():
     ap.add_argument("--mode", default="rgb", choices=["rgb", "3band", "blue"])
     ap.add_argument("--themes", nargs="*", default=None)
     ap.add_argument("--no-extras", action="store_true")
+    ap.add_argument("--flac", choices=["opus", "flac"], default=None,
+                    help="FLAC playback: 'opus' = FLAC + Ogg Opus (157 KB), "
+                         "'flac' = FLAC only (57 KB)")
     ap.add_argument("--out", default="build/usbloader/PACK.BIN")
     a = ap.parse_args()
     import theme_switch as TS
     names = TS.theme_names(a.themes) if a.themes else None
-    mem, recs = build_ops(a.mode, names, () if a.no_extras else EXTRAS)
+    mem, recs = build_ops(a.mode, names, () if a.no_extras else EXTRAS, flac=a.flac)
     blob = encode(recs)
     assert decode(blob) == recs
     os.makedirs(os.path.dirname(a.out) or ".", exist_ok=True)

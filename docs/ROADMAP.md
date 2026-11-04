@@ -280,10 +280,20 @@ overview, beat jump, key shift, stems, extended hot cues all worked.
   before the arms; the arms are written only after the whole file summed
   right. tools/usbpack_test.py: full pack (overview, versions, pads,
   centre, phase meter, 8 hot cues, stems, UTILITY, 8 themes + 1 lit) on
-  the emulated deck; PERFORM + theme push work live. Not yet: key shift
-  (needs the hot DSP patch), FLAC/Opus (a second file, same mechanism), the
-  pack builder in the Studio, the RAM-only rehearsal on the deck, the UPD
-  with the loader as a permanent_build extra.
+  the emulated deck; PERFORM + theme push work live.
+  FLAC/Opus (same day): usbpack.py --flac opus|flac adds the vfile layer
+  (541 KB home surveyed, 157 KB image, chain words from the live read
+  slots, JPEG->OPUS as an expected-sum write, type halfwords + six slots
+  as arms, read hooks last): 91 records, 355 KB, 30 arms. usbpack_test.py
+  flac: the deck lists generated FLAC/Opus files with their durations,
+  opens each through the layer, streams the Opus. FOUND (not the pack:
+  flac_apply's direct install does the same on the shipped main-screen
+  snapshot): loading a FLAC from folder view ends in E-8302 (300E) after
+  the deck's tail probe at EOF; Opus loads. The old emu_realusb snapshot
+  loaded FLACs -- needs that snapshot or the deck to settle.
+  Not yet: key shift (needs the hot DSP patch), the pack builder in the
+  Studio, the RAM-only rehearsal on the deck, the UPD with the loader as a
+  permanent_build extra.
 - The new 3-mode app (cable / USB stick / firmware UPD).
 - Bug list proven on the deck: FLAC load freeze, key shift right-channel
   noise on AIFF, BJ 32/64, lit-button theme stripes (+ light mode, 8 hot

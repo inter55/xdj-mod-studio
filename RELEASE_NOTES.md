@@ -2,6 +2,14 @@
 
 ## New
 
+- **Write to USB stick (Mods page).** Next to "Install on deck": builds the
+  mods pack from the same picks (waveform style and colours, PERFORM pads
+  with hot cues and stems, themes, FLAC / Opus) and writes
+  PIONEER/MODS/MODS.BIN + PACK.BIN onto your library stick in seconds
+  (tools/usbpack.py --stick). The deck installs them itself whenever the
+  stick goes in -- once its one-time loader is on the deck (a permanent
+  update, still to come); until then the folder is ignored. Live key
+  shift, brake length and the phase meter stay cable-only for now.
 - **Custom waveform: 1, 2 or 3 colours -- on the deck too.** Theme Builder ›
   Waveform › Custom › Colours 1 / 2 / 3. With 2 or 3 colours the waveform
   blends from the first colour (quiet, bottom / centre line) to the last

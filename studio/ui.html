@@ -372,11 +372,11 @@ dialog h2 { font-size: 16px; margin-bottom: 6px; }
         <span>Nothing is flashed: the mods live in the deck's memory until you switch it off. Reinstall after each power-up (the app offers it when you plug the deck in). About 15–30 minutes.</span>
         <span class="mgo">Choose mods ›</span>
       </button>
-      <button class="panel mcard" disabled>
-        <span class="mtag">Coming soon</span>
+      <button class="panel mcard" data-go="mods">
+        <span class="mtag">Early</span>
         <b>Mods file on your USB stick</b>
-        <span>Flash a small loader once; after that your rekordbox stick carries the mods. Stick in, modded: no laptop at gigs, update by copying a file.</span>
-        <span class="mgo">In the works</span>
+        <span>Your rekordbox stick carries the mods: stick in, modded, no laptop at gigs. The app writes the file now (Choose mods › Write to USB stick); the deck reads it once its one-time loader is installed — that part is still coming.</span>
+        <span class="mgo">Choose mods ›</span>
       </button>
       <button class="panel mcard" data-go="upd">
         <span class="mtag warn">Advanced</span>
@@ -441,8 +441,10 @@ dialog h2 { font-size: 16px; margin-bottom: 6px; }
         <div class="modsum" id="modsum" style="margin-bottom:12px"></div>
         <div class="row" style="flex-wrap:wrap">
           <button class="btn primary" id="deckgo" disabled>Install on deck…</button>
+          <button class="btn" id="stickgo" disabled title="Writes PIONEER/MODS/MODS.BIN + PACK.BIN onto your library stick">Write to USB stick…</button>
         </div>
         <div class="small faint" style="margin-top:8px">Plug the XDJ-700 into this Mac by USB and quit music and MIDI apps first. Takes 15–20 minutes; the log will tell you when to pull the USB stick.</div>
+        <div class="small faint" style="margin-top:6px"><b>Write to USB stick</b> puts the same mods on your library stick (PIONEER/MODS) in seconds. The deck installs them itself every time the stick goes in — once its one-time loader is on the deck (a permanent update, coming). Until then the folder is ignored; nothing can go wrong.</div>
         <div id="dprog" style="margin-top:10px"></div>
       </div>
       <div class="panel pad">
@@ -807,6 +809,7 @@ async function state() {
   const hint = $('#deckhint');
   hint.hidden = !s.deck_err; hint.textContent = s.deck_err || '';
   $('#deckgo').disabled = !s.deck || !!s.deck_multi;
+  $('#stickgo').disabled = !s.stick_ok;
   $('#ffdot').className = 'dot ' + (s.ffmpeg ? 'ok' : 'warn'); $('#ffline').textContent = s.ffmpeg ? 'ffmpeg + ffprobe are installed.' : 'ffmpeg / ffprobe missing. “Make stems” needs it (Mac: brew install ffmpeg; Windows: winget install ffmpeg).';
   $('#dminst').hidden = !!s.demucs;
   $('#dmdot').className = 'dot ' + (s.demucs ? 'ok' : 'warn'); $('#dmline').textContent = s.demucs ? 'Demucs is installed.' : 'Demucs is not installed. “Make stems” needs it.';
@@ -934,6 +937,19 @@ function renderPick() {
   $('#modsum').innerHTML = parts.map(p => `<span>${esc(p)}</span>`).join('') || '<span>nothing selected</span>';
 }
 $$('#p-mods .pick input[type=checkbox]').forEach(cb => cb.onchange = () => { PICK.touched = true; renderPick(); });
+$('#stickgo').onclick = async () => {
+  const wave = $('#pk-wave-on').checked ? (MOD.wave === 'blue' ? 'rgb' : MOD.wave) : 'blue';
+  const pads = $('#pk-pads-on').checked, themes = $('#pk-themes-on').checked;
+  const flac = $('#pk-flac-on').checked, opus = flac && !!(ST.lib_formats || {}).opus;
+  const parts = [wave === 'custom' ? 'custom colour waveforms' : wave === 'rgb' ? 'colour waveforms' : wave === '3band' ? '3-band waveforms' : 'stock waveforms'];
+  if (pads) parts.push('PERFORM pads, hot cues, stems');
+  if (themes) parts.push('themes');
+  if (flac) parts.push(opus ? 'FLAC & Opus playback' : 'FLAC playback');
+  if (await ask('Write the mods to your USB stick?',
+    `${parts.join(' · ')} → ${ST.stick}/PIONEER/MODS. Live key shift, brake length and the phase meter are cable-only for now. The deck reads this folder only once its one-time loader is installed.`, 'Write'))
+    api('/api/stick/write', {mode: wave, pads, themes, flac, opus,
+      wave_colours: wave === 'custom' ? customList() : undefined}).then(r => r && watch());
+};
 $('#deckgo').onclick = async () => {
   // the style picked in Theme Builder > Waveform (RGB / 3-Band / Custom) is
   // what goes on the deck; Blue there still means the RGB waveforms here

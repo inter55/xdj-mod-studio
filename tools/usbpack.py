@@ -19,8 +19,12 @@ LAST, in the cable installers' order. A write anywhere else is refused.
 Format (s2.c): header 32 B {"XPK1", 1, nrec, bytes, sum, 0,0,0}; records
 {u32 dst, u32 len, u32 flags, u32 expect} + data (none for ZERO).
 
-  .venv/bin/python tools/usbpack.py [--mode rgb] [--themes a b ..]
-                   [--no-extras] [--out build/usbloader/PACK.BIN]
+  .venv/bin/python tools/usbpack.py [--mode rgb|3band|blue|custom --colours ..]
+                   [--themes a b ..] [--no-pads] [--no-themes] [--no-extras]
+                   [--flac opus|flac] [--out build/usbloader/PACK.BIN]
+                   [--stick /Volumes/STICK]   # also write PIONEER/MODS/{MODS.BIN,PACK.BIN}
+The stick needs the stage-1 loader on the deck (flashed once, UPD extra)
+before the deck reads that folder; until then the files are ignored.
 """
 import argparse
 import os
@@ -155,8 +159,11 @@ def parse_colours(arg):
     return cols[:3] or None
 
 
-def build_ops(mode="rgb", names=None, extras=EXTRAS, log=print, flac=None, custom=None):
-    """-> (mem, records) where records = [(dst, len, flags, expect, data)]"""
+def build_ops(mode="rgb", names=None, extras=EXTRAS, log=print, flac=None, custom=None,
+              pads=True, themes=True):
+    """-> (mem, records) where records = [(dst, len, flags, expect, data)].
+    pads False: no PERFORM pads (and no 8 hot cues / live stems, they need
+    the pads); themes False: no theme switching."""
     from emu import fw as FW
     import rgb_overview as RO
     import perform_pads as PP
@@ -181,7 +188,9 @@ def build_ops(mode="rgb", names=None, extras=EXTRAS, log=print, flac=None, custo
     saved = PB.BAKERS["utility"]
     PB.BAKERS["utility"] = lambda mem_, log_: None
     try:
-        PB.apply_mods(mem, mode, True, True, log, tuple(e for e in extras if e != "utility"),
+        if not pads:
+            extras = tuple(e for e in extras if e not in ("hotcue8", "stems"))
+        PB.apply_mods(mem, mode, True, pads, log, tuple(e for e in extras if e != "utility"),
                       custom=custom)
     finally:
         PB.BAKERS["utility"] = saved
@@ -203,19 +212,22 @@ def build_ops(mode="rgb", names=None, extras=EXTRAS, log=print, flac=None, custo
     mem.ops.append(Op("arm", U.COUNT, struct.pack("<I", U.STOCK_N + U.NOURS), F_ARM, U.STOCK_N))
     log(f"UTILITY rows ({base:#x}; 4 table pools + RAM count 16 -> 21)")
     # theme switching: code (entry word = arm), tables, lit pictures, row text
-    names = names or TS.default_names()
-    (cb, code), (db, data) = TS.plan(names)
-    mem.region(cb, db + len(data), "theme switcher + tables")
-    mem.write(cb + 4, code[4:])
-    mem.write(db, data)
-    for a, st, pv in TS.lit_writes(names):
-        mem.expsum(a, pv, st)
-    mem.write(MS.MSTNAME, b"OFF\0")
-    mem.w32(cb, struct.unpack("<I", code[:4])[0])
+    if themes:
+        names = names or TS.default_names()
+        (cb, code), (db, data) = TS.plan(names)
+        mem.region(cb, db + len(data), "theme switcher + tables")
+        mem.write(cb + 4, code[4:])
+        mem.write(db, data)
+        for a, st, pv in TS.lit_writes(names):
+            mem.expsum(a, pv, st)
+        mem.write(MS.MSTNAME, b"OFF\0")
+        mem.w32(cb, struct.unpack("<I", code[:4])[0])
+        log(f"theme switching: {len(names)} themes ({', '.join(names)}), "
+            f"{len(data):,} B of tables, {len(TS.lit_writes(names))} lit pictures")
+    else:
+        log("theme switching: not included")
     if flac:
         flac_ops(mem, flac, log)
-    log(f"theme switching: {len(names)} themes ({', '.join(names)}), "
-        f"{len(data):,} B of tables, {len(TS.lit_writes(names))} lit pictures")
     # ---- records: surveys, data (aligned, padded from the final memory), arms
     recs = []
     for lo, hi, name in surveys:
@@ -240,6 +252,37 @@ def build_ops(mode="rgb", names=None, extras=EXTRAS, log=print, flac=None, custo
         if o.kind == "arm":
             recs.append((o.dst, 4, F_ARM, o.expect, bytes(o.data)))
     return mem, recs
+
+
+def mods_bin():
+    """MODS.BIN: the stage-2 installer (build/usbloader/s2.bin, or the
+    committed prebuilt copy) in the stage-1 loader's XMOD container"""
+    payload = PB._blob("build/usbloader/s2.bin")
+    hdr = struct.pack("<8I", 0x444F4D58, 1, len(payload), 0, sum(payload) & 0xFFFFFFFF, 0, 0, 0)
+    return hdr + payload
+
+
+def write_stick(stick, pack, log=print):
+    """PIONEER/MODS/MODS.BIN + PACK.BIN on the stick (written whole via a
+    temp name, read back and compared). -> the folder written."""
+    import hashlib
+    if not os.path.isdir(stick):
+        raise SystemExit(f"stick folder not found: {stick}")
+    d = os.path.join(stick, "PIONEER", "MODS")
+    os.makedirs(d, exist_ok=True)
+    for name, data in (("MODS.BIN", mods_bin()), ("PACK.BIN", pack)):
+        path = os.path.join(d, name)
+        tmp = path + ".tmp"
+        with open(tmp, "wb") as f:
+            f.write(data)
+            f.flush()
+            os.fsync(f.fileno())
+        os.replace(tmp, path)
+        back = open(path, "rb").read()
+        if back != data:
+            raise SystemExit(f"{name}: read back differs from what was written")
+        log(f"  {name}: {len(data):,} B, sha256 {hashlib.sha256(data).hexdigest()[:16]}")
+    return d
 
 
 def encode(recs):
@@ -288,17 +331,25 @@ def main():
                     help="FLAC playback: 'opus' = FLAC + Ogg Opus (157 KB), "
                          "'flac' = FLAC only (57 KB)")
     ap.add_argument("--out", default="build/usbloader/PACK.BIN")
+    ap.add_argument("--no-pads", action="store_true", help="no PERFORM pads (nor hot cues / stems)")
+    ap.add_argument("--no-themes", action="store_true", help="no theme switching")
+    ap.add_argument("--stick", default="",
+                    help="also write PIONEER/MODS/MODS.BIN + PACK.BIN to this stick folder")
     a = ap.parse_args()
     import theme_switch as TS
     names = TS.theme_names(a.themes) if a.themes else None
     mem, recs = build_ops(a.mode, names, () if a.no_extras else EXTRAS, flac=a.flac,
-                          custom=parse_colours(a.colours))
+                          custom=parse_colours(a.colours), pads=not a.no_pads,
+                          themes=not a.no_themes)
     blob = encode(recs)
     assert decode(blob) == recs
     os.makedirs(os.path.dirname(a.out) or ".", exist_ok=True)
     open(a.out, "wb").write(blob)
     summary(recs)
     print(f"written {a.out}: {len(blob):,} B")
+    if a.stick:
+        d = write_stick(a.stick, blob)
+        print(f"RESULT: written {d}")
 
 
 if __name__ == "__main__":

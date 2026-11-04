@@ -1693,6 +1693,39 @@ def j_deck_install(log, prog, mode, pads=True,
 UPD_ACKS = ("brick", "recovery", "power")
 
 
+def j_stick_write(log, prog, mode, pads=True, themes=True, flac=False, opus=False,
+                  colours=None):
+    """USB-stick install mode: build the mods pack (tools/usbpack.py) from
+    the same picks as the cable install and write PIONEER/MODS/MODS.BIN +
+    PACK.BIN onto the library stick. The deck reads that folder only once
+    the stage-1 loader is on it (flashed once with a permanent update);
+    until then the files do nothing. Writes files only."""
+    stick = stick_path()
+    if not stick or not os.path.isdir(stick):
+        raise RuntimeError("Choose your USB stick first (Settings > Library).")
+    try:
+        s = settings()
+        s["mods"] = {"mode": mode, "pads": bool(pads), "themes": bool(themes),
+                     "liveks": False, "phase": False, "brake": 0.0, "flac": bool(flac),
+                     "colours": list(colours or [])[:3] if mode == "custom" else None}
+        save_settings(s)
+    except Exception:
+        pass
+    args = ["tools/usbpack.py", "--mode", mode] + wave_colour_args(mode, colours)
+    if not pads:
+        args.append("--no-pads")
+    if not themes:
+        args.append("--no-themes")
+    if flac:
+        args += ["--flac", "opus" if opus else "flac"]
+    args += ["--out", os.path.join(APP_SUPPORT, "PACK.BIN"), "--stick", stick]
+    prog(0.0, "Building the mods pack", eta=60)
+    rc, txt = run_tool(log, args)
+    if rc or "RESULT: written" not in txt:
+        raise RuntimeError("pack not written -- see log")
+    prog(1.0, "Written to the stick: PIONEER/MODS/MODS.BIN + PACK.BIN")
+
+
 def j_upd_build(log, prog, upd, mode, pads, versions, banner, extras=(), colours=None):
     """PERMANENT mode: build a modded update file from the user's OWN
     official XDJ-700 v1.15 .UPD (tools/permanent_build.py), then boot it in
@@ -2256,6 +2289,14 @@ class H(BaseHTTPRequestHandler):
                                              upd, b.get("mode", "rgb"), pads,
                                              bool(b.get("versions", True)), banner,
                                              extras, b.get("wave_colours"))})
+            if p == "/api/stick/write":
+                return self.send({"job": job("Write mods to USB stick", j_stick_write,
+                                             b.get("mode", "rgb"),
+                                             bool(b.get("pads", True)),
+                                             bool(b.get("themes", True)),
+                                             bool(b.get("flac", False)),
+                                             bool(b.get("opus", False)),
+                                             b.get("wave_colours"))})
             if p == "/api/deck/install":
                 return self.send({"job": job("Install mods on deck", j_deck_install,
                                              b.get("mode", "rgb"),

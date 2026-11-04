@@ -25,7 +25,9 @@ mount it, then check
     for WAV, Opus and FLAC alike -- 2026-11-04, a wasted afternoon), so it
     is only used for the good/badarm cases.
 Screenshots: screenshots/usbpack/.
-Usage: .venv/bin/python tools/usbpack_test.py [good|badarm|flac|all]
+  * stick (STICKDIR=<folder written by usbpack.py --stick>): the files the
+    Studio's "Write to USB stick" put there install: DONE, RAM byte-exact
+Usage: .venv/bin/python tools/usbpack_test.py [good|badarm|flac|stick|all]
 """
 import os
 import shutil
@@ -226,8 +228,14 @@ def run_case(case, log=print):
     import theme_switch as TS
     import theme_switch_emu_direct as TD
     os.makedirs(SHOTS, exist_ok=True)
-    mem_, recs = UP.build_ops(names=names(), log=lambda *a: None,
-                              flac="opus" if case == "flac" else None)
+    if case == "stick":
+        sd = os.path.join(os.environ["STICKDIR"], "PIONEER", "MODS")
+        recs = UP.decode(open(os.path.join(sd, "PACK.BIN"), "rb").read())
+        assert open(os.path.join(sd, "MODS.BIN"), "rb").read() == UP.mods_bin(), "MODS.BIN differs"
+        mem_ = None
+    else:
+        mem_, recs = UP.build_ops(names=names(), log=lambda *a: None,
+                                  flac="opus" if case == "flac" else None)
     if case == "badarm":
         d, l, f, e, x = recs[-1]
         recs = recs[:-1] + [(d, l, f, e ^ 0x10, x)]
@@ -279,7 +287,11 @@ def run_case(case, log=print):
         # (byte-exactness of every record is what the badarm case proves)
         import rgb_overview as RO
         import perform_pads as PP
-        live = [(lo, hi) for lo, hi, _, _ in mem_.regions] + [(RO.CAVE, PP.PEND)]
+        live = [(RO.CAVE, PP.PEND)]
+        if mem_ is not None:
+            live += [(lo, hi) for lo, hi, _, _ in mem_.regions]
+        else:                                  # from a file: every zero home
+            live += [(d, d + l) for d, l, f, e, x in recs if f & UP.F_ZERO]
         bad = verify(mem, recs, log, live)
         log(f"[{case}] RAM vs pack outside the mods' own state: {bad} bytes differ (must be 0)")
         ok &= bad == 0
@@ -298,6 +310,10 @@ def run_case(case, log=print):
     m.cpu.run(limit=15_000_000)
     dev.panel_frame = panl.build_frame()
     m.cpu.run(limit=60_000_000)
+    if case == "stick":
+        shutil.rmtree(stick, ignore_errors=True)
+        log(f"[{case}] {'PASS' if ok else 'FAIL'}")
+        return ok
     if case == "flac":
         ok &= flac_loads(m, stick, log)
         shutil.rmtree(stick, ignore_errors=True)
@@ -371,6 +387,8 @@ def run_case(case, log=print):
 def main():
     arg = sys.argv[1] if len(sys.argv) > 1 else "all"
     cases = ["good", "badarm", "flac"] if arg == "all" else [arg]
+    if "stick" in cases and not os.environ.get("STICKDIR"):
+        sys.exit("stick case needs STICKDIR=<folder written by usbpack.py --stick>")
     ok = all([run_case(c) for c in cases])
     print("RESULT:", "PASS" if ok else "FAIL")
     return 0 if ok else 1

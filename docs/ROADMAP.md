@@ -306,7 +306,15 @@ overview, beat jump, key shift, stems, extended hot cues all worked.
   --colours, emu apply_wave(name, colours) and the Studio (settings
   wave_colours; Theme Builder style drives the cable install). Proof:
   tools/custom_wave_emu_test.py on the real-DSP snapshot. Next: the real
-  deck (cable, RAM-only), then the Studio's pack-to-stick button.
+  deck (cable, RAM-only).
+- Studio "Write to USB stick" (2026-11-04): Mods page button -> /api/stick/
+  write -> j_stick_write -> tools/usbpack.py --stick (picks: mode +
+  colours, --no-pads, --no-themes, --flac opus|flac); writes MODS.BIN (the
+  prebuilt stage-2, prebuilt/deck/usbloader) + PACK.BIN into PIONEER/MODS,
+  read back and compared. usbpack_test.py stick (STICKDIR=) installs from
+  the written files. Still needed before it is useful: the stage-1 loader
+  on the deck (RAM-only rehearsal over the cable, then a permanent_build
+  extra), and key shift / brake / phase meter in the pack.
 - The new 3-mode app (cable / USB stick / firmware UPD).
 - Bug list proven on the deck: FLAC load freeze, key shift right-channel
   noise on AIFF, BJ 32/64, lit-button theme stripes (+ light mode, 8 hot

@@ -507,7 +507,7 @@ dialog h2 { font-size: 16px; margin-bottom: 6px; }
   </div>
   <div class="actionbar">
     <button class="btn primary" id="testemu">Test in Emulator</button>
-    <span class="small dim">Applies the theme and waveform above to the emulator, then opens it.</span>
+    <span class="small dim">Applies the theme, lit buttons and waveform above to the emulator, then opens it.</span>
   </div>
 </section>
 
@@ -967,6 +967,13 @@ function customParams() {
 }
 let pscreen = 'main', pt = null, applied = null;
 const spec = () => Object.fromEntries(SL.map(k => [k, +$('#' + k).value]));
+// + the lit-button colour (saved with the theme; the deck's theme switching
+// and the emulator use it -- mods/litbuttons.py)
+const specLit = () => MOD.litOn ? {...spec(), lit: MOD.lit} : spec();
+function setLit(on, colour) {
+  MOD.litOn = on; if (colour) MOD.lit = colour;
+  try { localStorage.setItem('lit_on', on ? '1' : '0'); localStorage.setItem('lit_colour', MOD.lit); } catch (_) {}
+}
 
 function swatches() {
   const th = Object.assign({stock: {spec: null, swatch: ['#29487a', '#3b5f99']}}, ST.themes || {});
@@ -995,6 +1002,7 @@ $('#tdel').onclick = async () => {
 function usePreset() {
   const t = ((ST.themes || {})[MOD.theme] || {}).spec;
   SL.forEach(k => $('#' + k).value = t ? (t[k] ?? DEF[k]) : DEF[k]);
+  if (t) setLit(!!t.lit, t.lit);           // a saved theme brings its lit colour
   $('#tname').value = MOD.theme === 'stock' || MOD.theme === 'custom' ? '' : MOD.theme;
   preview();
 }
@@ -1012,7 +1020,7 @@ function preview() {
   segSet('litmode', MOD.litOn ? 'colour' : 'stock');
   $('#litc').hidden = !MOD.litOn; $('#litc').value = MOD.lit;
   $('#litnote').textContent = MOD.litOn
-    ? 'QUANTIZE, MASTER, SYNC, SLIP and VINYL BRAKE light up in your colour. Preview only for now: the deck and the emulator keep the stock lit colours.'
+    ? 'QUANTIZE, MASTER, SYNC, SLIP and VINYL BRAKE light up in your colour. Test in Emulator shows it; for the deck, save it with a theme (below) and install Themes: UTILITY › THEME then switches it with the theme. White and grey come out silver (the deck keeps the shading to switch exactly).'
     : 'QUANTIZE red, MASTER orange, SLIP and VINYL BRAKE in the theme colour. See them under Lit buttons in the preview.';
   $('#wcustom').hidden = MOD.wave !== 'custom';
   $('#wnote').textContent = {blue: 'Stock XDJ-700 blue waveform.', rgb: 'Each track shows its own rekordbox colours.', '3band': 'Lows in the core, mids, then highs on the outside -- on both the overview and the centre waveform.',
@@ -1052,18 +1060,21 @@ $$('#wstyle button').forEach(b => b.onclick = () => { MOD.wave = b.dataset.v; MO
   $('#' + id).oninput = e => { MOD[k] = e.target.value; try { localStorage.setItem(ls, MOD[k]); } catch (_) {} MOD.touched = true; preview(); markDirty(); });
 $$('#wncol button').forEach(b => b.onclick = () => { MOD.ncol = +b.dataset.v; try { localStorage.setItem('wave_ncol', MOD.ncol); } catch (_) {} MOD.touched = true; preview(); markDirty(); });
 $$('#pscreen button').forEach(b => b.onclick = () => { pscreen = b.dataset.v; segSet('pscreen', pscreen); preview(); });
-// lit-button colour: preview only (not sent to the emulator or the deck yet)
+// lit-button colour: saved with the theme; a change makes a saved theme "unsaved"
 const showLit = () => { if (pscreen !== 'lit') { pscreen = 'lit'; segSet('pscreen', pscreen); } };
-$$('#litmode button').forEach(b => b.onclick = () => {
-  MOD.litOn = b.dataset.v === 'colour'; try { localStorage.setItem('lit_on', MOD.litOn ? '1' : '0'); } catch (_) {}
-  showLit(); preview(); });
-$('#litc').oninput = e => { MOD.lit = e.target.value; try { localStorage.setItem('lit_colour', MOD.lit); } catch (_) {} showLit(); preview(); };
+function litChanged() {
+  const t = ((ST.themes || {})[MOD.theme] || {}).spec;
+  if (t && MOD.theme !== 'stock' && (t.lit || '') !== (MOD.litOn ? MOD.lit : '')) { MOD.theme = 'custom'; swatches(); }
+  MOD.touched = true; showLit(); preview(); markDirty();
+}
+$$('#litmode button').forEach(b => b.onclick = () => { setLit(b.dataset.v === 'colour'); litChanged(); });
+$('#litc').oninput = e => { setLit(true, e.target.value); litChanged(); };
 
 $('#tsave').onclick = async () => {
   const name = $('#tname').value.trim().toLowerCase();
   if (!/^[a-z0-9][a-z0-9-]*$/.test(name)) return toast('Name the theme with lowercase letters, numbers and dashes.', true);
   if (!ST.themes_ok) return toast('Theme engine not found. Choose the project folder in Settings.', true);
-  const r = await api('/api/theme/save', {name, spec: spec()}); if (!r) return;
+  const r = await api('/api/theme/save', {name, spec: specLit()}); if (!r) return;
   watch(); toast(`Saving “${name}”…`);
   // the save is a short job: refresh the theme list when it is done
   const t0 = Date.now();
@@ -1078,7 +1089,8 @@ $('#tsave').onclick = async () => {
 
 /* Theme Builder -> emulator hand-off */
 function draftMods() {
-  const t = MOD.theme === 'stock' ? null : {name: MOD.theme, spec: spec()};
+  const t = MOD.theme !== 'stock' ? {name: MOD.theme, spec: specLit()}
+    : MOD.litOn ? {name: 'stock', spec: {lit: MOD.lit}} : null;   // stock + lit buttons
   return {theme: t, wave: MOD.wave};
 }
 async function applyMods() {
@@ -1093,7 +1105,7 @@ function markDirty() {
   const d = draftMods(), same = applied === JSON.stringify(d);
   $('#dirty').hidden = applied === null || same;
   const wn = {blue: 'Blue', rgb: 'RGB', '3band': '3-Band', custom: 'Custom (preview only)'}[d.wave] || d.wave;
-  $('#modsline').textContent = `Theme Builder now: ${d.theme ? d.theme.name : 'stock'} · ${wn}` + (applied === null ? ' — not sent to the emulator yet' : same ? ' — in the emulator' : '');
+  $('#modsline').textContent = `Theme Builder now: ${d.theme ? d.theme.name : 'stock'}${MOD.litOn ? ' · lit ' + MOD.lit : ''} · ${wn}` + (applied === null ? ' — not sent to the emulator yet' : same ? ' — in the emulator' : '');
 }
 $('#testemu').onclick = async () => { if (await applyMods()) showTab('emu'); };
 $('#applymods').onclick = applyMods;

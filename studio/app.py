@@ -1193,18 +1193,8 @@ def screens():
     return _SCREENS
 
 
-# Lit touch buttons (firmware 1.15 block1): each button is four 72x53
-# RGB565 pictures (lit, lit+pressed, unlit, unlit+pressed); 0xF81F = clear.
-# x, y = where the deck draws it on the player screen (measured: the unlit
-# picture matches screens.npz exactly there). Found 2026-11-04 by logging
-# the 2D engine's blits while tapping each button in the emulator.
-LIT_BUTTONS = {          # name: (lit picture, x, y)
-    "quantize": (0x0826AAF0, 642, 232),     # red
-    "master": (0x088647E0, 715, 341),       # orange
-    "sync": (0x08873660, 642, 341),         # grey (no colour)
-    "slip": (0x0886BF20, 18, 403),          # blue
-    "vinyl": (0x0887E940, 18, 341),         # blue (brake mode: 0x088824E0, red)
-}
+# Lit touch buttons: addresses, positions and the colour maths live in
+# mods/litbuttons.py, shared with the deck's theme tables and the emulator.
 LIT_KEY = 0xF81F
 _LIT = None
 
@@ -1214,81 +1204,40 @@ def lit_sprites():
     (firmware home blk1.bin, loaded at 0x08000000); {} if it is missing."""
     global _LIT
     if _LIT is None:
+        import litbuttons as LB
         from emu import fwhome
         out = {}
         try:
             with open(fwhome.path("blk1.bin"), "rb") as f:
-                for k, (a, x, y) in LIT_BUTTONS.items():
-                    f.seek(a - 0x08000000)
-                    px = np.frombuffer(f.read(72 * 53 * 2), "<u2")
-                    if len(px) == 72 * 53:
-                        out[k] = (x, y, px.reshape(53, 72).copy())
+                for k in LB.SHOWN:
+                    a, _ap, x, y = LB.BUTTONS[k]
+                    f.seek(a - LB.IMG_BASE)
+                    px = np.frombuffer(f.read(LB.W * LB.H * 2), "<u2")
+                    if len(px) == LB.W * LB.H:
+                        out[k] = (x, y, px.reshape(LB.H, LB.W).copy())
         except OSError:
             pass
         _LIT = out
     return _LIT
 
 
-def _hsv565(px):
-    import themes as T
-    v16 = px.astype(np.uint32)
-    r = (((v16 >> 11) & 0x1F) * 255 // 31).astype(np.float32)
-    g = (((v16 >> 5) & 0x3F) * 255 // 63).astype(np.float32)
-    b = ((v16 & 0x1F) * 255 // 31).astype(np.float32)
-    return T._to_hsv(r, g, b)
-
-
 _LIT_REF = None
 
 
 def lit_ref():
-    """(saturation, brightness) median over the coloured pixels of ALL lit
-    buttons: one shared reference, so each button keeps the stock design's
-    light/dark structure (SLIP: dark face, bright stripe; VINYL BRAKE: lit
-    face) while the picked colour sets the overall hue and level."""
+    """one shared (saturation, brightness) reference for every button"""
     global _LIT_REF
     if _LIT_REF is None:
-        allpx = np.concatenate([px.ravel() for _x, _y, px in lit_sprites().values()] or
-                               [np.zeros(1, np.uint16)])
-        _h, sat, val = _hsv565(allpx)
-        col = (sat >= 0.25) & (allpx != LIT_KEY)
-        _LIT_REF = (float(np.median(sat[col])), float(np.median(val[col]))) if col.any() else (0.8, 0.5)
+        import litbuttons as LB
+        _LIT_REF = LB.reference([px for _x, _y, px in lit_sprites().values()])
     return _LIT_REF
 
 
 def lit_recolour(px, colour):
-    """One lit button's pixels (stock RGB565) -> the user's lit colour:
-    coloured pixels take the colour's hue; saturation and brightness are
-    scaled by the same factor for every button (see lit_ref), keeping the
-    shading, highlight stripe and white label. Neutrals and the clear key
-    stay as they are."""
-    import themes as T
-    v16 = px.astype(np.uint32)
-    r = (((v16 >> 11) & 0x1F) * 255 // 31).astype(np.float32)
-    g = (((v16 >> 5) & 0x3F) * 255 // 63).astype(np.float32)
-    b = ((v16 & 0x1F) * 255 // 31).astype(np.float32)
-    h, sat, val = T._to_hsv(r, g, b)
-    col = (sat >= 0.25) & (px != LIT_KEY)
-    if not col.any():
-        return px.copy()
-    c = hex565(colour)
-    tr, tg, tb = (((c >> 11) & 31) * 255 // 31, ((c >> 5) & 63) * 255 // 63, (c & 31) * 255 // 31)
-    th, ts, tv = T._to_hsv(*(np.array([x], np.float32) for x in (tr, tg, tb)))
-    rs, rv = lit_ref()
-    ns = np.clip(sat * float(ts[0]) / max(rs, 1e-3), 0, 1)
-    nv = np.clip(val * float(tv[0]) / max(rv, 1e-3), 0, 1)
-    nr, ng, nb = T._to_rgb(np.full_like(h, float(th[0])), ns, nv)
-    enc = ((nr.astype(np.uint32) >> 3) << 11) | ((ng.astype(np.uint32) >> 2) << 5) | (nb.astype(np.uint32) >> 3)
-    out = np.where(col, enc, v16)
-    # a light colour (yellow, white, light green...) under the stock white
-    # label is unreadable: the label turns dark instead
-    if (0.299 * tr + 0.587 * tg + 0.114 * tb) / 255.0 > 0.6:
-        lab = (sat < 0.25) & (val > 0.6) & (px != LIT_KEY)
-        lab[:10] = False                  # the lit stripe on top stays light
-        k = np.clip((1.0 - val) * 0.5 * 255.0, 0, 255).astype(np.uint32)
-        dark = ((k >> 3) << 11) | ((k >> 2) << 5) | (k >> 3)
-        out = np.where(lab, dark, out)
-    return out.astype(np.uint16)
+    """one lit button (stock RGB565) in the user's lit colour -- the same
+    maths as the deck's theme tables (mods/litbuttons.py)"""
+    import litbuttons as LB
+    return LB.recolour(px, colour, lit_ref())
 
 
 def preview_png(spec, screen, wave=False, wopts=None, track=None, lit=None):
@@ -1296,8 +1245,8 @@ def preview_png(spec, screen, wave=False, wopts=None, track=None, lit=None):
     stock waveform palettes with the same maths). wopts: overview style +
     colours, drawn with the deck's own overview maths on a stick track.
     screen "lit" = the player screen with every lit-able touch button lit.
-    lit = "#rrggbb": the lit buttons in that colour (preview only for now:
-    the deck keeps its stock lit colours)."""
+    lit = "#rrggbb": the lit buttons in that colour (the deck does the
+    same with a theme saved with that lit colour)."""
     import themes as T
     show_lit = screen == "lit"
     screen = "main" if show_lit else screen
@@ -1538,6 +1487,8 @@ def j_theme_save(log, prog, name, spec):
     for k in ("vivid", "lift"):
         if spec.get(k):
             args += [f"--{k}", str(spec[k])]
+    if spec.get("lit") and re.fullmatch(r"#?[0-9a-fA-F]{6}", str(spec["lit"])):
+        args += ["--lit", str(spec["lit"])]     # lit buttons (on-deck switching)
     prog(0.2, "building the theme")
     rc, _ = run_tool(log, args)
     if rc:

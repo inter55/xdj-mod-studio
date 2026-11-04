@@ -8,7 +8,10 @@ NOT YET RUN ON HARDWARE.
              deck (code, 20 KB work area, theme tables); writes
              build/themesw/survey_ok.<base> on success
   (no flag)  chunked write of code (minus the entry word) + theme tables
-             (resumable, foreign-data check), verify; then a fresh run arms:
+             (resumable, foreign-data check), verify; a theme with a lit
+             colour also needs the lit button pictures moved to their
+             private colours (only while they read stock, see
+             theme_switch.lit_private); then a fresh run arms:
              row text "OFF", LW self-test, LW entry table word (atomic).
 Needs the MY SETTINGS rows installed with the [THEME] -> ts_push code
 (tools/mysettings_apply.py from 2026-10-11 on); until the entry word is
@@ -26,6 +29,44 @@ import theme_switch as TS
 import mysettings as MS
 
 OUT = "build/themesw"
+
+
+def lit_pictures(h, writes, scratch):
+    """2026-11-04 lit buttons: each lit picture -> its private colours
+    (1 LSB moves, invisible). Only a picture that reads EXACTLY stock is
+    written; one already ours is skipped; anything else is left as is (that
+    button then keeps its stock lit colour: the deck's stock fingerprint
+    skips it). Returns True if it wrote (arm in a fresh session)."""
+    import fastload
+    if not writes:
+        return False
+    wrote = left = 0
+    for addr, st, pv in writes:
+        live = bytes(fastload.BR32(h, addr, len(pv)))
+        if live == pv:
+            continue
+        if live != st:
+            print(f"lit button picture {addr:#x}: not stock - left as is")
+            continue
+        if wrote >= fastload.SESSION_BUDGET:
+            left += 1
+            continue
+        if not wrote:                     # LW bursts need this session's self-test
+            try:
+                import xdj700_usb_shell as S
+                if fastload.lw_selftest(h, scratch):
+                    fastload._LW_SESSION = (id(h), getattr(S, "OPEN_TIME", None))
+            except SystemExit as e:
+                print(f"(byte writes: {e})")
+        diff = {addr + i for i in range(len(pv)) if st[i] != pv[i]}
+        rem = fastload._write_window(h, addr, pv, live, diff)
+        wrote += len(diff)
+        if rem:
+            left += 1
+    if wrote:
+        print(f"lit buttons: {wrote} bytes written this session"
+              + (f", {left} pictures left" if left else ""))
+    return bool(wrote)
 
 
 def main():
@@ -89,6 +130,9 @@ def main():
                                        fastload.SESSION_BUDGET)
         if left:
             print(f"wrote this session; {left} left")
+            print("RESULT: PARTIAL - run again to continue")
+            return 0
+        if lit_pictures(h, TS.lit_writes(names), dbase + 36):
             print("RESULT: PARTIAL - run again to continue")
             return 0
         if fastload.arm_later():          # long session: arm in a fresh one

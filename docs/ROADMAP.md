@@ -303,16 +303,20 @@ overview, beat jump, key shift, stems, extended hot cues all worked.
 
 ## Colour mods (user ideas, 2026-11-04)
 Order agreed: lit-button colour first, then button borders/frames.
-- **Lit-button colour** (PREVIEW DONE 2026-11-04: studio/app.py LIT_BUTTONS,
-  lit_recolour; deck part next). Lit touch buttons are 72x53 RGB565
-  sprites, 4 per button (lit, lit-pressed, unlit, unlit-pressed):
-  QUANTIZE 0x0826AAF0.. (red), MASTER 0x088647E0/0x088665B0 (orange),
-  SLIP 0x0886BF20/0x0886DCF0 (blue), VINYL BRAKE 0x0887E940/0x08880710
-  (blue) + brake 0x088824E0/0x088842B0 (red); SYNC lit is neutral grey.
-  The deck switcher (tools/themesw/ts.c) maps colours with ONE global
-  table, and lit SLIP / brake / QUANTIZE share their exact colours with
-  other artwork (MASTER 95 % and VINYL 82 % own colours), so a separate
-  lit colour needs a second, region-only table in ts.c (+ hardware test).
+- **Lit-button colour** (DONE 2026-11-04 in preview, emulator and the deck
+  theme switcher; DECK TEST PENDING). mods/litbuttons.py holds the
+  addresses and the one colour rule used by all three. Lit touch buttons
+  are 72x53 RGB565 sprites, 4 per button (lit, lit-pressed, unlit,
+  unlit-pressed): QUANTIZE 0x0826AAF0.. (red), MASTER 0x088647E0/0x088665B0
+  (orange), SLIP 0x0886BF20/0x0886DCF0 (blue), VINYL BRAKE
+  0x0887E940/0x08880710 (blue) + brake 0x088824E0/0x088842B0 (red); SYNC
+  lit is neutral grey. ts.c maps colours with ONE global table and the lit
+  pictures share colours with other art, so no ts.c change: the installer
+  moves the lit pictures' shared colours to private ones 1 LSB away
+  (theme_switch.lit_private, 502 colours, 28 k px) and the tables map them.
+  The lit maths rolls off saturation/brightness instead of clipping (the
+  one-to-one tables cannot merge colours; clipped white speckled pink and
+  green): white and grey read silver.
 - Button borders / frames (grey chrome of the touch buttons): pictures,
   same method.
 - Cue / loop / hot-cue marker colours: probably colour tables; research.

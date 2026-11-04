@@ -284,6 +284,7 @@ class EmuApp:
         self._leds = None
         self._stock_words = None
         self._theme_words = None
+        self._lit_priv = []          # lit pictures the switcher install moved
         self.status = ""
         self.fw_name = "Stock v1.15"
         self.ckpt = ckpt
@@ -386,6 +387,7 @@ class EmuApp:
         self._stop()
         self.theme = "stock"
         self._theme_words = None
+        self._lit_priv = []
         self.machine = machine
         self.fw_name = name
         # A restored snapshot can already carry an ATTACHED stick; adopt
@@ -803,8 +805,9 @@ class EmuApp:
                 sys.path.insert(0, os.path.join(ROOT, "tools"))
                 sys.path.insert(0, os.path.join(ROOT, "mods"))
                 import theme_switch as TS
-                data = TS.blob(TS.default_names())
+                data, lit = TS.build(TS.default_names())
             except Exception:
+                lit = []
                 from . import fwhome
                 tp = os.path.join(fwhome.home(), "themesw_tables.bin")
                 data = open(tp if os.path.exists(tp) else os.path.join(d, "tables.bin"), "rb").read()
@@ -822,6 +825,13 @@ class EmuApp:
             m.mem.w8(cb + 4 + i, b)
         for i, b in enumerate(data):
             m.mem.w8(db + i, b)
+        # lit buttons (a theme with a lit colour): their pictures -> private
+        # colours before the switch is armed, only while they read stock
+        for a, st, pv in lit:
+            if bytes(m.mem.r8(a + i) for i in range(len(st))) == st:
+                for i, b in enumerate(pv):
+                    m.mem.w8(a + i, b)
+                self._lit_priv.append((a, pv))   # Test in Emulator starts from these
         import mysettings as MSET
         if not m.mem.r8(MSET.MSTNAME):
             for i, b in enumerate(b"OFF\0"):
@@ -1216,8 +1226,17 @@ class EmuApp:
                     raw = open(fwhome.path("blk1.bin"), "rb").read()
                     self._stock_words = np.frombuffer(raw[:len(raw) // 2 * 2], "<u2")
                 stock = self._stock_words
-                new = stock if sp is None else T.recolour(stock.copy(), sp)[0]
+                base = {k: v for k, v in (sp or {}).items() if k != "lit"}
+                new = T.recolour(stock.copy(), base)[0] if base.get("hue") is not None else stock
+                if sp and sp.get("lit"):          # lit buttons (mods/litbuttons.py)
+                    import litbuttons as LB
+                    new = LB.apply_words(new.copy() if new is stock else new, stock, sp["lit"])
                 prev = self._theme_words if self._theme_words is not None else stock
+                if self._theme_words is None and self._lit_priv:
+                    prev = stock.copy()      # lit pictures hold their private colours
+                    for a, pv in self._lit_priv:
+                        o = (a - 0x08000000) // 2
+                        prev[o:o + len(pv) // 2] = np.frombuffer(pv, "<u2")
                 ram = np.frombuffer(m.mem.ram0, dtype="<u2", count=len(stock))
                 safe = (ram == prev) & (new != prev)
                 ram[safe] = new[safe]

@@ -8,14 +8,17 @@
   top / peaks), on both the overview and the centre waveform. Preview only,
   like the one-colour custom waveform: the deck and the emulator still use
   Blue, RGB or 3-Band.
-- **Lit buttons: your colour (preview).** Theme Builder › Lit buttons ›
-  Your colour: QUANTIZE, MASTER, SYNC, SLIP and VINYL BRAKE light up in one
-  colour of your choice, keeping each button's shading and top stripe;
-  with a light colour the labels turn dark so they stay readable. The new
-  "Lit buttons" preview shows the player screen with all of them lit.
-  Preview only for now: the deck and the emulator keep the stock lit
-  colours (on the deck this needs a lit-buttons-only colour table in the
-  theme switcher, planned).
+- **Lit buttons in your colour (preview, emulator, deck).** Theme Builder ›
+  Lit buttons › Your colour: QUANTIZE, MASTER, SYNC, SLIP and VINYL BRAKE
+  light up in one colour of your choice (also when pressed, and VINYL BRAKE
+  in brake mode), keeping each button's shading and top stripe; with a
+  light colour the labels turn dark so they stay readable. The "Lit
+  buttons" preview shows the player screen with all of them lit, and Test
+  in Emulator shows it live. For the deck, save the colour with a theme and
+  install Themes: UTILITY › THEME switches the lit colour together with the
+  theme, and OFF brings the stock colours back. White and grey come out
+  silver rather than flat white: the deck's exact theme switching needs a
+  little shading to tell the colours apart. **Not yet tried on a deck.**
 - **Emulator: 5x more audio.** The audio chip now gets 3 DSP cycles per SH
   cycle instead of 0.6 (about 30 % of real-time sound instead of 6 %), with
   no frame-rate loss: stopped deck 60 frames/s, playing deck 30-35. During

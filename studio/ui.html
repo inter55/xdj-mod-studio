@@ -1373,7 +1373,7 @@ $('#projbtn').onclick = () => setProject($('#project').value);
 
 /* ---- Activity: friendly build cards with progress + ETA */
 function jobCard(j) {
-  const el = Math.max(0, Date.now() / 1000 - j.t0);
+  const el = Math.max(0, (j.t1 || Date.now() / 1000) - j.t0);   // t1: when it finished
   let bar = '', note = j.note || '', meta = `${Math.floor(el / 60)}:${String(Math.floor(el % 60)).padStart(2, '0')} so far`;
   if (j.state === 'running') {
     // time left comes from the server (studio/app.py eta_left: recent
@@ -1414,8 +1414,20 @@ for (const id of ['jobs', 'dprog']) {
     if (e.target.open) JOB_OPEN.add(jid); else JOB_OPEN.delete(jid);
   }, true);
 }
-// replace a card's HTML only when it changed, so an open log keeps its scroll position
-function renderJobs(el, html) { if (el.dataset.html !== html) { el.dataset.html = html; el.innerHTML = html; } }
+// replace a card's HTML only when it changed. A running job changes every
+// second (time, log), so put each open log back where it was: same scroll
+// offset, or still at the end if it was at the end (new lines stay in view)
+function renderJobs(el, html) {
+  if (el.dataset.html === html) return;
+  const pos = {};
+  for (const p of el.querySelectorAll('.job details[open] pre'))
+    pos[p.closest('.job').dataset.id] = p.scrollHeight - p.scrollTop - p.clientHeight < 4 ? -1 : p.scrollTop;
+  el.dataset.html = html; el.innerHTML = html;
+  for (const p of el.querySelectorAll('.job details[open] pre')) {
+    const s = pos[p.closest('.job').dataset.id];
+    if (s !== undefined) p.scrollTop = s < 0 ? p.scrollHeight : s;
+  }
+}
 let polling = false;
 function watch() { $('#act').classList.add('on'); if (!polling) poll(); }
 $('#dminst').onclick = async () => {

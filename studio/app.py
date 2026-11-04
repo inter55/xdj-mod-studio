@@ -334,6 +334,7 @@ def job(title, fn, *args):
         _SCAN.clear()
         with LOCK:
             JOBS[jid]["state"] = st
+            JOBS[jid]["t1"] = time.time()
     threading.Thread(target=run, daemon=True).start()
     return jid
 
@@ -533,6 +534,7 @@ def job_view(j):
     v = {k: j[k] for k in ("id", "title", "state", "log", "t0", "frac",
                            "note", "wait")}
     v["left"] = eta_left(j)
+    v["t1"] = j.get("t1")                  # finish time: "took …" stops counting
     return v
 
 

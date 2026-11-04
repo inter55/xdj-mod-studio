@@ -4,6 +4,10 @@ Follow-up to 0.99.4: window sizes and the Activity log. Same requirements
 as 0.99 (your own XDJ-700 v1.15 update file; Apple Silicon Mac on macOS
 14+, or the Windows zip). Mac: see the Gatekeeper note under 0.99.1 below.
 
+**Test status.** Tested on a real XDJ-700 with an Apple Silicon Mac:
+everything except FLAC playback and stems, which have not been tried with
+this release yet. The Windows build has not been tested yet.
+
 ## Fixed in 0.99.5
 
 - **Text disappeared in a narrower window.** "How it works", the Home

@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>XDJ Mod Studio: free XDJ-700 mods (RGB waveforms, key shift, stems)</title>
-<meta name="description" content="Open-source XDJ-700 mods, nothing flashed: RGB and 3-band waveforms, live key shift, stems, beat jump pads, live themes. Power-cycle and it's stock again.">
+<meta name="description" content="Open-source XDJ-700 mods: RGB and 3-band waveforms, live key shift, stems, beat jump pads and live themes. USB-stick loader, cable session or a baked firmware update file.">
 <meta property="og:title" content="XDJ Mod Studio: free XDJ-700 mods">
 <meta property="og:type" content="website">
 <meta property="og:url" content="https://inter55.github.io/xdj-mod-studio/">
@@ -12,13 +12,13 @@
 <link rel="canonical" href="https://inter55.github.io/xdj-mod-studio/">
 <script type="application/ld+json">
 {"@context":"https://schema.org","@type":"SoftwareApplication","name":"XDJ Mod Studio",
- "description":"Free, open-source mods for the Pioneer DJ XDJ-700: RGB and 3-band waveforms, live key shift, stems, beat jump pads and themes. Nothing is flashed.",
+ "description":"Free, open-source mods for the Pioneer DJ XDJ-700: RGB and 3-band waveforms, live key shift, stems, beat jump pads and themes.",
  "applicationCategory":"MultimediaApplication","operatingSystem":"macOS, Windows",
  "url":"https://inter55.github.io/xdj-mod-studio/","downloadUrl":"https://github.com/inter55/xdj-mod-studio/releases/latest",
  "codeRepository":"https://github.com/inter55/xdj-mod-studio","license":"https://opensource.org/licenses/MIT",
  "offers":{"@type":"Offer","price":"0","priceCurrency":"USD"}}
 </script>
-<meta property="og:description" content="RGB and 3-band waveforms, live key shift, stems and live themes for the XDJ-700. Nothing flashed: power-cycle = stock.">
+<meta property="og:description" content="RGB and 3-band waveforms, live key shift, stems and live themes for the XDJ-700. Stick loader, cable session or a baked firmware update file.">
 <meta name="theme-color" content="#0b0b10">
 <link rel="icon" href="favicon.svg" type="image/svg+xml">
 <style>
@@ -145,9 +145,9 @@ footer p { margin: 6px 0; max-width: 820px; }
 <main>
 <div class="wrap hero">
   <div>
-    <div class="eyebrow">Open source · No flashing · XDJ-700 firmware 1.15</div>
+    <div class="eyebrow">Open source · Cable, stick or update file · XDJ-700 firmware 1.15</div>
     <h1>Give your <span class="grad">XDJ-700</span> the features it never got.</h1>
-    <p class="lead">RGB and 3-band waveforms, live key shift, stems, beat jump pads and live colour themes. Everything is loaded into the deck's memory over USB. Nothing is flashed, and switching the deck off and on puts it back to stock.</p>
+    <p class="lead">RGB and 3-band waveforms, live key shift, stems, beat jump pads and live colour themes. The recommended route is the USB-stick loader: one firmware update installs it, and after that the mods travel on your stick and survive a power cycle. Cable mode installs nothing — it sends the mods into the deck's memory for the session, and a power cycle puts it back to stock.</p>
     <div class="cta">
       <a class="btn primary" href="https://github.com/inter55/xdj-mod-studio/releases">Download Mod Studio</a>
       <a class="btn" href="#safety">How it stays safe</a>
@@ -222,7 +222,7 @@ footer p { margin: 6px 0; max-width: 820px; }
   <div class="wrap two">
     <div>
       <h2>Built so you can't brick it</h2>
-      <p class="sub" style="margin-bottom:18px">The XDJ-700 has a service connection over USB that can read and write the deck's working memory. The mods use only that. They never touch the flash chip that stores the firmware.</p>
+      <p class="sub" style="margin-bottom:18px">The XDJ-700 has a service connection over USB that can read and write the deck's working memory. Cable mode uses only that, and a power cycle brings the deck back to stock.</p>
       <p style="color:var(--dim)">Because the patches live in memory, <b style="color:var(--text)">switching the deck off and on returns it to stock.</b> That's also how you remove the mods. To use them again, plug in and click Install.</p>
     </div>
     <div class="card safe">
@@ -290,7 +290,7 @@ footer p { margin: 6px 0; max-width: 820px; }
     <h2>FAQ</h2>
     <details><summary>Will this void my warranty or damage the deck?</summary><p>The mods only change the deck's working memory, which is cleared every time it powers off. Nothing is written to the firmware chip. Even so, this is unofficial software and you use it at your own risk.</p></details>
     <details><summary>How do I remove the mods?</summary><p>Switch the deck off and on. It starts up completely stock.</p></details>
-    <details><summary>Do I have to reinstall after every power-cycle?</summary><p>Yes. That's the trade-off for never flashing anything. Mod Studio remembers your choices, so reinstalling is a single click.</p></details>
+    <details><summary>Do I have to reinstall after every power-cycle?</summary><p>Yes, in cable mode. Mod Studio remembers your choices, so reinstalling is a single click.</p></details>
     <details><summary>Does it work on the XDJ-1000 / MK2 or CDJs?</summary><p>No. Everything is built for the XDJ-700 on firmware 1.15 only.</p></details>
     <details><summary>Windows?</summary><p>Yes, in beta: download the Windows zip from Releases (64-bit Windows 10/11). Every build is checked automatically on a clean Windows machine: the app starts, its pages load and the emulator engine loads. Nobody has yet run their firmware in the emulator or installed mods on a real deck from Windows (both are proven on a Mac), and the emulator has no sound on Windows yet. If you try it, please open an issue and say how it went.</p></details>
     <details><summary>Is it open source?</summary><p>Yes. Everything is on GitHub under the MIT licence: the Mac and Windows apps, the emulator, every mod and the tools that build them. The only thing not included is Pioneer DJ's firmware, which you add yourself.</p></details>

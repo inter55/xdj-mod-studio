@@ -57,6 +57,47 @@ but nobody has tried them on one yet:
 | 8 hot cues | pages A–C / D–F / G–H |
 | FLAC and Ogg Opus playback | own decoders on the deck |
 
+## In development (experimental, not released)
+
+> **Work in progress.** Everything in this section is on `master` only, is
+> not in any release yet, and may still change or break. Try it only if you
+> are comfortable power-cycling your deck; every mod still lives in the
+> deck's working memory only, so a power cycle always brings back the stock
+> deck.
+
+**USB-stick install (no cable for the mods themselves).** Mod Studio's new
+**Write to USB stick** button (Mods page) puts the mods you picked into a
+`PIONEER/MODS` folder on your library stick. A small loader in the deck's
+memory installs them when the stick goes in. Rehearsed on a real XDJ-700 on
+2026-11-04, with the loader put into RAM over the cable:
+
+- a stick without the folder is ignored;
+- a byte-exact copy test passed;
+- the full pack (RGB waveforms, PERFORM pads, themes, FLAC) installed from
+  the stick and the deck kept working normally.
+
+Still missing: getting the loader onto the deck without the cable (planned
+for the optional permanent update), and key shift, vinyl brake length and
+the phase meter, which are cable-only for now.
+
+**FLAC from the rekordbox library.** Tracks loaded from the rekordbox
+library failed with **E-8305**. rekordbox marks FLAC files with a type the
+XDJ-700's player refuses before even opening the file, so our FLAC decoder
+never got a chance. A one-word change in the deck's decoder choice now sends
+them to our decoder. On 2026-11-04 the first FLAC played on a real XDJ-700.
+Known issues, being worked on:
+
+- search and jog scrubbing on a FLAC are a little laggy;
+- with colour waveforms, switching to or from a FLAC can leave the previous
+  track's waveform on screen until you load another track (the stock blue
+  waveform is not affected).
+
+The OneLibrary converter now marks FLAC tracks the way rekordbox does.
+
+**Also new, not yet tried on a deck:** custom waveform colours (1 to 3
+colours, UTILITY › WAVEFORM COLOR › CUSTOM), lit buttons in your own colour
+(saved with a theme), and 5x more audio in the emulator.
+
 ## For DJs: Mod Studio
 
 1. Download Mod Studio from Releases.

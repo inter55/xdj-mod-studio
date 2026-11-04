@@ -37,6 +37,7 @@ ROOT = repo_root()
 from . import deck
 from .deck import DECK_W, DECK_H, SCR_X, SCR_Y, SCR_W, SCR_H
 from . import simplay
+from .c6x.dspdev import DSP_PER_SH, DSP_LOAD_RATIO
 
 TB_H = 48                     # toolbar height (canvas px)
 CAN_W, CAN_H = DECK_W, DECK_H + TB_H
@@ -283,6 +284,7 @@ class EmuApp:
         self._leds = None
         self._stock_words = None
         self._theme_words = None
+        self._lit_priv = []          # lit pictures the switcher install moved
         self.status = ""
         self.fw_name = "Stock v1.15"
         self.ckpt = ckpt
@@ -385,6 +387,7 @@ class EmuApp:
         self._stop()
         self.theme = "stock"
         self._theme_words = None
+        self._lit_priv = []
         self.machine = machine
         self.fw_name = name
         # A restored snapshot can already carry an ATTACHED stick; adopt
@@ -453,6 +456,9 @@ class EmuApp:
                 # firmware-side wait (dialog timers, handshakes) then took
                 # tens of seconds of wall clock. Pacing is unchanged: the
                 # loop still sleeps to the 60 Hz frame clock.
+                de = getattr(dev, "dspemu", None)
+                if de is not None:          # audio share: see dspdev.DSP_LOAD_RATIO
+                    de.ratio = DSP_LOAD_RATIO if self.bursting() else DSP_PER_SH
                 m.run(limit=1_000_000)
                 self._burst_sound(m, dev)
                 if self.burst_until is not None and m.cpu.steps >= self.burst_until:
@@ -603,11 +609,13 @@ class EmuApp:
         self._start(m, self.fw_name)
 
     # -- waveform styles ----------------------------------------------------
-    def apply_wave(self, name):
-        """Overview waveform style: blue (stock) / rgb / 3band. Installs the
-        tools/rgb_overview.py cave + hook (same bytes as the deck tool) and
-        sets its mode byte. Takes effect on the next track load (the stock
-        painter only redraws the overview when a track loads)."""
+    def apply_wave(self, name, colours=None):
+        """Overview waveform style: blue (stock) / rgb / 3band / custom.
+        Installs the tools/rgb_overview.py cave + hook (same bytes as the
+        deck tool) and sets its mode byte. custom: colours = 1-3 RGB565
+        (the Studio's 1-3 colour gradient; 2026-11-04 on the deck too),
+        kept for later menu picks. Takes effect on the next track load (the
+        stock painter only redraws the overview when a track loads)."""
         m = self.machine
         if m is None or not self.fw_name.startswith("Stock"):
             self.status = "waveform styles need the stock firmware running"
@@ -615,7 +623,13 @@ class EmuApp:
         import sys as _sys
         _sys.path.insert(0, os.path.join(ROOT, "tools"))
         import rgb_overview as RO
-        code, writes = RO.plan(RO.MODES[name])
+        if colours:
+            self.wave_colours = list(colours)
+        if name == "custom" and not getattr(self, "wave_colours", None):
+            self.status = "custom waveform needs its colours (Theme Builder > Waveform > Custom)"
+            return
+        code, writes = RO.plan(RO.MODES[name],
+                               self.wave_colours if name == "custom" else None)
         hook = m.mem.r32(RO.HOOK_POOL)
         if hook not in (RO.ORIG_RELEASE, RO.CAVE):
             self.status = f"waveform hook site unexpected ({hook:#x}) - not applied"
@@ -628,6 +642,8 @@ class EmuApp:
         if m.mem.r32(RD.POOL) in (RD.PALETTE, RD.DCAVE) and \
                 m.mem.r16(RD.INSN) in (RD.INSN_OLD, RD.INSN_NEW):
             RD.install(m.mem)            # C colour module + shim + row patch
+            if name == "custom":
+                RD.install_custom(m.mem, self.wave_colours)
         # the rest of the deck set: version switching + the mod settings in
         # UTILITY (same bytes as tools/deck_session.py installs; 1.0: no
         # MY SETTINGS rows any more)
@@ -799,8 +815,9 @@ class EmuApp:
                 sys.path.insert(0, os.path.join(ROOT, "tools"))
                 sys.path.insert(0, os.path.join(ROOT, "mods"))
                 import theme_switch as TS
-                data = TS.blob(TS.default_names())
+                data, lit = TS.build(TS.default_names())
             except Exception:
+                lit = []
                 from . import fwhome
                 tp = os.path.join(fwhome.home(), "themesw_tables.bin")
                 data = open(tp if os.path.exists(tp) else os.path.join(d, "tables.bin"), "rb").read()
@@ -818,6 +835,13 @@ class EmuApp:
             m.mem.w8(cb + 4 + i, b)
         for i, b in enumerate(data):
             m.mem.w8(db + i, b)
+        # lit buttons (a theme with a lit colour): their pictures -> private
+        # colours before the switch is armed, only while they read stock
+        for a, st, pv in lit:
+            if bytes(m.mem.r8(a + i) for i in range(len(st))) == st:
+                for i, b in enumerate(pv):
+                    m.mem.w8(a + i, b)
+                self._lit_priv.append((a, pv))   # Test in Emulator starts from these
         import mysettings as MSET
         if not m.mem.r8(MSET.MSTNAME):
             for i, b in enumerate(b"OFF\0"):
@@ -1212,8 +1236,17 @@ class EmuApp:
                     raw = open(fwhome.path("blk1.bin"), "rb").read()
                     self._stock_words = np.frombuffer(raw[:len(raw) // 2 * 2], "<u2")
                 stock = self._stock_words
-                new = stock if sp is None else T.recolour(stock.copy(), sp)[0]
+                base = {k: v for k, v in (sp or {}).items() if k != "lit"}
+                new = T.recolour(stock.copy(), base)[0] if base.get("hue") is not None else stock
+                if sp and sp.get("lit"):          # lit buttons (mods/litbuttons.py)
+                    import litbuttons as LB
+                    new = LB.apply_words(new.copy() if new is stock else new, stock, sp["lit"])
                 prev = self._theme_words if self._theme_words is not None else stock
+                if self._theme_words is None and self._lit_priv:
+                    prev = stock.copy()      # lit pictures hold their private colours
+                    for a, pv in self._lit_priv:
+                        o = (a - 0x08000000) // 2
+                        prev[o:o + len(pv) // 2] = np.frombuffer(pv, "<u2")
                 ram = np.frombuffer(m.mem.ram0, dtype="<u2", count=len(stock))
                 safe = (ram == prev) & (new != prev)
                 ram[safe] = new[safe]

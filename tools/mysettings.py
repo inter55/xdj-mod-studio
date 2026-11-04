@@ -820,7 +820,17 @@ def emu_theme_switch(names):
             mem.w8(base + i, x)
     for i, x in enumerate(b"OFF".ljust(16, b"\0")):
         mem.w8(MSTNAME + i, x)
-    regs, S, Ds, _ = TS.tables(names)
+    # lit button pictures -> private colours (theme_switch_apply.py order:
+    # before arming, only while they read stock)
+    nlit = 0
+    for a, st, pv in TS.lit_writes(names):
+        if bytes(mem.ram0[a - 0x08000000:a - 0x08000000 + len(st)]) == st:
+            for i, x in enumerate(pv):
+                mem.w8(a + i, x)
+            nlit += 1
+    if nlit:
+        print(f"lit button pictures moved to private colours: {nlit}")
+    wmod, regs, S, Ds, _, _g = TS.tables_full(names)
     lo = min(a for a, _ in regs)
     hi = max(a + 2 * n for a, n in regs)
 
@@ -901,7 +911,7 @@ def emu_theme_switch(names):
     # blocks whose RAM differs from the stock image (firmware data + our
     # planted guard): the deck code must leave exactly these alone
     import theme_deck as TD
-    sw = TS.with_own_art(TD.stock_words())[(lo - 0x08000000) // 2:(hi - 0x08000000) // 2].copy()
+    sw = wmod[(lo - 0x08000000) // 2:(hi - 0x08000000) // 2].copy()   # stock (+ lit privates)
     sw[~mask] = 0
     frozen = np.zeros(len(stock), bool)
     nfrozen = 0

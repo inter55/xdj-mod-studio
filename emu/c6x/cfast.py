@@ -95,6 +95,7 @@ def load_lib():
         "c6x_counts": ([P, ctypes.c_int], u64),
         "c6x_splx_pending": ([P], ctypes.c_int),
         "c6x_set_idle_loop": ([P, u32, u32, u32], None),
+        "c6x_add_idle_head": ([P, u32], ctypes.c_int),
         "c6x_skip": ([P, u64], None),
         "c6x_set_dff": ([P, ctypes.c_int], None),
         "c6x_dff_stat": ([P, ctypes.c_int], u64),
@@ -638,6 +639,9 @@ class CCpu:
     insn_count = property(_g(lambda s: s.lib.c6x_counts(s.h, 1)))
     interrupts = property(lambda s: s.lib.c6x_counts(s.h, 2))
     py_calls = property(lambda s: s.lib.c6x_counts(s.h, 3))
+    idle_jumped = property(lambda s: s.lib.c6x_counts(s.h, 4))   # busy-wait cycles jumped (exact)
+    idle_jumps = property(lambda s: s.lib.c6x_counts(s.h, 5))
+    idle_refhits = property(lambda s: s.lib.c6x_counts(s.h, 6))
 
     # ---- run
     def run_cycles(self, n):
@@ -718,8 +722,12 @@ def watch_log(cpu):
     return n, res
 
 
-def set_idle_loop(cpu, head, lo, hi):
+def set_idle_loop(cpu, head, lo, hi, more=()):
     """arm the busy-wait skip (XDJ-700 v1.15: 0xC004C8CC, stack
-    0x11804AE0..0x11805C00, from cdj-nxs2-qemu models/xdj700.conf)"""
+    0x11804AE0..0x11805C00, from cdj-nxs2-qemu models/xdj700.conf).
+    more: further loop heads of the same idle task (same stack), e.g. the
+    playing deck's channel-poll loop 0xC0048C2E."""
     if hasattr(cpu, "lib"):
         cpu.lib.c6x_set_idle_loop(cpu.h, head, lo, hi)
+        for h in more:
+            cpu.lib.c6x_add_idle_head(cpu.h, h)

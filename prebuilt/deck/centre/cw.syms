@@ -1,5 +1,8 @@
-098a0500 B _cw_calls
-098a0454 T _cw_col
-098a0474 T _cw_col2
-098a050c B _cw_tbl
-098a058c B _end
+098a05dc B _cw_calls
+098a04b0 T _cw_col
+098a04d0 T _cw_col2
+098a05e8 B _cw_cust_kind
+098a05ec B _cw_cust_pal
+098a05fc B _cw_cust_ramp
+098a067c B _cw_tbl
+098a06fc B _end

@@ -111,6 +111,11 @@ def setup(upd, progress=lambda f, note: None, steps=None):
     if not ver:
         raise ValueError(f"not the XDJ-700 v1.15 update file (sha256 {h[:12]}...). "
                          "Download XDJ-700 firmware 1.15 from Pioneer DJ's site.")
+    # the second boot (real audio chip) decodes DSP code with the tic6x
+    # objdump: check it NOW, not after minutes of booting at 84 %
+    from .c6x import decode as C6D
+    if not C6D.available():
+        raise RuntimeError(C6D.HOWTO)
     d = home()
     os.makedirs(d, exist_ok=True)
     progress(0.02, "unpacking the update file")

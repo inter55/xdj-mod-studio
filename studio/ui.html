@@ -37,9 +37,12 @@ h2 { font-size: 13px; font-weight: 650; margin: 0 0 10px; }
 .grow { flex: 1; min-width: 0; }
 
 .bar { background-image: linear-gradient(180deg, #1c1e24, #14161a) !important; box-shadow: inset 0 -1px 0 #000, 0 1px 0 #ffffff08; display: flex; align-items: center; height: 52px; padding: 0 16px; flex: none; border-bottom: 1px solid var(--line); background: var(--panel); gap: 16px; }
-.brand { display: flex; align-items: center; gap: 9px; font-weight: 650; letter-spacing: -.01em; width: 190px; }
+.brand { display: flex; align-items: center; gap: 9px; font-weight: 650; letter-spacing: -.01em; width: 190px; white-space: nowrap; }
 .tabs { display: flex; gap: 2px; align-self: stretch; }
-.tabs button { border: 0; background: none; padding: 0 14px; cursor: pointer; color: var(--dim); font-weight: 560; position: relative; }
+.tabs button { border: 0; background: none; padding: 0 14px; cursor: pointer; color: var(--dim); font-weight: 560; position: relative; white-space: nowrap; }
+/* narrow window: the bar stays one line (labels never wrap onto two) */
+@media (max-width: 1040px) { .brand { width: auto; margin-right: 6px; } .tabs button { padding: 0 9px; } .bar { gap: 10px; } }
+@media (max-width: 860px) { .tabs button .faint { display: none; } .brand span { display: none; } #decktxt { display: none; } }
 .tabs button:hover { color: var(--text); }
 .tabs button[aria-selected=true] { color: var(--text); }
 .tabs button[aria-selected=true]::after { content: ""; position: absolute; left: 12px; right: 12px; bottom: -1px; height: 2px; background: var(--blue); border-radius: 2px 2px 0 0; box-shadow: 0 0 12px 1px #3d8bffaa; }
@@ -62,7 +65,7 @@ h2 { font-size: 13px; font-weight: 650; margin: 0 0 10px; }
 select, .field { background: var(--raise); border: 1px solid var(--line2); border-radius: 7px; padding: 6px 9px; color: var(--text); max-width: 100%; }
 .field { width: 100%; }
 .seg { display: inline-flex; background: var(--raise); border: 1px solid var(--line); border-radius: 8px; padding: 2px; gap: 2px; }
-.seg button { border: 0; background: none; padding: 4px 12px; border-radius: 6px; cursor: pointer; color: var(--dim); font-weight: 560; }
+.seg button { border: 0; background: none; padding: 4px 12px; border-radius: 6px; cursor: pointer; color: var(--dim); font-weight: 560; white-space: nowrap; }
 .seg button[aria-pressed=true] { background: var(--raise2); color: var(--text); box-shadow: 0 0 0 1px var(--line2); }
 input[type=checkbox] { accent-color: var(--blue); width: 15px; height: 15px; margin: 0; }
 input[type=range] { width: 100%; accent-color: var(--blue); }
@@ -77,6 +80,10 @@ main { flex: 1; min-height: 0; position: relative; }
 .pad { padding: 16px; }
 .row { display: flex; align-items: center; gap: 10px; }
 .stack { display: flex; flex-direction: column; gap: 14px; }
+/* `hidden` must win over the display:flex classes above (it does not by
+   default: the Custom colour row and the Appearance panel showed while
+   hidden) */
+[hidden] { display: none !important; }
 .notice { gap: 10px; align-items: flex-start; padding: 10px 12px; border-radius: 8px; background: #2a2210; border: 1px solid #5a4514; color: #ffd98a; }
 .notice:not([hidden]) { display: flex; }
 .notice.bad { background: #2b1416; border-color: #6a2a2e; color: #ffb3b3; }
@@ -92,7 +99,7 @@ main { flex: 1; min-height: 0; position: relative; }
 .modrow { display: flex; align-items: center; gap: 12px; padding: 11px 0; border-top: 1px solid var(--line); }
 .modrow:first-child { border-top: 0; }
 .modrow b { font-weight: 600; width: 128px; flex: none; }
-.modrow .d { color: var(--dim); flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.modrow .d { color: var(--dim); flex: 1; min-width: 0; overflow-wrap: anywhere; }
 .modrow .d.warn { color: var(--amber); }
 .modrow.click { cursor: pointer; border-radius: 8px; }
 .modrow.click:hover { background: #ffffff06; }
@@ -127,7 +134,7 @@ main { flex: 1; min-height: 0; position: relative; }
 .chk { display: flex; align-items: center; gap: 12px; padding: 11px 0; border-top: 1px solid var(--line); }
 .chk:first-child { border-top: 0; }
 .chk b { width: 130px; font-weight: 600; flex: none; }
-.chk span.d { color: var(--dim); flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.chk span.d { color: var(--dim); flex: 1; min-width: 0; overflow-wrap: anywhere; }
 
 /* Mods (the mod builder) */
 #p-mods { flex-direction: column; }
@@ -155,11 +162,16 @@ main { flex: 1; min-height: 0; position: relative; }
 .sw[aria-pressed=true] i { border-color: var(--text); } .sw[aria-pressed=true] { color: var(--text); }
 .ctl { display: grid; grid-template-columns: 84px 1fr 38px; align-items: center; gap: 10px; margin-top: 9px; color: var(--dim); }
 .ctl output { text-align: right; font-variant-numeric: tabular-nums; color: var(--text); font-size: 12px; }
-.screen { border-radius: 8px; overflow: hidden; background: #000; aspect-ratio: 5 / 3; border: 1px solid var(--line); }
+.screen { position: relative; border-radius: 8px; overflow: hidden; background: #000; aspect-ratio: 5 / 3; border: 1px solid var(--line); }
 .screen img { display: block; width: 100%; height: 100%; object-fit: cover; }
+.screen img:not([src]) { visibility: hidden; }
+.pmsg { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; text-align: center; padding: 24px; color: var(--dim); font-size: 13px; line-height: 1.5; }
+.pmsg:not([hidden]) { display: flex; }
 .actionbar { flex: none; display: flex; align-items: center; gap: 12px; padding: 12px 16px; border-top: 1px solid var(--line); background: var(--panel); }
 .kv { display: grid; grid-template-columns: auto 1fr; gap: 4px 14px; }
-.kv dt { color: var(--dim); } .kv dd { margin: 0; text-align: right; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+/* values wrap instead of vanishing behind an ellipsis when the window is narrow */
+.kv dt { color: var(--dim); } .kv dd { margin: 0; text-align: right; min-width: 0; overflow-wrap: anywhere; }
+.kv.wrap { grid-template-columns: 92px 1fr; } .kv.wrap dd { text-align: left; line-height: 1.45; }
 
 #p-emu { padding: 16px; gap: 16px; }
 .stage { flex: 1; min-width: 0; position: relative; display: flex; align-items: center; justify-content: center; background: #0a0b0d; border: 1px solid var(--line); border-radius: var(--r); overflow: hidden; }
@@ -176,7 +188,8 @@ kbd { font: 11px var(--mono); background: var(--raise2); border: 1px solid var(-
 .libhead { display: flex; align-items: baseline; gap: 12px; margin-bottom: 10px; }
 .chips { display: flex; gap: 6px; align-items: center; margin-bottom: 8px; }
 .list { flex: 1; overflow: auto; border-top: 1px solid var(--line); }
-.tr { display: grid; grid-template-columns: 24px minmax(0, 2.2fr) minmax(0, 1.4fr) 62px 52px 104px 84px; gap: 10px; align-items: center; padding: 6px 8px; border-radius: 6px; }
+.tr { display: grid; grid-template-columns: 24px minmax(0, 2.2fr) minmax(0, 1.4fr) 62px 52px 104px 84px; gap: 10px; align-items: center; padding: 6px 8px; border-radius: 6px; min-width: 560px; }
+.chips { flex-wrap: wrap; row-gap: 8px; }
 .tr.h { color: var(--faint); font-size: 11.5px; position: sticky; top: 0; background: var(--panel); z-index: 1; }
 .tr:not(.h):hover { background: var(--raise); }
 .tr.sel { background: var(--raise2); box-shadow: inset 2px 0 0 var(--blue); }
@@ -185,7 +198,17 @@ kbd { font: 11px var(--mono); background: var(--raise2); border: 1px solid var(-
 .tag { display: inline-flex; align-items: center; gap: 6px; font-size: 12px; }
 .tag i { width: 7px; height: 7px; border-radius: 50%; background: var(--faint); }
 .tag.ok i { background: var(--green); } .tag.rb i { background: var(--blue); } .tag.no i { background: var(--amber); }
-.selbar { display: flex; align-items: center; gap: 8px; padding-top: 10px; border-top: 1px solid var(--line); }
+.selbar { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; padding-top: 10px; border-top: 1px solid var(--line); }
+.selbar .selhint { flex: 1 1 220px; min-width: 0; }
+.selbar .selbtns { display: flex; gap: 8px; margin-left: auto; flex: none; }
+.wf img:not([src]) { background: var(--raise); cursor: default; }
+/* narrow window: library above the track panel, the page scrolls */
+@media (max-width: 900px) {
+  #p-tracks.on { flex-direction: column; overflow: auto; }
+  #p-tracks .lib { flex: none; height: max(420px, 70vh); }
+  #p-tracks .insp { width: auto; overflow: visible; }
+  #p-tracks .lib .seg { flex-wrap: wrap; }
+}
 .insp { width: 340px; flex: none; padding: 16px; display: flex; flex-direction: column; gap: 12px; overflow: auto; }
 .meta { display: flex; gap: 6px; flex-wrap: wrap; }
 .meta span { background: var(--raise); border-radius: 6px; padding: 2px 8px; font-size: 12px; color: var(--dim); }
@@ -248,7 +271,7 @@ code { background: var(--raise); padding: 1px 6px; border-radius: 5px; font: 12p
 @media (prefers-reduced-motion: reduce) { .pb.ind i { animation: none; } }
 .job details { margin-top: 8px; }
 .job summary { cursor: pointer; color: var(--faint); font-size: 12px; }
-.job pre { margin: 6px 0 0; font: 11px/1.45 var(--mono); color: var(--dim); white-space: pre-wrap; max-height: 140px; overflow: auto; user-select: text; }
+.job pre { margin: 6px 0 0; font: 11px/1.45 var(--mono); color: var(--dim); white-space: pre-wrap; max-height: 240px; overflow: auto; user-select: text; -webkit-user-select: text; }
 dialog { background: var(--panel); color: var(--text); border: 1px solid var(--line2); border-radius: 12px; padding: 20px; width: min(460px, calc(100vw - 32px)); }
 dialog::backdrop { background: #000a; }
 dialog h2 { font-size: 16px; margin-bottom: 6px; }
@@ -287,8 +310,8 @@ dialog h2 { font-size: 16px; margin-bottom: 6px; }
     <button role="tab" data-p="home" aria-selected="true">Home</button>
     <button role="tab" data-p="mod" aria-selected="false">Mod</button>
     <button role="tab" data-p="builder" aria-selected="false">Theme Builder</button>
-    <button role="tab" data-p="tracks" aria-selected="false">Track Builder</button>
     <button role="tab" data-p="emu" aria-selected="false">Emulator <span class="faint">(beta)</span></button>
+    <button role="tab" data-p="tracks" aria-selected="false">Track Builder</button>
     <button role="tab" data-p="settings" aria-selected="false">Settings</button>
   </nav>
   <div class="right">
@@ -349,11 +372,11 @@ dialog h2 { font-size: 16px; margin-bottom: 6px; }
         <span>Nothing is flashed: the mods live in the deck's memory until you switch it off. Reinstall after each power-up (the app offers it when you plug the deck in). About 15–30 minutes.</span>
         <span class="mgo">Choose mods ›</span>
       </button>
-      <button class="panel mcard" disabled>
-        <span class="mtag">Coming soon</span>
+      <button class="panel mcard" data-go="mods">
+        <span class="mtag">Early</span>
         <b>Mods file on your USB stick</b>
-        <span>Flash a small loader once; after that your rekordbox stick carries the mods. Stick in, modded: no laptop at gigs, update by copying a file.</span>
-        <span class="mgo">In the works</span>
+        <span>Your rekordbox stick carries the mods: stick in, modded, no laptop at gigs. The app writes the file now (Choose mods › Write to USB stick); the deck reads it once its one-time loader is installed — that part is still coming.</span>
+        <span class="mgo">Choose mods ›</span>
       </button>
       <button class="panel mcard" data-go="upd">
         <span class="mtag warn">Advanced</span>
@@ -385,7 +408,7 @@ dialog h2 { font-size: 16px; margin-bottom: 6px; }
       <h2>Pick your mods</h2>
       <div class="pick" id="pk-wave">
         <input type="checkbox" id="pk-wave-on" checked>
-        <div class="body"><b>Colour Waveforms</b><div class="d">RGB and 3-band colours for the overview strip and the big centre waveform. You pick the style on the deck: hold MENU › UTILITY › WAVEFORM COLOR.</div></div>
+        <div class="body"><b>Colour Waveforms</b><div class="d">RGB, 3-band and your own 1–3 colours (Theme Builder › Waveform › Custom) for the overview strip and the big centre waveform. The style picked in Theme Builder is installed; on the deck you can still switch: hold MENU › UTILITY › WAVEFORM COLOR (BLUE / RGB / 3-BAND / CUSTOM).</div></div>
       </div>
       <div class="pick" id="pk-pads">
         <input type="checkbox" id="pk-pads-on" checked>
@@ -418,13 +441,15 @@ dialog h2 { font-size: 16px; margin-bottom: 6px; }
         <div class="modsum" id="modsum" style="margin-bottom:12px"></div>
         <div class="row" style="flex-wrap:wrap">
           <button class="btn primary" id="deckgo" disabled>Install on deck…</button>
+          <button class="btn" id="stickgo" disabled title="Writes PIONEER/MODS/MODS.BIN + PACK.BIN onto your library stick">Write to USB stick…</button>
         </div>
         <div class="small faint" style="margin-top:8px">Plug the XDJ-700 into this Mac by USB and quit music and MIDI apps first. Takes 15–20 minutes; the log will tell you when to pull the USB stick.</div>
+        <div class="small faint" style="margin-top:6px"><b>Write to USB stick</b> puts the same mods on your library stick (PIONEER/MODS) in seconds. The deck installs them itself every time the stick goes in — once its one-time loader is on the deck (a permanent update, coming). Until then the folder is ignored; nothing can go wrong.</div>
         <div id="dprog" style="margin-top:10px"></div>
       </div>
       <div class="panel pad">
         <h2>How it works</h2>
-        <dl class="kv small" style="margin:0">
+        <dl class="kv small wrap" style="margin:0">
           <dt>Safe?</dt><dd>Nothing is flashed: mods load into the deck's memory (power-cycle = stock), every write is verified and it stops at the first surprise. Track Builder does write to your USB stick, keeping backups; the Permanent (UPD) tab is the one exception that makes a file to flash.</dd>
           <dt>Undo</dt><dd>Power-cycle the deck. That's it.</dd>
           <dt>After install</dt><dd>Hold MENU › UTILITY and scroll to the end: MODS, WAVEFORM COLOR, VINYL BRAKE LENGTH (0.5×–15×), HOT CUE GATE and THEME — push, turn, push to change, like any stock setting. If the colours or phase meter ever look gone: check WAVEFORM COLOR is not BLUE and MODS is ON there.</dd>
@@ -438,9 +463,11 @@ dialog h2 { font-size: 16px; margin-bottom: 6px; }
 <section class="page" id="p-builder" role="tabpanel">
   <div class="builder-body">
     <div class="panel pad scroll">
+      <div id="nofw" class="notice" hidden style="margin-bottom:12px"><div class="grow"><b>Firmware not set up.</b><div class="small">The preview draws the deck's own screens, built once from your official XDJ-700 v1.15 update file (about 3 minutes). Themes still save; the emulator needs it too.</div></div><button class="btn sm" id="nofwadd">Add firmware</button></div>
       <div id="nothemes" class="notice bad" hidden style="margin-bottom:12px"><div><b>No theme presets loaded.</b><div id="themeerr" class="small" style="user-select:text"></div><div class="small">Project folder: <code id="themeroot"></code>. Presets live in its <code>mods/themes.py</code>; point Settings at the folder that has it.</div></div></div>
       <div class="sec first">
         <h2>Theme</h2>
+        <div class="row" style="margin-bottom:10px"><select class="field grow" id="tsel" aria-label="Saved themes" title="Saved themes in the project folder (mods/themes.py)"></select><button class="btn sm" id="tdel" title="Remove this theme from mods/themes.py">Delete</button></div>
         <div class="sws" id="sws"></div>
         <div id="sliders">
           <div class="ctl"><span>Hue</span><input class="hue" type="range" id="hue" min="0" max="360" step="1"><output id="o-hue"></output></div>
@@ -458,8 +485,13 @@ dialog h2 { font-size: 16px; margin-bottom: 6px; }
       <div class="sec">
         <h2>Waveform</h2>
         <div class="seg" id="wstyle"><button data-v="blue" class="on">Blue</button><button data-v="rgb">RGB</button><button data-v="3band">3-Band</button><button data-v="custom">Custom</button></div>
-        <div class="row" id="wcustom" hidden style="margin-top:8px"><label class="small dim" for="customc">Custom colour</label><input type="color" id="customc" value="#6ba3f0"></div>
+        <div class="row" id="wcustom" hidden style="margin-top:8px;gap:8px;align-items:center"><span class="small dim">Colours</span><div class="seg" id="wncol"><button data-v="1" class="on">1</button><button data-v="2">2</button><button data-v="3">3</button></div><input type="color" id="customc" value="#6ba3f0" title="Colour 1: quiet / bottom" aria-label="Colour 1"><input type="color" id="customc2" value="#c86bf0" title="Colour 2" aria-label="Colour 2"><input type="color" id="customc3" value="#f06b8a" title="Colour 3: loud / top" aria-label="Colour 3"></div>
         <div class="small dim" id="wnote" style="margin-top:8px"></div>
+      </div>
+      <div class="sec">
+        <h2>Lit buttons</h2>
+        <div class="row" style="gap:8px;align-items:center"><div class="seg" id="litmode"><button data-v="stock">Stock</button><button data-v="colour">Your colour</button></div><input type="color" id="litc" value="#ff40c0" aria-label="Lit button colour" hidden></div>
+        <div class="small dim" id="litnote" style="margin-top:8px"></div>
       </div>
       <div class="sec" hidden></div>
     </div>
@@ -467,17 +499,17 @@ dialog h2 { font-size: 16px; margin-bottom: 6px; }
     <div class="stack scroll" style="min-height:0">
       <div class="panel pad">
         <div class="row" style="margin-bottom:10px">
-          <div class="seg" id="pscreen"><button data-v="main">Player</button><button data-v="perform">Perform</button></div>
+          <div class="seg" id="pscreen"><button data-v="main">Player</button><button data-v="lit">Lit buttons</button><button data-v="perform">Perform</button></div>
           <span class="small faint grow" id="ptrack" style="text-align:right;overflow:hidden;text-overflow:ellipsis;white-space:nowrap"></span>
         </div>
-        <div class="screen"><img id="pimg" alt="Theme preview of the deck screen"></div>
+        <div class="screen"><img id="pimg" alt="Theme preview of the deck screen"><div id="pmsg" class="pmsg" hidden></div></div>
         <div class="small faint" style="margin-top:8px">Preview uses the deck's own colour maths. Waveforms follow the track picked in Track Builder.</div>
       </div>
     </div>
   </div>
   <div class="actionbar">
     <button class="btn primary" id="testemu">Test in Emulator</button>
-    <span class="small dim">Applies the theme and waveform above to the emulator, then opens it.</span>
+    <span class="small dim">Applies the theme, lit buttons and waveform above to the emulator, then opens it.</span>
   </div>
 </section>
 
@@ -487,13 +519,13 @@ dialog h2 { font-size: 16px; margin-bottom: 6px; }
     <div id="callout" class="notice" hidden style="margin-bottom:10px"><span id="ctitle"></span><button class="btn sm" id="fixall">Add to all</button></div>
     <div class="chips">
       <div class="seg" id="filters"><button data-f="all">All tracks</button><button data-f="need3">Needs 3-band</button><button data-f="vers">Stems files</button></div>
-      <input class="field" id="search" type="text" placeholder="Search" style="margin-left:auto;width:200px" autocomplete="off">
+      <input class="field" id="search" type="text" placeholder="Search" style="margin-left:auto;flex:1 1 140px;max-width:220px;min-width:0" autocomplete="off">
     </div>
     <div class="list" id="list"></div>
     <div class="selbar">
-      <span class="dim" id="selc">Nothing selected</span><span class="grow"></span>
-      <span class="small faint" style="margin-right:10px">Stems files are saved next to the original track as <code>Title (STEMS)</code>. On the deck: BROWSE › FOLDER.</span>
-      <button class="btn" id="b3">Add 3-band</button><button class="btn primary" id="bstems">Make stems</button>
+      <span class="dim" id="selc">Nothing selected</span>
+      <span class="small faint selhint">Stems files are saved next to the original track as <code>Title (STEMS)</code>. On the deck: BROWSE › FOLDER.</span>
+      <span class="selbtns"><button class="btn" id="b3">Add 3-band</button><button class="btn primary" id="bstems">Make stems</button></span>
     </div>
   </div>
   <div class="panel insp" id="insp">
@@ -559,7 +591,10 @@ dialog h2 { font-size: 16px; margin-bottom: 6px; }
         <dt>Waveform</dt><dd id="a-wave">stock</dd>
         <dt hidden>Beat jump</dt><dd id="a-bj" hidden>gone</dd>
       </dl>
-      <div id="dirty" class="row small" style="margin-top:10px" hidden><span class="dim grow">Mods tab has changes.</span><button class="btn sm primary" id="applymods">Apply</button></div>
+      <div class="small dim" id="modsline" style="margin-top:10px"></div>
+      <div class="row" style="margin-top:8px"><button class="btn sm primary" id="applymods">Apply from Theme Builder</button></div>
+      <div id="dirty" class="small" style="margin-top:6px;color:#ffd98a" hidden>Theme Builder has changes that are not in the emulator yet.</div>
+      <div id="modsnote" class="small faint" style="margin-top:6px"></div>
     </div>
     <div class="panel">
       <h2>Keyboard</h2>
@@ -600,7 +635,7 @@ dialog h2 { font-size: 16px; margin-bottom: 6px; }
           <button class="btn sm" id="updpre-all">Everything</button>
           <button class="btn sm" id="updpre-pm">Phase meter only</button>
           <button class="btn sm" id="updpre-wave">Waveform colours only</button></div></div>
-      <div class="row"><span class="dim" style="width:150px">Overview waveform</span><div class="seg" id="updwave"><button data-v="blue">Blue</button><button data-v="rgb" aria-pressed="true">RGB</button><button data-v="3band">3-Band</button></div></div>
+      <div class="row"><span class="dim" style="width:150px">Overview waveform</span><div class="seg" id="updwave"><button data-v="blue">Blue</button><button data-v="rgb" aria-pressed="true">RGB</button><button data-v="3band">3-Band</button><button data-v="custom" title="The 1-3 colours from Theme Builder > Waveform > Custom">Custom</button></div></div>
       <label class="row"><input type="checkbox" id="updpads" checked> PERFORM pads: HOT CUE / BEAT JUMP / KEY SHIFT / STEMS tabs, beat jump 1–64</label>
       <div class="small dim">Extras: the file carries them and a small start-up routine copies them into the deck's memory every time it switches on.</div>
       <label class="row"><input type="checkbox" class="updx" data-x="centre" checked> RGB / 3-band centre waveform</label>
@@ -650,9 +685,19 @@ dialog h2 { font-size: 16px; margin-bottom: 6px; }
       <div class="row"><button class="btn primary" id="stickbtn">Use this folder</button><span class="small dim" id="stickmsg"></span></div>
     </div>
     <div class="panel stack" style="gap:10px">
-      <div><h2>Project folder</h2><div class="small dim">Holds the firmware (<code>XDJ700.UPD</code> or <code>FIRMWARE</code>), <code>mods</code>, <code>cache</code> and <code>build</code>. The firmware is yours to provide; it is never bundled.</div></div>
-      <div class="row"><input class="field" id="project" type="text" spellcheck="false" autocomplete="off"><button class="btn" id="projpick">Choose…</button></div>
-      <div class="row"><button class="btn" id="projbtn">Use this folder</button><span class="small dim" id="projmsg"></span></div>
+      <div><h2>Project folder</h2><div class="small dim">Holds your themes (<code>mods/themes.py</code>), the mod tools, the prebuilt deck modules, <code>cache</code> and <code>build</code>, and your official update file. Studio works from a default folder (inside the app on the Mac; the <code>repo</code> folder next to <code>XDJ Mod Studio.exe</code> on Windows); a folder of your own keeps your themes and firmware where you can see and back them up.</div></div>
+      <div class="small dim">Default folder (<span id="projkind">the folder inside the app</span>): <code id="projdefault"></code> <span id="projstate"></span></div>
+      <div class="small dim" style="line-height:1.55"><b>Your own project folder in four steps</b>
+        <ol style="margin:4px 0 0 18px;padding:0">
+          <li>Make an empty folder anywhere, for example <code id="projexample">Documents/XDJ Project</code>.</li>
+          <li>Type or choose its path below and press <b>Set up this folder</b>: Studio copies the mods, tools, prebuilt deck modules and the audio-chip disassembler into it (nothing you already have there is overwritten).</li>
+          <li>Put your official XDJ-700 v1.15 update file in that folder as <code>XDJ700.UPD</code> (or <code>FIRMWARE/XDJ700_stock_v1.15.UPD</code>). Studio copies it for you when it already knows the file from the Permanent firmware page. It is never bundled with the app.</li>
+          <li>Quit and reopen Studio. <b>Reset to default</b> goes back to the default folder at any time; your own folder is left untouched.</li>
+        </ol>
+      </div>
+      <div class="row"><input class="field" id="project" type="text" spellcheck="false" autocomplete="off" placeholder="/Users/you/Documents/XDJ Project"><button class="btn" id="projpick">Choose…</button></div>
+      <div class="row"><button class="btn primary" id="projsetup">Set up this folder</button><button class="btn" id="projbtn">Use this folder</button><button class="btn quiet" id="projreset" hidden>Reset to default</button></div>
+      <div class="small dim" id="projmsg"></div>
     </div>
     <div class="panel stack" style="gap:8px">
       <h2>Stem separation</h2>
@@ -667,7 +712,7 @@ dialog h2 { font-size: 16px; margin-bottom: 6px; }
 <div id="act"><div class="acth">Activity <button class="btn sm quiet" id="actx">Close</button></div><div id="jobs"><div class="empty">Nothing has run yet.</div></div></div>
 <div id="toast" aria-live="polite"></div>
 
-<dialog id="dlg"><h2 id="dtitle"></h2><div class="dim" id="dbody"></div><div id="dextra"></div>
+<dialog id="dlg"><h2 id="dtitle"></h2><div class="dim" id="dbody" style="white-space:pre-line"></div><div id="dextra"></div>
   <div class="dlgfoot"><button class="btn" id="dno">Cancel</button><button class="btn primary" id="dyes">OK</button></div></dialog>
 
 <script>
@@ -746,7 +791,10 @@ $('#actbtn').onclick = () => $('#act').classList.toggle('on');
 $('#actx').onclick = () => $('#act').classList.remove('on');
 
 async function state() {
-  const s = await api('/api/state'); if (!s) return; ST = s;
+  const s = await api('/api/state'); if (!s) return;
+  const fwWas = ST.fw_ready; ST = s;
+  customFromServer(s.wave_colours);
+  if (fwWas !== undefined && fwWas !== s.fw_ready) preview();   // firmware setup just finished
   if (s.upd && !$('#updpath').value) { $('#updpath').value = s.upd; updReady(); }
   $('#deckdot').className = 'dot ' + (s.deck ? 'ok' : ''); $('#decktxt').textContent = s.deck ? 'Deck connected' : 'No deck';
   $$('[data-cable]').forEach(el => { el.classList.toggle('on', !!s.deck);
@@ -761,6 +809,7 @@ async function state() {
   const hint = $('#deckhint');
   hint.hidden = !s.deck_err; hint.textContent = s.deck_err || '';
   $('#deckgo').disabled = !s.deck || !!s.deck_multi;
+  $('#stickgo').disabled = !s.stick_ok;
   $('#ffdot').className = 'dot ' + (s.ffmpeg ? 'ok' : 'warn'); $('#ffline').textContent = s.ffmpeg ? 'ffmpeg + ffprobe are installed.' : 'ffmpeg / ffprobe missing. “Make stems” needs it (Mac: brew install ffmpeg; Windows: winget install ffmpeg).';
   $('#dminst').hidden = !!s.demucs;
   $('#dmdot').className = 'dot ' + (s.demucs ? 'ok' : 'warn'); $('#dmline').textContent = s.demucs ? 'Demucs is installed.' : 'Demucs is not installed. “Make stems” needs it.';
@@ -865,6 +914,7 @@ $('#updbtn').onclick = async () => {
   if (!ok) return;
   const ack = {}; $$('.updack').forEach(c => ack[c.dataset.k] = c.checked);
   const r = await api('/api/upd/build', {path: $('#updpath').value.trim(), mode: UPD.wave,
+    wave_colours: UPD.wave === 'custom' ? customList() : undefined,
     pads: $('#updpads').checked, versions: false, ack,
     extras: $$('.updx').filter(c => c.checked && !c.disabled).map(c => c.dataset.x)});
   if (r) { toast('Building + boot-testing — about 5 minutes.'); watch(); }
@@ -878,7 +928,7 @@ function renderPick() {
     if (cb && !cb.disabled) pk.classList.toggle('off', !cb.checked);
   });
   const parts = [];
-  if ($('#pk-wave-on').checked) parts.push('Colour waveforms');
+  if ($('#pk-wave-on').checked) parts.push(MOD.wave === 'custom' ? 'Custom colour waveforms' : MOD.wave === '3band' ? '3-band waveforms' : 'Colour waveforms');
   if ($('#pk-pads-on').checked) parts.push('PERFORM pads');
   if ($('#pk-themes-on').checked) parts.push('Themes');
   if ($('#pk-liveks-on').checked) parts.push('Live key shift');
@@ -887,12 +937,28 @@ function renderPick() {
   $('#modsum').innerHTML = parts.map(p => `<span>${esc(p)}</span>`).join('') || '<span>nothing selected</span>';
 }
 $$('#p-mods .pick input[type=checkbox]').forEach(cb => cb.onchange = () => { PICK.touched = true; renderPick(); });
+$('#stickgo').onclick = async () => {
+  const wave = $('#pk-wave-on').checked ? (MOD.wave === 'blue' ? 'rgb' : MOD.wave) : 'blue';
+  const pads = $('#pk-pads-on').checked, themes = $('#pk-themes-on').checked;
+  const flac = $('#pk-flac-on').checked, opus = flac && !!(ST.lib_formats || {}).opus;
+  const parts = [wave === 'custom' ? 'custom colour waveforms' : wave === 'rgb' ? 'colour waveforms' : wave === '3band' ? '3-band waveforms' : 'stock waveforms'];
+  if (pads) parts.push('PERFORM pads, hot cues, stems');
+  if (themes) parts.push('themes');
+  if (flac) parts.push(opus ? 'FLAC & Opus playback' : 'FLAC playback');
+  if (await ask('Write the mods to your USB stick?',
+    `${parts.join(' · ')} → ${ST.stick}/PIONEER/MODS. Live key shift, brake length and the phase meter are cable-only for now. The deck reads this folder only once its one-time loader is installed.`, 'Write'))
+    api('/api/stick/write', {mode: wave, pads, themes, flac, opus,
+      wave_colours: wave === 'custom' ? customList() : undefined}).then(r => r && watch());
+};
 $('#deckgo').onclick = async () => {
-  const wave = $('#pk-wave-on').checked ? 'rgb' : 'blue';
+  // the style picked in Theme Builder > Waveform (RGB / 3-Band / Custom) is
+  // what goes on the deck; Blue there still means the RGB waveforms here
+  const wave = $('#pk-wave-on').checked ? (MOD.wave === 'blue' ? 'rgb' : MOD.wave) : 'blue';
   const pads = $('#pk-pads-on').checked;
   const themes = $('#pk-themes-on').checked, liveks = $('#pk-liveks-on').checked, phase = $('#pk-phase-on').checked && pads;
   const flac = $('#pk-flac-on').checked, opus = flac && !!(ST.lib_formats || {}).opus;
-  const parts = [wave === 'rgb' ? 'colour waveforms' : 'stock waveforms'];
+  const parts = [wave === 'custom' ? 'custom colour waveforms (' + customList().join(', ') + ')'
+    : wave === 'rgb' ? 'colour waveforms' : wave === '3band' ? '3-band waveforms' : 'stock waveforms'];
   if (pads) parts.push('PERFORM pads');
   if (themes) parts.push('themes');
   if (liveks) parts.push('live key shift');
@@ -902,72 +968,185 @@ $('#deckgo').onclick = async () => {
   const mins = Math.round(((ST.surveyed ? 1 : 5) + 3 + 1 + 1 + 1 + 1 + 2 + (pads ? 3 : 0) + (themes ? 4 : 0) + (liveks ? 2 : 0) + (phase ? 3 : 0) + (flac ? (opus ? 5 : 2) : 0)) * 70 / 60);
   if (await ask('Install mods on the deck?',
     `${parts.join(' · ')}. It takes about ${mins} minutes, plus the moment you eject the stick when asked. Keep the USB stick out of the deck until the log asks for it. Power-cycle the deck any time to go back to stock.`, 'Install'))
-    api('/api/deck/install', {mode: wave, pads, themes, liveks, phase, flac, opus}).then(r => r && watch());
+    api('/api/deck/install', {mode: wave, pads, themes, liveks, phase, flac, opus,
+      wave_colours: wave === 'custom' ? customList() : undefined}).then(r => r && watch());
 };
 
 /* ---- Theme Builder */
 const SL = ['hue', 'vivid', 'lift', 'sat', 'val', 'spread'];
 const DEF = {hue: 210, vivid: 0, lift: 0, sat: 1, val: 1, spread: 0.5};
-const MOD = {theme: 'stock', wave: 'blue', custom: localStorage.getItem('wave_custom') || '#6ba3f0', touched: false};
+const MOD = {theme: 'stock', wave: 'blue', custom: localStorage.getItem('wave_custom') || '#6ba3f0',
+  custom2: localStorage.getItem('wave_custom2') || '#c86bf0', custom3: localStorage.getItem('wave_custom3') || '#f06b8a',
+  ncol: Math.min(3, Math.max(1, +localStorage.getItem('wave_ncol') || 1)),
+  litOn: localStorage.getItem('lit_on') === '1', lit: localStorage.getItem('lit_colour') || '#ff40c0', touched: false};
+// custom waveform colours as /api/wave + /api/preview params: 1-3 colours,
+// blended from quiet (bottom) to loud (top) when there are 2 or 3
+function customParams() {
+  const p = {custom: MOD.custom || '#6ba3f0'};
+  if (MOD.ncol >= 2) p.custom2 = MOD.custom2;
+  if (MOD.ncol >= 3) p.custom3 = MOD.custom3;
+  return p;
+}
+// the same 1-3 colours as a list: what the emulator, the deck installer and
+// the UPD builder get (tools/rgb_overview.py custom mode, 2026-11-04). One
+// set for the app, kept in studio.json by the server (state.wave_colours).
+function customList() {
+  const l = [MOD.custom || '#6ba3f0'];
+  if (MOD.ncol >= 2) l.push(MOD.custom2);
+  if (MOD.ncol >= 3) l.push(MOD.custom3);
+  return l;
+}
+let WAVE_FROM_SERVER = false;
+function customFromServer(list) {
+  if (WAVE_FROM_SERVER || !Array.isArray(list) || !list.length) return;
+  WAVE_FROM_SERVER = true;
+  [MOD.custom, MOD.custom2, MOD.custom3] = [list[0] || MOD.custom, list[1] || MOD.custom2, list[2] || MOD.custom3];
+  MOD.ncol = Math.min(3, Math.max(1, list.length));
+  try { localStorage.setItem('wave_custom', MOD.custom); localStorage.setItem('wave_custom2', MOD.custom2);
+        localStorage.setItem('wave_custom3', MOD.custom3); localStorage.setItem('wave_ncol', String(MOD.ncol)); } catch (_) {}
+}
 let pscreen = 'main', pt = null, applied = null;
 const spec = () => Object.fromEntries(SL.map(k => [k, +$('#' + k).value]));
+// + the lit-button colour (saved with the theme; the deck's theme switching
+// and the emulator use it -- mods/litbuttons.py)
+const specLit = () => MOD.litOn ? {...spec(), lit: MOD.lit} : spec();
+function setLit(on, colour) {
+  MOD.litOn = on; if (colour) MOD.lit = colour;
+  try { localStorage.setItem('lit_on', on ? '1' : '0'); localStorage.setItem('lit_colour', MOD.lit); } catch (_) {}
+}
 
 function swatches() {
   const th = Object.assign({stock: {spec: null, swatch: ['#29487a', '#3b5f99']}}, ST.themes || {});
   $('#sws').innerHTML = Object.entries(th).map(([n, t]) => `<button class="sw" aria-pressed="${n === MOD.theme}" data-n="${esc(n)}" title="${esc(n)}">
     <i style="background:linear-gradient(135deg, ${t.swatch[0]} 50%, ${t.swatch[1]} 50%)"></i><span>${esc(n)}</span></button>`).join('');
   $$('.sw').forEach(b => b.onclick = () => { MOD.theme = b.dataset.n; MOD.touched = true; usePreset(); swatches(); markDirty(); });
+  // the same list as a dropdown (saved themes from the project's mods/themes.py)
+  const sel = $('#tsel'), names = Object.keys(th);
+  const cur = names.includes(MOD.theme) ? MOD.theme : '';
+  const opts = [`<option value="" ${cur ? '' : 'selected'}>${MOD.theme === 'custom' ? 'Unsaved changes — name and save below' : 'Saved themes…'}</option>`]
+    .concat(names.map(n => `<option value="${esc(n)}" ${n === cur ? 'selected' : ''}>${esc(n)}</option>`));
+  if (sel.innerHTML !== opts.join('')) sel.innerHTML = opts.join('');
+  $('#tdel').disabled = !cur || cur === 'stock';
 }
+$('#tsel').onchange = e => { if (!e.target.value) return; MOD.theme = e.target.value; MOD.touched = true; usePreset(); swatches(); markDirty(); };
+$('#tdel').onclick = async () => {
+  const name = MOD.theme;
+  if (!name || name === 'stock' || name === 'custom') return;
+  if (!await ask(`Delete theme “${name}”?`, 'It is removed from mods/themes.py in the project folder. The sliders keep its values, so you can save it again under any name.', 'Delete')) return;
+  const r = await api('/api/theme/delete', {name}); if (!r) return;
+  if (!r.ok) return toast(r.error || 'Could not delete the theme.', true);
+  toast(`Deleted “${name}”.`);
+  MOD.theme = 'custom';                    // sliders stay as they are
+  await state(); swatches(); markDirty();
+};
 function usePreset() {
   const t = ((ST.themes || {})[MOD.theme] || {}).spec;
   SL.forEach(k => $('#' + k).value = t ? (t[k] ?? DEF[k]) : DEF[k]);
+  if (t) setLit(!!t.lit, t.lit);           // a saved theme brings its lit colour
   $('#tname').value = MOD.theme === 'stock' || MOD.theme === 'custom' ? '' : MOD.theme;
   preview();
 }
 function wopts() {
-  if (MOD.wave === 'custom') return {style: 'custom', custom: MOD.custom};
+  if (MOD.wave === 'custom') return {style: 'custom', ...customParams()};
   return {style: MOD.wave};
 }
 function preview() {
   if (TAB !== 'builder') return;
   SL.forEach(k => $('#o-' + k).textContent = k === 'hue' ? Math.round($('#' + k).value) + '°' : (+$('#' + k).value).toFixed(2));
   if ($('#customc') && MOD.custom) $('#customc').value = MOD.custom;
+  $('#customc2').value = MOD.custom2; $('#customc3').value = MOD.custom3;
+  $('#customc2').hidden = MOD.ncol < 2; $('#customc3').hidden = MOD.ncol < 3;
+  segSet('wncol', String(MOD.ncol));
+  segSet('litmode', MOD.litOn ? 'colour' : 'stock');
+  $('#litc').hidden = !MOD.litOn; $('#litc').value = MOD.lit;
+  $('#litnote').textContent = MOD.litOn
+    ? 'QUANTIZE, MASTER, SYNC, SLIP and VINYL BRAKE light up in your colour. Test in Emulator shows it; for the deck, save it with a theme (below) and install Themes: UTILITY › THEME then switches it with the theme. White and grey come out silver (the deck keeps the shading to switch exactly).'
+    : 'QUANTIZE red, MASTER orange, SLIP and VINYL BRAKE in the theme colour. See them under Lit buttons in the preview.';
   $('#wcustom').hidden = MOD.wave !== 'custom';
   $('#wnote').textContent = {blue: 'Stock XDJ-700 blue waveform.', rgb: 'Each track shows its own rekordbox colours.', '3band': 'Lows in the core, mids, then highs on the outside -- on both the overview and the centre waveform.',
-    custom: 'Your colour, stock waveform shape.'}[MOD.wave];
+    custom: MOD.ncol === 1 ? 'Your colour, stock waveform shape.' : `${MOD.ncol} colours blended from quiet to loud (first swatch to last), stock waveform shape.`}[MOD.wave];
+  $('#nofw').hidden = ST.fw_ready !== false;
   clearTimeout(pt);
-  pt = setTimeout(() => {
-    const p = MOD.theme === 'stock' ? {hue: 'stock'} : spec();
-    $('#pimg').src = '/api/preview?' + new URLSearchParams({...p, ...wopts(), screen: pscreen, wave: 0, track: CUR || ''});
+  pt = setTimeout(async () => {
     const t = CUR && track(CUR);
     $('#ptrack').textContent = t ? t.title : 'Pick a track in Track Builder to preview its waveforms';
+    if (ST.fw_ready === false) return previewMsg('Add your XDJ-700 firmware file (Home › Setup) to see the deck screen here.');
+    const p = MOD.theme === 'stock' ? {hue: 'stock'} : spec();
+    const url = '/api/preview?' + new URLSearchParams({...p, ...wopts(), ...(MOD.litOn ? {lit: MOD.lit} : {}), screen: pscreen, wave: 0, track: CUR || ''});
+    const my = ++PREVIEW_N;
+    // the first render scans the library for a demo track: say so instead of a black box
+    const slow = setTimeout(() => { if (my === PREVIEW_N && !$('#pimg').getAttribute('src')) previewMsg('Rendering the deck screen… the first one reads your library.'); }, 600);
+    try {
+      // fetch (not <img src>): a server error is JSON text we can show,
+      // not a broken-image icon on a black box
+      const r = await fetch(url);
+      if (my !== PREVIEW_N) return;
+      if (!r.ok) { let m = `Preview failed (${r.status}).`; try { m = (await r.json()).error || m; } catch (_) {} return previewMsg(m); }
+      const b = await r.blob(); if (my !== PREVIEW_N) return;
+      const img = $('#pimg'), old = img.dataset.blob;
+      img.src = img.dataset.blob = URL.createObjectURL(b);
+      if (old) URL.revokeObjectURL(old);
+      previewMsg('');
+    } catch (e) { if (my === PREVIEW_N) previewMsg('Studio is not responding.'); }
+    finally { clearTimeout(slow); }
   }, 90);
 }
+let PREVIEW_N = 0;
+function previewMsg(m) { const el = $('#pmsg'); el.hidden = !m; el.textContent = m; if (m) $('#pimg').removeAttribute('src'); }
+$('#nofwadd').onclick = addFirmware;
 SL.forEach(k => $('#' + k).oninput = () => { MOD.theme = 'custom'; MOD.touched = true; swatches(); preview(); markDirty(); });
 $$('#wstyle button').forEach(b => b.onclick = () => { MOD.wave = b.dataset.v; MOD.touched = true; segSet('wstyle', MOD.wave); preview(); markDirty(); });
-$('#customc').oninput = e => { MOD.custom = e.target.value; try { localStorage.setItem('wave_custom', MOD.custom); } catch (_) {} MOD.touched = true; preview(); markDirty(); };
+[['customc', 'custom', 'wave_custom'], ['customc2', 'custom2', 'wave_custom2'], ['customc3', 'custom3', 'wave_custom3']].forEach(([id, k, ls]) =>
+  $('#' + id).oninput = e => { MOD[k] = e.target.value; try { localStorage.setItem(ls, MOD[k]); } catch (_) {} MOD.touched = true; preview(); markDirty(); });
+$$('#wncol button').forEach(b => b.onclick = () => { MOD.ncol = +b.dataset.v; try { localStorage.setItem('wave_ncol', MOD.ncol); } catch (_) {} MOD.touched = true; preview(); markDirty(); });
 $$('#pscreen button').forEach(b => b.onclick = () => { pscreen = b.dataset.v; segSet('pscreen', pscreen); preview(); });
+// lit-button colour: saved with the theme; a change makes a saved theme "unsaved"
+const showLit = () => { if (pscreen !== 'lit') { pscreen = 'lit'; segSet('pscreen', pscreen); } };
+function litChanged() {
+  const t = ((ST.themes || {})[MOD.theme] || {}).spec;
+  if (t && MOD.theme !== 'stock' && (t.lit || '') !== (MOD.litOn ? MOD.lit : '')) { MOD.theme = 'custom'; swatches(); }
+  MOD.touched = true; showLit(); preview(); markDirty();
+}
+$$('#litmode button').forEach(b => b.onclick = () => { setLit(b.dataset.v === 'colour'); litChanged(); });
+$('#litc').oninput = e => { setLit(true, e.target.value); litChanged(); };
 
 $('#tsave').onclick = async () => {
   const name = $('#tname').value.trim().toLowerCase();
   if (!/^[a-z0-9][a-z0-9-]*$/.test(name)) return toast('Name the theme with lowercase letters, numbers and dashes.', true);
   if (!ST.themes_ok) return toast('Theme engine not found. Choose the project folder in Settings.', true);
-  const r = await api('/api/theme/save', {name, spec: spec()}); if (!r) return;
+  const r = await api('/api/theme/save', {name, spec: specLit()}); if (!r) return;
   watch(); toast(`Saving “${name}”…`);
-  setTimeout(async () => { await state(); MOD.theme = name; swatches(); }, 2500);
+  // the save is a short job: refresh the theme list when it is done
+  const t0 = Date.now();
+  const tick = async () => {
+    const js = await api('/api/jobs') || [];
+    const j = js.find(x => x.title === `Save theme ${name}`);
+    if (j && j.state === 'running' && Date.now() - t0 < 60000) return setTimeout(tick, 700);
+    await state(); if (j && j.state === 'done') MOD.theme = name; swatches(); markDirty();
+  };
+  setTimeout(tick, 700);
 };
 
 /* Theme Builder -> emulator hand-off */
 function draftMods() {
-  const t = MOD.theme === 'stock' ? null : {name: MOD.theme, spec: spec()};
-  return {theme: t, wave: MOD.wave};
+  const t = MOD.theme !== 'stock' ? {name: MOD.theme, spec: specLit()}
+    : MOD.litOn ? {name: 'stock', spec: {lit: MOD.lit}} : null;   // stock + lit buttons
+  return {theme: t, wave: MOD.wave, wave_colours: MOD.wave === 'custom' ? customList() : undefined};
 }
 async function applyMods() {
   const d = draftMods();
   const r = await api('/api/emu/cmd', {cmd: 'mods', ...d}); if (!r) return false;
-  applied = JSON.stringify(d); markDirty(); return true;
+  applied = JSON.stringify(d); markDirty();
+  $('#modsnote').textContent = 'Applying to the emulator…';
+  if (TAB === 'emu') emuPoll();
+  return true;
 }
-function markDirty() { $('#dirty').hidden = applied === null || applied === JSON.stringify(draftMods()); }
+function markDirty() {
+  const d = draftMods(), same = applied === JSON.stringify(d);
+  $('#dirty').hidden = applied === null || same;
+  const wn = {blue: 'Blue', rgb: 'RGB', '3band': '3-Band', custom: 'Custom colours'}[d.wave] || d.wave;
+  $('#modsline').textContent = `Theme Builder now: ${d.theme ? d.theme.name : 'stock'}${MOD.litOn ? ' · lit ' + MOD.lit : ''} · ${wn}` + (applied === null ? ' — not sent to the emulator yet' : same ? ' — in the emulator' : '');
+}
 $('#testemu').onclick = async () => { if (await applyMods()) showTab('emu'); };
 $('#applymods').onclick = applyMods;
 
@@ -1031,6 +1210,8 @@ async function emuPoll() {
   $('#a-theme').textContent = s.theme || 'stock';
   $('#a-wave').textContent = s.stock ? (s.wave === 'blue' ? 'stock' : s.wave) : 'from the build';
   $('#a-bj') && ($('#a-bj').textContent = '');
+  $('#modsnote').textContent = s.mods_note || '';
+  $('#applymods').disabled = !!s.mods_busy;
   const nm = p => (p || '').split('/').filter(Boolean).pop();
   $('#usbline').textContent = s.usb ? `Inserted: ${nm(s.usb)}` : (ST.stick_ok ? `Library: ${nm(ST.stick)}` : 'No library folder chosen yet.');
   $('#usbbtn').textContent = s.usb ? 'Eject' : 'Insert library'; $('#usbbtn').dataset.in = s.usb ? '1' : '';
@@ -1167,7 +1348,7 @@ function pick(d) {
   $('#imeta').innerHTML = [t.artist, t.bpm && t.bpm.toFixed(1) + ' BPM', fmtT(t.duration), t.three_band ? '3-band ready' : t.has_2ex ? '3-band in rekordbox' : 'no 3-band yet']
     .filter(Boolean).map(x => `<span>${esc(x)}</span>`).join('');
   ['rgb', '3band', 'blue'].forEach(s => $('#w-' + s).src = `/api/wave?dir=${encodeURIComponent(d)}&style=${s}&tint=stock`);
-  $('#w-custom').src = `/api/wave?dir=${encodeURIComponent(d)}&style=custom&custom=${encodeURIComponent(MOD.custom || '#6ba3f0')}`;
+  $('#w-custom').src = `/api/wave?dir=${encodeURIComponent(d)}&` + new URLSearchParams({style: 'custom', ...customParams()});
   const showx7s = false;   // sidecar -> key/stem VERSION file retired 2026-10-19 (stems = STEMS-4 only)
   $('#x7srow').hidden = !showx7s;
   $('#x7krow').hidden = !(t.exists && t.duration);
@@ -1239,7 +1420,13 @@ $('#ix7s').onclick = async () => {
 /* ---- Settings */
 function fillSettings() {
   if (!$('#stick').value) $('#stick').value = ST.stick || '';
-  if (!$('#project').value) $('#project').value = ST.project || '';
+  if (!$('#project').value) $('#project').value = ST.project_pending || ST.project || '';
+  $('#projdefault').textContent = ST.project_default || '';
+  $('#projkind').textContent = ST.project_default_kind || 'the folder inside the app';
+  $('#projexample').textContent = ST.windows ? 'Documents\\XDJ Project' : 'Documents/XDJ Project';
+  $('#project').placeholder = ST.windows ? 'C:\\Users\\you\\Documents\\XDJ Project' : '/Users/you/Documents/XDJ Project';
+  $('#projreset').hidden = !ST.project_custom;
+  $('#projstate').textContent = ST.project_custom ? (ST.project_pending === ST.project ? '— using your own folder' : '— your own folder is saved; quit and reopen Studio to use it') : '— in use';
 }
 async function setStick(p) {
   const r = await api('/api/stick', {path: p}); if (!r) return;
@@ -1250,15 +1437,37 @@ $('#stickpick').onclick = async () => { const p = await pickFolder('Choose your 
 $('#stickbtn').onclick = () => setStick($('#stick').value);
 async function setProject(p) {
   const r = await api('/api/project', {path: p}); if (!r) return;
-  $('#projmsg').textContent = !r.ok ? 'That folder has no tools folder in it.' : r.restart ? 'Saved. Quit and reopen Studio to use it.' : 'Already in use.';
+  $('#projmsg').textContent = !r.ok ? 'That folder has no tools folder in it: press “Set up this folder” to fill it first.' : r.restart ? 'Saved. Quit and reopen Studio to use it.' : 'Already in use.';
+  await state(); fillSettings();
 }
+async function setupProject(p) {
+  p = (p || '').trim();
+  if (!p) return toast('Type or choose the folder first.', true);
+  if (!await ask('Set up this folder as your project folder?',
+    `${p}\n\nStudio copies the mods, tools, prebuilt deck modules and the audio-chip disassembler into it (a few MB), plus your official update file when it knows where it is. Files already there are kept.`, 'Set up')) return;
+  const r = await api('/api/project/setup', {path: p}); if (!r) return;
+  if (!r.ok) { $('#projmsg').textContent = r.error || 'Could not set up that folder.'; return; }
+  $('#projmsg').textContent = `${r.copied} files copied${r.kept ? `, ${r.kept} already there` : ''}. ` +
+    (r.firmware ? 'Update file is in place. ' : 'Now put your XDJ700.UPD in it. ') + (r.restart ? 'Quit and reopen Studio to use it.' : '');
+  await state(); fillSettings();
+}
+async function resetProject() {
+  if (!await ask('Reset to the default project folder?',
+    `Studio goes back to ${ST.project_default_kind || 'the default folder'}. Your own folder and everything in it stay where they are.`, 'Reset')) return;
+  const r = await api('/api/project/reset', {}); if (!r) return;
+  $('#project').value = r.path;
+  $('#projmsg').textContent = r.restart ? 'Reset. Quit and reopen Studio to use it.' : 'Already using the default folder.';
+  await state(); fillSettings();
+}
+$('#projsetup').onclick = () => setupProject($('#project').value);
+$('#projreset').onclick = resetProject;
 $('#projpick').onclick = async () => { const p = await pickFolder('Choose the project folder'); if (p) { $('#project').value = p; setProject(p); } };
 $('#projbtn').onclick = () => setProject($('#project').value);
 
 
 /* ---- Activity: friendly build cards with progress + ETA */
 function jobCard(j) {
-  const el = Math.max(0, Date.now() / 1000 - j.t0);
+  const el = Math.max(0, (j.t1 || Date.now() / 1000) - j.t0);   // t1: when it finished
   let bar = '', note = j.note || '', meta = `${Math.floor(el / 60)}:${String(Math.floor(el % 60)).padStart(2, '0')} so far`;
   if (j.state === 'running') {
     // time left comes from the server (studio/app.py eta_left: recent
@@ -1281,10 +1490,37 @@ function jobCard(j) {
     note = note || 'Finished';
     meta = `took ${Math.floor(el / 60)} min ${Math.floor(el % 60)} s`;
   }
-  const log = (j.log || []).slice(-14).join('\n');
-  return `<div class="job"><div class="t"><b>${esc(j.title)}</b><span class="s ${j.state}">${j.state}</span></div>
+  const log = (j.log || []).slice(-40).join('\n');
+  // the card is re-rendered every second while a job runs: keep Details
+  // open if the user opened it (JOB_OPEN), else it snapped shut at once
+  const open = JOB_OPEN.has(j.id) ? ' open' : '';
+  return `<div class="job" data-id="${j.id}"><div class="t"><b>${esc(j.title)}</b><span class="s ${j.state}">${j.state}</span></div>
     ${note ? `<div class="note">${esc(note)}</div>` : ''}${bar}<div class="meta">${meta}</div>
-    ${log ? `<details><summary>Details</summary><pre>${esc(log)}</pre></details>` : ''}</div>`;
+    ${log ? `<details${open}><summary>Details</summary><pre>${esc(log)}</pre></details>` : ''}</div>`;
+}
+const JOB_OPEN = new Set();
+// <details> toggle does not bubble: listen in the capture phase on the containers
+for (const id of ['jobs', 'dprog']) {
+  const el = $('#' + id);
+  if (el) el.addEventListener('toggle', e => {
+    const card = e.target.closest('.job'); if (!card) return;
+    const jid = +card.dataset.id;
+    if (e.target.open) JOB_OPEN.add(jid); else JOB_OPEN.delete(jid);
+  }, true);
+}
+// replace a card's HTML only when it changed. A running job changes every
+// second (time, log), so put each open log back where it was: same scroll
+// offset, or still at the end if it was at the end (new lines stay in view)
+function renderJobs(el, html) {
+  if (el.dataset.html === html) return;
+  const pos = {};
+  for (const p of el.querySelectorAll('.job details[open] pre'))
+    pos[p.closest('.job').dataset.id] = p.scrollHeight - p.scrollTop - p.clientHeight < 4 ? -1 : p.scrollTop;
+  el.dataset.html = html; el.innerHTML = html;
+  for (const p of el.querySelectorAll('.job details[open] pre')) {
+    const s = pos[p.closest('.job').dataset.id];
+    if (s !== undefined) p.scrollTop = s < 0 ? p.scrollHeight : s;
+  }
 }
 let polling = false;
 function watch() { $('#act').classList.add('on'); if (!polling) poll(); }
@@ -1307,7 +1543,8 @@ async function reinstall() {
   const m = savedMods(); if (!m) return;
   const js = await api('/api/jobs') || [];
   if (js.some(j => j.state === 'running')) return toast('Something is already running: wait for it to finish.', true);
-  api('/api/deck/install', {mode: m.mode, pads: m.pads, themes: m.themes, liveks: m.liveks, phase: m.phase, brake: m.brake}).then(r => r && watch());
+  api('/api/deck/install', {mode: m.mode, pads: m.pads, themes: m.themes, liveks: m.liveks, phase: m.phase, brake: m.brake,
+    wave_colours: m.mode === 'custom' ? (m.colours || customList()) : undefined}).then(r => r && watch());
 }
 async function offerReinstall() {
   const m = savedMods(); if (!m) return;
@@ -1319,9 +1556,9 @@ document.addEventListener('click', e => { if (e.target.closest('.creinst')) rein
 async function poll() {
   polling = true;
   const js = await api('/api/jobs') || [];
-  $('#jobs').innerHTML = js.length ? js.slice(0, 8).map(jobCard).join('') : '<div class="empty">Nothing has run yet.</div>';
+  renderJobs($('#jobs'), js.length ? js.slice(0, 8).map(jobCard).join('') : '<div class="empty">Nothing has run yet.</div>');
   const inst = js.find(j => j.title.startsWith('Install mods'));
-  $('#dprog').innerHTML = inst ? jobCard(inst) : '';
+  renderJobs($('#dprog'), inst ? jobCard(inst) : '');
   const running = js.some(j => j.state === 'running');
   $('#actdot').hidden = !running; $('#actdot').className = 'dot run';
   if (running) setTimeout(poll, 1000); else { polling = false; if (LIB.loaded) load(); }

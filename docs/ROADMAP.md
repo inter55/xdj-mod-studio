@@ -265,6 +265,75 @@ overview, beat jump, key shift, stems, extended hot cues all worked.
   pack" builder. One-time flash approved "if u can guarantee it works":
   exhaustive emulator proof, recovery path written down first, careful
   first deck flash with a boot test.
+  2026-11-04: loader cache bug fixed (the after-read pass was ocbi, which
+  drops a CPU-copied payload on the deck's copy-back cache; now ocbp, and
+  build.sh fails on any ocbi). Built with tools/build_sh_gcc.sh (GCC
+  14.2.0); tools/usbloader_test.py good/badsum/nofile PASS on the shipped
+  main-screen snapshot. The emulator has no cache model, so the cache fix
+  itself is checked by disassembly, not by the emulator run.
+  Stage-2 (same day): MODS.BIN = tools/usbloader/s2.c, a 1.4 KB installer
+  that streams PIONEER/MODS/PACK.BIN (tools/usbpack.py: the UPD baker's
+  installers + theme switching run against a recording memory; records =
+  surveyed zero homes, data runs, lit pictures as expected-sum writes, arm
+  words LAST with the stock value each must still hold) straight into RAM
+  through the P2 alias, purging lines before/after, I-cache invalidated
+  before the arms; the arms are written only after the whole file summed
+  right. tools/usbpack_test.py: full pack (overview, versions, pads,
+  centre, phase meter, 8 hot cues, stems, UTILITY, 8 themes + 1 lit) on
+  the emulated deck; PERFORM + theme push work live.
+  FLAC/Opus (same day): usbpack.py --flac opus|flac adds the vfile layer
+  (541 KB home surveyed, 157 KB image, chain words from the live read
+  slots, JPEG->OPUS as an expected-sum write, type halfwords + six slots
+  as arms, read hooks last): 91 records, 355 KB, 30 arms. usbpack_test.py
+  flac (real-DSP snapshot): the deck lists generated FLAC/Opus files with
+  their durations, opens each through the layer and loads them (mode word
+  at cue / playing). LESSON (2026-11-04): the instant main-screen snapshot
+  has no DSP and cannot finish ANY track load -- WAV, Opus and FLAC all end
+  in E-8302 (300E in the first list row, 300A once streaming); an
+  afternoon went into "FLAC fails" before a plain WAV control showed it.
+  Track-load tests belong on dspsound.pkl.gz.
+  Not yet: key shift (needs the hot DSP patch), the pack builder in the
+  Studio, the RAM-only rehearsal on the deck, the UPD with the loader as a
+  permanent_build extra.
+- Custom waveform colours on the deck (2026-11-04, user-asked before the
+  Studio's stick button): overview cave mode 3 recolours the stock bar
+  row by row from a 34-entry table at CAVE+0x780 (rgb_overview.custom_table
+  = the preview's grad565 ramp); the centre module (tools/centre/cw.c)
+  mode 3 reads a 55-row ramp or a tinted 8-entry palette shipped in its
+  own bss (rgb_detail.custom_tables / install_custom); UTILITY WAVEFORM
+  COLOR = 4 values. Carried by rgb_overview_apply / rgb_detail_apply
+  --colours, deck_session --colours, permanent_build --colours, usbpack
+  --colours, emu apply_wave(name, colours) and the Studio (settings
+  wave_colours; Theme Builder style drives the cable install). Proof:
+  tools/custom_wave_emu_test.py on the real-DSP snapshot. Next: the real
+  deck (cable, RAM-only).
+- Studio "Write to USB stick" (2026-11-04): Mods page button -> /api/stick/
+  write -> j_stick_write -> tools/usbpack.py --stick (picks: mode +
+  colours, --no-pads, --no-themes, --flac opus|flac); writes MODS.BIN (the
+  stage-2, build/usbloader, else prebuilt/deck/usbloader) + PACK.BIN into
+  PIONEER/MODS,
+  read back and compared. usbpack_test.py stick (STICKDIR=) installs from
+  the written files. Still needed before it is useful: the stage-1 loader
+  on the deck (RAM-only rehearsal over the cable, then a permanent_build
+  extra), and key shift / brake / phase meter in the pack.
+  Rehearsal tooling (2026-11-04): tools/usbloader_apply.py (--survey,
+  install+arm with fastload + LW self-test, --status, --check-marker,
+  --rearm, --revert) and usbpack.py --marker (a no-arm pack: 4 KB of a
+  known pattern into the theme switcher's zero home = the copy-back cache
+  test the emulator cannot do). Rehearsal order on the deck: --survey;
+  install (2-3 short sessions); plain stick -> --status NOFILE; stick
+  with MODS.BIN + the marker PACK.BIN -> --check-marker PASS; the Studio's
+  real pack -> use the mods; power cycle = stock. Proven on the mock deck
+  (tools/mock) against the emulator; not yet on hardware.
+  App build (2026-11-04): tools/build_studio.sh now ships build/usbloader
+  (ul + s2; the packaged app had no stage-2, so "Write to USB stick" only
+  worked from a checkout), and with work/sh-tools present it no longer
+  stops on modules it cannot rebuild here: xflac_flac needs work/drflac,
+  keyshift needs work/tic6x-tools -- both fall back to prebuilt/deck.
+  Proven: PUBLIC=1 build installed in /Applications, its bundled
+  interpreter wrote a stick folder (MODS.BIN 1,476 B, PACK.BIN 193,448 B,
+  read back). Lesson: a new deck module needs a line in build_studio.sh's
+  copy list, or the packaged app silently lacks it.
 - The new 3-mode app (cable / USB stick / firmware UPD).
 - Bug list proven on the deck: FLAC load freeze, key shift right-channel
   noise on AIFF, BJ 32/64, lit-button theme stripes (+ light mode, 8 hot
@@ -300,3 +369,33 @@ overview, beat jump, key shift, stems, extended hot cues all worked.
 
 ## Not planned
 - StreamingDirectPlay (partner logins/DRM). Other decks: XDJ-700 only.
+
+## Colour mods (user ideas, 2026-11-04)
+Order agreed: lit-button colour first, then button borders/frames.
+- **Lit-button colour** (DONE 2026-11-04 in preview, emulator and the deck
+  theme switcher; DECK TEST PENDING). mods/litbuttons.py holds the
+  addresses and the one colour rule used by all three. Lit touch buttons
+  are 72x53 RGB565 sprites, 4 per button (lit, lit-pressed, unlit,
+  unlit-pressed): QUANTIZE 0x0826AAF0.. (red), MASTER 0x088647E0/0x088665B0
+  (orange), SLIP 0x0886BF20/0x0886DCF0 (blue), VINYL BRAKE
+  0x0887E940/0x08880710 (blue) + brake 0x088824E0/0x088842B0 (red); SYNC
+  lit is neutral grey. ts.c maps colours with ONE global table and the lit
+  pictures share colours with other art, so no ts.c change: the installer
+  moves the lit pictures' shared colours to private ones 1 LSB away
+  (theme_switch.lit_private, 502 colours, 28 k px) and the tables map them.
+  The lit maths rolls off saturation/brightness instead of clipping (the
+  one-to-one tables cannot merge colours; clipped white speckled pink and
+  green): white and grey read silver.
+- Button borders / frames (grey chrome of the touch buttons): pictures,
+  same method.
+- Cue / loop / hot-cue marker colours: probably colour tables; research.
+- Text colours (track name, time, BPM) and background tint: drawn by code
+  (2DG fills carry a colour word) -- research item, also needed for the
+  light theme.
+- **Own picture instead of the big rekordbox logo** (no-track splash on
+  the player screen): it is a blitted picture, so a same-size RGB565
+  replacement written to RAM by the installer (like the theme switcher
+  writes pixels) looks possible; size, transparency key 0xF81F and the
+  fingerprint safety check to be measured first.
+- Physical button LEDs: single-colour LEDs, colour cannot change (only
+  on / off / blink).

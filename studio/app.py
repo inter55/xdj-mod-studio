@@ -95,7 +95,7 @@ UIHTML = os.path.join(BUNDLE, "studio", "ui.html") if FROZEN else os.path.join(H
 
 APP_SUPPORT = app_support_dir()
 # the app's own release number (GitHub release tag v<APP_VERSION>)
-APP_VERSION = "0.99"
+APP_VERSION = "0.99.5"
 RELEASES_API = "https://api.github.com/repos/inter55/xdj-mod-studio/releases/latest"
 RELEASES_PAGE = "https://github.com/inter55/xdj-mod-studio/releases/latest"
 SETTINGS = os.path.join(APP_SUPPORT, "studio.json")
@@ -156,6 +156,83 @@ def find_project():
             return os.path.abspath(c)
     return os.path.abspath(next((c for c in cands if c and os.path.isdir(c)),
                                 os.path.dirname(HERE)))
+
+
+def default_project():
+    """The project folder Studio uses with no choice made in Settings: the
+    repo bundled in the app, else the source checkout."""
+    for c in (_bundle_repo(), os.environ.get("XDJ_ROOT"), os.path.dirname(HERE)):
+        if c and os.path.isdir(os.path.join(c, "tools")):
+            return os.path.abspath(c)
+    return os.path.abspath(os.path.dirname(HERE))
+
+
+# what a project folder of your own needs from the default one (relative
+# paths; whole folders are copied, files are never overwritten)
+PROJECT_PARTS = ("tools", "mods", "build", "prebuilt", "work/tic6x",
+                 "TESTER_README.md")
+
+
+def project_setup(path):
+    """Make `path` a usable project folder: copy the mods, tools, prebuilt
+    deck modules and the audio-chip disassembler from the default folder,
+    and the official update file when Studio knows where it is. Existing
+    files are kept (your themes.py stays yours). Returns what happened."""
+    src = default_project()
+    path = os.path.abspath(os.path.expanduser(path))
+    if os.path.realpath(path) == os.path.realpath(src):
+        return {"ok": False, "error": "That is the default folder itself. "
+                                      "Choose an empty folder of your own."}
+    if path.startswith(os.path.realpath(src) + os.sep):
+        return {"ok": False, "error": "Choose a folder outside the app."}
+    os.makedirs(path, exist_ok=True)
+    copied = skipped = 0
+    for rel in PROJECT_PARTS:
+        s = os.path.join(src, rel)
+        d = os.path.join(path, rel)
+        if os.path.isdir(s):
+            for dp, dirs, files in os.walk(s):
+                dirs[:] = [x for x in dirs if x != "__pycache__" and not x.startswith(".")]
+                for f in files:
+                    sf = os.path.join(dp, f)
+                    df = os.path.join(d, os.path.relpath(sf, s))
+                    if os.path.exists(df):
+                        skipped += 1
+                        continue
+                    os.makedirs(os.path.dirname(df), exist_ok=True)
+                    shutil.copy2(sf, df)
+                    copied += 1
+        elif os.path.isfile(s):
+            if os.path.exists(d):
+                skipped += 1
+            else:
+                shutil.copy2(s, d)
+                copied += 1
+    for rel in ("cache", "build"):
+        os.makedirs(os.path.join(path, rel), exist_ok=True)
+    # the official update file: the one chosen on the UPD page, else one
+    # lying in the default folder (a developer checkout); never from the
+    # firmware home (that holds derived files, not the update file)
+    upd = None
+    cand = settings().get("upd")
+    if cand and os.path.isfile(os.path.expanduser(cand)):
+        upd = os.path.expanduser(cand)
+    else:
+        for c in ("XDJ700.UPD", os.path.join("build", "XDJ700.UPD")):
+            if os.path.isfile(os.path.join(src, c)):
+                upd = os.path.join(src, c)
+                break
+    fw = os.path.join(path, "XDJ700.UPD")
+    fw_copied = False
+    if upd and not os.path.exists(fw) and os.path.realpath(upd) != os.path.realpath(fw):
+        shutil.copy2(upd, fw)
+        fw_copied = True
+    s = settings()
+    s["project"] = path
+    save_settings(s)
+    return {"ok": True, "path": path, "copied": copied, "kept": skipped,
+            "firmware": fw_copied or os.path.exists(fw),
+            "restart": path != ROOT}
 
 
 ROOT = find_project()
@@ -257,6 +334,7 @@ def job(title, fn, *args):
         _SCAN.clear()
         with LOCK:
             JOBS[jid]["state"] = st
+            JOBS[jid]["t1"] = time.time()
     threading.Thread(target=run, daemon=True).start()
     return jid
 
@@ -293,17 +371,50 @@ def run_tool_main(argv):
 
 # --------------------------------------------------------------- tracks ---
 _SCAN = {}
+_SCAN_BUSY = set()
+_SCAN_LOCK = threading.Lock()
+SCAN_TTL = 60
 
 
 def scan(stick):
-    """Library scan, cached for a few seconds (the previews and the track
-    list all ask for it); jobs invalidate it when they finish."""
-    hit = _SCAN.get(stick)
-    if hit and time.time() - hit[0] < 20:
-        return hit[1]
-    res = _scan(stick)
-    _SCAN[stick] = (time.time(), res)
-    return res
+    """Library scan (the previews and the track list all ask for it).
+    A full scan reads every track's analysis file and tails every audio
+    file: ~35 s for 1100 tracks on a USB stick. So: the first call blocks
+    (single-flight), later calls answer from the cache at once and refresh
+    it in the background once it is older than SCAN_TTL. Jobs clear the
+    cache when they finish (their results must show right away)."""
+    with _SCAN_LOCK:
+        hit = _SCAN.get(stick)
+        if hit:
+            if time.time() - hit[0] >= SCAN_TTL and stick not in _SCAN_BUSY:
+                _SCAN_BUSY.add(stick)
+                threading.Thread(target=_rescan, args=(stick,), daemon=True).start()
+            return hit[1]
+        if stick in _SCAN_BUSY:            # another request is scanning: wait
+            busy = True
+        else:
+            _SCAN_BUSY.add(stick)
+            busy = False
+    if busy:
+        while True:
+            time.sleep(0.1)
+            with _SCAN_LOCK:
+                hit = _SCAN.get(stick)
+                if hit or stick not in _SCAN_BUSY:
+                    break
+        return hit[1] if hit else scan(stick)
+    return _rescan(stick)
+
+
+def _rescan(stick):
+    try:
+        res = _scan(stick)
+        with _SCAN_LOCK:
+            _SCAN[stick] = (time.time(), res)
+        return res
+    finally:
+        with _SCAN_LOCK:
+            _SCAN_BUSY.discard(stick)
 
 
 def _scan(stick):
@@ -423,6 +534,7 @@ def job_view(j):
     v = {k: j[k] for k in ("id", "title", "state", "log", "t0", "frac",
                            "note", "wait")}
     v["left"] = eta_left(j)
+    v["t1"] = j.get("t1")                  # finish time: "took …" stops counting
     return v
 
 
@@ -701,6 +813,27 @@ def hex565(h):
     return ((r >> 3) << 11) | ((g >> 2) << 5) | (b >> 3)
 
 
+def custom_colours(w):
+    """The custom waveform's 1-3 colours (RGB565), from w["custom"],
+    w["custom2"], w["custom3"]; missing or bad ones are skipped."""
+    out = []
+    for k in ("custom", "custom2", "custom3"):
+        v = w.get(k)
+        if isinstance(v, str) and v:
+            try:
+                out.append(hex565(v))
+            except Exception:
+                pass
+    return out or [hex565("#6ba3f0")]
+
+
+def grad565(cols, t):
+    """Colour at t (0..1) on a straight RGB blend through cols (RGB565):
+    the deck's table maths (tools/rgb_overview.py), one source"""
+    import rgb_overview as RO
+    return RO.grad565(cols, t)
+
+
 def wave_cols(stick, d, style, w):
     """[col][k] RGB565 (k = 0 bottom) exactly like the deck's overview.
 
@@ -736,11 +869,12 @@ def wave_cols(stick, d, style, w):
     if not pw:
         return None
     col = STOCK_BLUE
+    grad = None
     if style == "custom":
-        try:
-            col = hex565(w.get("custom") or "#6ba3f0")
-        except Exception:
-            col = STOCK_BLUE
+        cc = custom_colours(w)
+        col = cc[0]
+        if len(cc) > 1:               # 2-3 colours: bottom -> top of the bar
+            grad = [grad565(cc, k / (RO.ROWS - 1)) for k in range(RO.ROWS)]
     elif style == "blue":
         # Legacy compat: very old saved themes stored a custom tint under
         # style=blue + tint=#hex. Honour it so old previews still render;
@@ -758,7 +892,7 @@ def wave_cols(stick, d, style, w):
     for c in range(RO.COLS):
         b = pw[c * len(pw) // RO.COLS]
         h = (b & 31) * RO.ROWS // 31
-        out.append([col if k < h else 0 for k in range(RO.ROWS)])
+        out.append([(grad[k] if grad else col) if k < h else 0 for k in range(RO.ROWS)])
     return out
 
 
@@ -789,7 +923,22 @@ def demo_track(stick):
     longest audio file. Deterministic. Falls back to any usable track."""
     import make_3band as M3
     tracks = scan(stick)["tracks"]
+    # Reading every track's ANLZ .DAT + .EXT (a few MB each) over USB took
+    # minutes on a 1100-track stick, on EVERY preview: the Theme Builder
+    # showed a black box forever. Remember the pick per library (the
+    # track count is the cheap "has it changed" key, in memory and on disk)
+    # and stop looking once enough complete tracks have been seen.
+    ck = f"{stick}|{len(tracks)}"
+    hit = _DEMO_CACHE.get(ck)
+    if hit is not None:
+        return hit or None
+    disk = _read_json(DEMO_CACHE_FILE, {})
+    if disk.get("key") == ck and (not disk.get("dir") or os.path.isdir(
+            os.path.join(stick, disk["dir"]))):
+        _DEMO_CACHE[ck] = disk.get("dir") or ""
+        return disk.get("dir") or None
     best = None
+    complete = 0
     for r in tracks:
         if not r["exists"]:
             continue
@@ -812,26 +961,36 @@ def demo_track(stick):
         key = (score, size)
         if best is None or key > best[0]:
             best = (key, r["dir"])
-    if best:
-        return best[1]
-    for r in tracks:
-        if r["exists"]:
-            return r["dir"]
-    return None
+        if score == 4:
+            complete += 1
+            if complete >= DEMO_CANDIDATES:
+                break
+    out = best[1] if best else next((r["dir"] for r in tracks if r["exists"]), None)
+    _DEMO_CACHE[ck] = out or ""
+    try:
+        os.makedirs(os.path.dirname(DEMO_CACHE_FILE), exist_ok=True)
+        with open(DEMO_CACHE_FILE, "w") as f:
+            json.dump({"key": ck, "dir": out or ""}, f)
+    except OSError:
+        pass
+    return out
 
 
-STOCK_DETAIL = (0x09F1, 0x0AF7, 0x037F, 0x0D5E, 0x55BE, 0x757F, 0x757F, 0xCF3F)
+_DEMO_CACHE = {}
+DEMO_CANDIDATES = 24        # complete tracks to compare before picking
+DEMO_CACHE_FILE = os.path.join(APP_SUPPORT, "cache", "demo_track.json")
+
+
+STOCK_DETAIL = (0x09F1, 0x0AF7, 0x037F, 0x0D5E, 0x55BE, 0x757F, 0x757F, 0xCF3F)  # == rgb_detail.STOCK_DETAIL
 CENTRE = {"main": dict(x0=116, cx=366, cy=240, rmax=55),      # playhead x 366
           "perform": dict(x0=116, cx=366, cy=100, rmax=34)}
 
 
 def _tint_spec(c565):
-    """A theme spec that moves the stock blue onto colour c565."""
-    import colorsys
-    r, g, b = ((c565 >> 11) & 31) / 31, ((c565 >> 5) & 63) / 63, (c565 & 31) / 31
-    h, sat, v = colorsys.rgb_to_hsv(r, g, b)
-    return {"hue": h * 360, "sat": 1.0 + sat, "val": 0.6 + v * 0.5,
-            "spread": 0.3, "vivid": sat * 0.6}
+    """A theme spec that moves the stock blue onto colour c565 (the deck's
+    1-colour centre tint, tools/rgb_detail.py: one source)."""
+    import rgb_detail as RD
+    return RD.tint_spec(c565)
 
 
 def centre_cols(stick, d, style, w, pos_frac=0.4, step=2):
@@ -883,9 +1042,23 @@ def centre_cols(stick, d, style, w, pos_frac=0.4, step=2):
         return None
     import themes as T
     pal = np.array(STOCK_DETAIL, np.uint16)
+    cc = custom_colours(w) if style == "custom" else []
+    if len(cc) > 1:
+        # 2-3 colours: centre line -> peak, like the overview's bottom -> top
+        ramp = [grad565(cc, k / 30) for k in range(31)]
+        n = len(p3)
+        pos = int(n * pos_frac)
+        for x in range(500):
+            i0 = pos + (x - 250) * step
+            if i0 < 0 or i0 >= n:
+                out.append((0, 0))
+                continue
+            h = max(1, max(b & 31 for b in p3[i0:i0 + step]))
+            out.append((ramp[:h], h))
+        return out
     if style == "custom":
         try:
-            pal = T.map_colours(pal, _tint_spec(hex565(w.get("custom") or "#6ba3f0")))
+            pal = T.map_colours(pal, _tint_spec(cc[0]))
         except Exception:
             pass
     elif style == "blue" and isinstance(w.get("tint"), str) and w.get("tint", "").startswith("#"):
@@ -1000,17 +1173,82 @@ def screens():
         else:
             base = HERE
         from emu import fwhome
-        z = np.load(fwhome.path("screens.npz"))   # user's firmware home
+        p = fwhome.path("screens.npz")             # user's firmware home
+        if not os.path.exists(p):
+            raise RuntimeError("Firmware not set up yet: add the official "
+                               "XDJ-700 v1.15 update file on Home (Setup › "
+                               "Firmware › Add) to see the theme preview.")
+        z = np.load(p)
         _SCREENS = {k: z[k] for k in z.files}
     return _SCREENS
 
 
-def preview_png(spec, screen, wave=False, wopts=None, track=None):
+# Lit touch buttons: addresses, positions and the colour maths live in
+# mods/litbuttons.py, shared with the deck's theme tables and the emulator.
+LIT_KEY = 0xF81F
+_LIT = None
+
+
+def lit_sprites():
+    """{name: (x, y, uint16[53, 72])} read from the user's firmware block1
+    (firmware home blk1.bin, loaded at 0x08000000); {} if it is missing."""
+    global _LIT
+    if _LIT is None:
+        import litbuttons as LB
+        from emu import fwhome
+        out = {}
+        try:
+            with open(fwhome.path("blk1.bin"), "rb") as f:
+                for k in LB.SHOWN:
+                    a, _ap, x, y = LB.BUTTONS[k]
+                    f.seek(a - LB.IMG_BASE)
+                    px = np.frombuffer(f.read(LB.W * LB.H * 2), "<u2")
+                    if len(px) == LB.W * LB.H:
+                        out[k] = (x, y, px.reshape(LB.H, LB.W).copy())
+        except OSError:
+            pass
+        _LIT = out
+    return _LIT
+
+
+_LIT_REF = None
+
+
+def lit_ref():
+    """one shared (saturation, brightness) reference for every button"""
+    global _LIT_REF
+    if _LIT_REF is None:
+        import litbuttons as LB
+        _LIT_REF = LB.reference([px for _x, _y, px in lit_sprites().values()])
+    return _LIT_REF
+
+
+def lit_recolour(px, colour):
+    """one lit button (stock RGB565) in the user's lit colour -- the same
+    maths as the deck's theme tables (mods/litbuttons.py)"""
+    import litbuttons as LB
+    return LB.recolour(px, colour, lit_ref())
+
+
+def preview_png(spec, screen, wave=False, wopts=None, track=None, lit=None):
     """wave=True: the waveforms follow the theme too (the deck recolours the
     stock waveform palettes with the same maths). wopts: overview style +
-    colours, drawn with the deck's own overview maths on a stick track."""
+    colours, drawn with the deck's own overview maths on a stick track.
+    screen "lit" = the player screen with every lit-able touch button lit.
+    lit = "#rrggbb": the lit buttons in that colour (the deck does the
+    same with a theme saved with that lit colour)."""
     import themes as T
+    show_lit = screen == "lit"
+    screen = "main" if show_lit else screen
     fb = screens()[screen].copy()
+    lits = {}
+    if screen == "main" and (show_lit or lit):
+        for k, (x, y, px) in lit_sprites().items():
+            if show_lit or k == "quantize":       # QUANTIZE is lit in the shot
+                lits[k] = (x, y, px)
+                if show_lit:
+                    sub = fb[y:y + 53, x:x + 72]
+                    fb[y:y + 53, x:x + 72] = np.where(px == LIT_KEY, sub, px)
     if spec:
         keep = np.zeros(fb.shape, bool)
         for x, y, w, h in ([] if wave else MASKS.get(screen, [])):
@@ -1019,6 +1257,13 @@ def preview_png(spec, screen, wave=False, wopts=None, track=None):
         new = T.map_colours(cols, spec)        # == the deck's theme tables
         out = new[inv].reshape(fb.shape)
         fb = np.where(keep, fb, out)
+    if lit:
+        try:
+            for x, y, px in lits.values():
+                sub = fb[y:y + 53, x:x + 72]
+                fb[y:y + 53, x:x + 72] = np.where(px == LIT_KEY, sub, lit_recolour(px, lit))
+        except (ValueError, IndexError):
+            pass                                  # bad colour: theme only
     stick = stick_path()
     d = track or demo_track(stick)
     # `track` may be a dir (lookup) or a ready label dict from the caller
@@ -1190,6 +1435,41 @@ def j_firmware(log, prog, upd):
     prog(1.0, "firmware ready")
 
 
+def theme_delete(name):
+    """Remove one entry from the project's mods/themes.py (the single
+    `    'name': dict(...)` line tools/mod_builder.py writes). The file is
+    re-imported afterwards; if that fails the original is put back."""
+    if not re.fullmatch(r"[a-z0-9][a-z0-9-]*", name or "") or name == "stock":
+        return {"ok": False, "error": "That theme cannot be deleted."}
+    tp = os.path.join(ROOT, "mods", "themes.py")
+    try:
+        src = open(tp, encoding="utf-8").read()
+    except OSError as e:
+        return {"ok": False, "error": f"mods/themes.py: {e}"}
+    pat = re.compile(rf"^[ \t]*'{re.escape(name)}'[ \t]*:.*\n", re.M)
+    if not pat.search(src):
+        return {"ok": False, "error": f"'{name}' is not in mods/themes.py."}
+    new = pat.sub("", src, count=1)
+    bak = tp + ".bak"
+    shutil.copy2(tp, bak)
+    with open(tp, "w", encoding="utf-8") as f:
+        f.write(new)
+    try:
+        import importlib
+        import themes as T
+        importlib.reload(T)
+        assert name not in T.THEMES
+    except Exception as e:
+        shutil.copy2(bak, tp)
+        return {"ok": False, "error": f"could not remove '{name}': {type(e).__name__}: {e}"}
+    try:
+        os.unlink(bak)
+    except OSError:
+        pass
+    _THEMES[0] = None                       # theme_list() re-reads the file
+    return {"ok": True, "name": name, "themes": sorted(theme_list())}
+
+
 def j_theme_save(log, prog, name, spec):
     args = ["tools/mod_builder.py", "--name", name,
             "--hue", str(spec["hue"]), "--sat", str(spec["sat"]),
@@ -1197,6 +1477,8 @@ def j_theme_save(log, prog, name, spec):
     for k in ("vivid", "lift"):
         if spec.get(k):
             args += [f"--{k}", str(spec[k])]
+    if spec.get("lit") and re.fullmatch(r"#?[0-9a-fA-F]{6}", str(spec["lit"])):
+        args += ["--lit", str(spec["lit"])]     # lit buttons (on-deck switching)
     prog(0.2, "building the theme")
     rc, _ = run_tool(log, args)
     if rc:
@@ -1282,20 +1564,31 @@ INSTALL_STEPS = [          # sessions per step (mock-deck measured 2026-10-12)
 SESSION_S = 55.0            # per session incl. 30 s cool-down (mock-deck model)
 
 
+def wave_colour_args(mode, colours):
+    """['--colours', '#a,#b'] for the custom waveform, [] otherwise"""
+    if mode != "custom":
+        return []
+    cols = [c for c in (colours or []) if isinstance(c, str) and re.fullmatch(r"#[0-9a-fA-F]{6}", c)][:3]
+    if not cols:
+        raise RuntimeError("Custom waveform: pick 1-3 colours in Theme Builder > Waveform > Custom first.")
+    return ["--colours", ",".join(c.lower() for c in cols)]
+
+
 def j_deck_install(log, prog, mode, pads=True,
                    themes=True, liveks=False, phase=False, brake=0.0, flac=True,
-                   opus=False):
+                   opus=False, colours=None):
     if deck_ready():
         raise RuntimeError(deck_ready())
     try:
         s = settings()
         s["mods"] = {"mode": mode, "pads": bool(pads), "themes": bool(themes),
                      "liveks": bool(liveks), "phase": bool(phase),
-                     "brake": float(brake or 0), "flac": bool(flac)}
+                     "brake": float(brake or 0), "flac": bool(flac),
+                     "colours": list(colours or [])[:3] if mode == "custom" else None}
         save_settings(s)
     except Exception:
         pass
-    args = ["tools/deck_session.py", "--mode", mode]
+    args = ["tools/deck_session.py", "--mode", mode] + wave_colour_args(mode, colours)
     if not pads:
         args.append("--no-pads")
     if not themes:
@@ -1400,7 +1693,40 @@ def j_deck_install(log, prog, mode, pads=True,
 UPD_ACKS = ("brick", "recovery", "power")
 
 
-def j_upd_build(log, prog, upd, mode, pads, versions, banner, extras=()):
+def j_stick_write(log, prog, mode, pads=True, themes=True, flac=False, opus=False,
+                  colours=None):
+    """USB-stick install mode: build the mods pack (tools/usbpack.py) from
+    the same picks as the cable install and write PIONEER/MODS/MODS.BIN +
+    PACK.BIN onto the library stick. The deck reads that folder only once
+    the stage-1 loader is on it (flashed once with a permanent update);
+    until then the files do nothing. Writes files only."""
+    stick = stick_path()
+    if not stick or not os.path.isdir(stick):
+        raise RuntimeError("Choose your USB stick first (Settings > Library).")
+    try:
+        s = settings()
+        s["mods"] = {"mode": mode, "pads": bool(pads), "themes": bool(themes),
+                     "liveks": False, "phase": False, "brake": 0.0, "flac": bool(flac),
+                     "colours": list(colours or [])[:3] if mode == "custom" else None}
+        save_settings(s)
+    except Exception:
+        pass
+    args = ["tools/usbpack.py", "--mode", mode] + wave_colour_args(mode, colours)
+    if not pads:
+        args.append("--no-pads")
+    if not themes:
+        args.append("--no-themes")
+    if flac:
+        args += ["--flac", "opus" if opus else "flac"]
+    args += ["--out", os.path.join(APP_SUPPORT, "PACK.BIN"), "--stick", stick]
+    prog(0.0, "Building the mods pack", eta=60)
+    rc, txt = run_tool(log, args)
+    if rc or "RESULT: written" not in txt:
+        raise RuntimeError("pack not written -- see log")
+    prog(1.0, "Written to the stick: PIONEER/MODS/MODS.BIN + PACK.BIN")
+
+
+def j_upd_build(log, prog, upd, mode, pads, versions, banner, extras=(), colours=None):
     """PERMANENT mode: build a modded update file from the user's OWN
     official XDJ-700 v1.15 .UPD (tools/permanent_build.py), then boot it in
     the emulator from reset. Writes a file only -- the app never flashes."""
@@ -1408,7 +1734,7 @@ def j_upd_build(log, prog, upd, mode, pads, versions, banner, extras=()):
     os.makedirs(out_dir, exist_ok=True)
     out = os.path.join(out_dir, "XDJ700.UPD")
     args = ["tools/permanent_build.py", upd, out, "--mode", mode,
-            "--banner", banner, "--i-know-flashing-can-brick"]
+            "--banner", banner, "--i-know-flashing-can-brick"] + wave_colour_args(mode, colours)
     if not pads:
         args.append("--no-pads")
     if not versions:
@@ -1442,6 +1768,8 @@ def j_upd_build(log, prog, upd, mode, pads, versions, banner, extras=()):
 
 
 _FMT_CACHE = {}
+_FMT_BUSY = set()
+_FMT_LOCK = threading.Lock()
 
 
 def lib_formats(root):
@@ -1450,22 +1778,39 @@ def lib_formats(root):
     installs Opus only for .opus files. {'flac': None} = no stick."""
     if not root or not os.path.isdir(root):
         return {"flac": None, "opus": None}
-    hit = _FMT_CACHE.get(root)
-    if hit and time.time() - hit[0] < 60:
-        return hit[1]
+    with _FMT_LOCK:
+        hit = _FMT_CACHE.get(root)
+        fresh = bool(hit and time.time() - hit[0] < 300)
+        if not fresh and root not in _FMT_BUSY:
+            # Never walk the stick on the request thread: a big USB library
+            # took /api/state (polled every 6 s) ~30 s on a cold start and
+            # froze the whole UI on "Checking your setup...". Count in the
+            # background; answer with the last count (or 0s) meanwhile.
+            _FMT_BUSY.add(root)
+            threading.Thread(target=_lib_formats_walk, args=(root,),
+                             daemon=True).start()
+        if hit:
+            return hit[1]
+    return {"flac": 0, "opus": 0}
+
+
+def _lib_formats_walk(root):
     n = {"flac": 0, "opus": 0}
     seen = 0
-    for d, dirs, files in os.walk(root):
-        dirs[:] = [x for x in dirs if not x.startswith(".") and x != "PIONEER"]
-        for f in files:
-            ext = f.rsplit(".", 1)[-1].lower() if "." in f else ""
-            if ext in ("flac", "opus"):
-                n[ext] += 1
-            seen += 1
-        if seen > 50000:
-            break
-    _FMT_CACHE[root] = (time.time(), n)
-    return n
+    try:
+        for d, dirs, files in os.walk(root):
+            dirs[:] = [x for x in dirs if not x.startswith(".") and x != "PIONEER"]
+            for f in files:
+                ext = f.rsplit(".", 1)[-1].lower() if "." in f else ""
+                if ext in ("flac", "opus"):
+                    n[ext] += 1
+                seen += 1
+            if seen > 50000:
+                break
+    finally:
+        with _FMT_LOCK:
+            _FMT_CACHE[root] = (time.time(), n)
+            _FMT_BUSY.discard(root)
 
 
 UPD_EXTRAS = ("centre", "phasemeter", "hotcue8", "stems", "keyshift", "utility")  # utility: always baked (1.0)
@@ -1575,7 +1920,14 @@ def emu_cmd(b):
     elif c == "restart":
         h.restart()
     elif c == "mods":
-        m = {"wave": b.get("wave") or None}
+        m = {"wave": b.get("wave") or None, "wave_colours": b.get("wave_colours") or None}
+        if m["wave_colours"]:                    # the one set, kept with the app
+            try:                                 # (not just in the browser)
+                s_ = settings()
+                s_["wave_colours"] = [str(c) for c in m["wave_colours"]][:3]
+                save_settings(s_)
+            except Exception:
+                pass
         th = b.get("theme")
         if th and th.get("spec"):
             m["theme"] = {"name": th.get("name") or "custom", "spec": th["spec"]}
@@ -1637,11 +1989,20 @@ class H(BaseHTTPRequestHandler):
                 return self.send({"stick": stick_path(),
                                   "stick_ok": os.path.isdir(stick_path()),
                                   "project": ROOT,
+                                  "project_default": default_project(),
+                                  "project_default_kind": (
+                                      ("the repo folder next to XDJ Mod Studio.exe" if WINDOWS
+                                       else "the folder inside the app") if _bundle_repo()
+                                      else "the source checkout Studio runs from"),
+                                  "windows": WINDOWS,
+                                  "project_custom": bool(s.get("project")),
+                                  "project_pending": s.get("project") or default_project(),
                                   "project_ok": os.path.isdir(os.path.join(ROOT, "tools")),
                                   "deck": deck_present(), "deck_err": deck_err(), "deck_multi": _DECK_N[0] > 1,
                                   "demucs": demucs_ok(),
                                   "ffmpeg": bool(shutil.which("ffmpeg") and shutil.which("ffprobe")),
                                   "mods": s.get("mods", {}),
+                                  "wave_colours": s.get("wave_colours"),
                                   "themes": themes,
                                   "themes_ok": bool(themes), "themes_err": _THEME_ERR[0],
                                   "firmware": _firmware_labels(),
@@ -1683,8 +2044,38 @@ class H(BaseHTTPRequestHandler):
         ext = os.path.splitext(p)[1].lower()
         ct = {".mp3": "audio/mpeg", ".wav": "audio/wav", ".m4a": "audio/mp4",
               ".aif": "audio/aiff", ".aiff": "audio/aiff", ".flac": "audio/flac"}
+        # Honour byte ranges: WebKit (the Mac app's window) and Chrome seek
+        # with Range requests and may refuse to play a stream that answers
+        # them with the whole file (no Accept-Ranges).
+        size = os.path.getsize(p)
+        start, end = 0, size - 1
+        m = re.match(r"bytes=(\d*)-(\d*)$", self.headers.get("Range") or "")
+        partial = bool(m) and size > 0
+        if partial:
+            a, b = m.group(1), m.group(2)
+            if a:
+                start, end = int(a), (int(b) if b else size - 1)
+            elif b:                            # suffix: last N bytes
+                start = max(0, size - int(b))
+            end = min(end, size - 1)
+            if start > end:
+                self.send_response(416)
+                self.send_header("Content-Range", f"bytes */{size}")
+                self.send_header("Content-Length", "0")
+                self.end_headers()
+                return
         with open(p, "rb") as f:
-            return self.send(f.read(), ct.get(ext, "application/octet-stream"))
+            f.seek(start)
+            body = f.read(end - start + 1)
+        self.send_response(206 if partial else 200)
+        self.send_header("Content-Type", ct.get(ext, "application/octet-stream"))
+        self.send_header("Content-Length", str(len(body)))
+        self.send_header("Accept-Ranges", "bytes")
+        if partial:
+            self.send_header("Content-Range", f"bytes {start}-{end}/{size}")
+        self.send_header("Cache-Control", "no-store")
+        self.end_headers()
+        self.wfile.write(body)
 
     def _x7k(self, q):
         """.x7k key version as WAV (decoded on the Mac): proof-of-concept
@@ -1800,7 +2191,7 @@ class H(BaseHTTPRequestHandler):
     def _render(self, path, q):
         if path == "/api/wave":
             stick = stick_path()
-            w = {k: q.get(k) for k in ("tint", "low", "mid", "high", "custom")}
+            w = {k: q.get(k) for k in ("tint", "low", "mid", "high", "custom", "custom2", "custom3")}
             return self.send(wave_png(stick, q["dir"], q.get("style", "blue"), w), "image/png")
         spec = None
         if q.get("hue") not in (None, "", "stock"):
@@ -1808,10 +2199,13 @@ class H(BaseHTTPRequestHandler):
             for k in ("vivid", "lift"):
                 if q.get(k) not in (None, "", "0"):
                     spec[k] = float(q[k])
-        wopts = {k: q.get(k) for k in ("style", "tint", "low", "mid", "high", "custom")}
+        wopts = {k: q.get(k) for k in ("style", "tint", "low", "mid", "high", "custom", "custom2", "custom3")}
+        lit = q.get("lit") or None
+        if lit and not re.fullmatch(r"#?[0-9a-fA-F]{6}", lit):
+            lit = None
         return self.send(preview_png(spec, q.get("screen", "main"),
                                      q.get("wave") == "1", wopts,
-                                     q.get("track") or None), "image/png")
+                                     q.get("track") or None, lit), "image/png")
 
     def do_POST(self):
         n = int(self.headers.get("Content-Length") or 0)
@@ -1851,6 +2245,14 @@ class H(BaseHTTPRequestHandler):
                     s["project"] = path
                     save_settings(s)
                 return self.send({"ok": ok, "restart": ok and path != ROOT})
+            if p == "/api/project/setup":
+                return self.send(project_setup(b["path"].strip()))
+            if p == "/api/project/reset":
+                s = settings()
+                s.pop("project", None)
+                save_settings(s)
+                return self.send({"ok": True, "path": default_project(),
+                                  "restart": default_project() != ROOT})
             if p == "/api/3band":
                 return self.send({"job": job("3-band waveforms", j_3band, stick,
                                              b.get("dirs"), b.get("compute_all", False))})
@@ -1864,6 +2266,8 @@ class H(BaseHTTPRequestHandler):
             if p == "/api/theme/save":
                 return self.send({"job": job(f"Save theme {b['name']}", j_theme_save,
                                              b["name"], b["spec"])})
+            if p == "/api/theme/delete":
+                return self.send(theme_delete((b.get("name") or "").strip().lower()))
             if p == "/api/theme/deck":
                 return self.send({"job": job(f"Install theme {b['name']} on deck",
                                              j_theme_deck, b["name"])})
@@ -1884,7 +2288,15 @@ class H(BaseHTTPRequestHandler):
                 return self.send({"job": job("Build permanent update (UPD)", j_upd_build,
                                              upd, b.get("mode", "rgb"), pads,
                                              bool(b.get("versions", True)), banner,
-                                             extras)})
+                                             extras, b.get("wave_colours"))})
+            if p == "/api/stick/write":
+                return self.send({"job": job("Write mods to USB stick", j_stick_write,
+                                             b.get("mode", "rgb"),
+                                             bool(b.get("pads", True)),
+                                             bool(b.get("themes", True)),
+                                             bool(b.get("flac", False)),
+                                             bool(b.get("opus", False)),
+                                             b.get("wave_colours"))})
             if p == "/api/deck/install":
                 return self.send({"job": job("Install mods on deck", j_deck_install,
                                              b.get("mode", "rgb"),
@@ -1894,7 +2306,8 @@ class H(BaseHTTPRequestHandler):
                                              bool(b.get("phase", False)),
                                              float(b.get("brake") or 0),
                                              bool(b.get("flac", False)),
-                                             bool(b.get("opus", False)))})
+                                             bool(b.get("opus", False)),
+                                             b.get("wave_colours"))})
         except (BrokenPipeError, ConnectionResetError):
             raise
         except Exception as e:

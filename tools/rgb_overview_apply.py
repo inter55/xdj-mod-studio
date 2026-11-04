@@ -106,10 +106,19 @@ def main():
     if check:
         args = []
     revert = args == ["--revert"]
+    cols = None
+    if "--colours" in args:                   # custom: 1-3 '#rrggbb' comma list
+        i = args.index("--colours")
+        from rgb_overview import hex565
+        cols = [hex565(c) for c in args[i + 1].split(",") if c.strip()][:3]
+        del args[i:i + 2]
     if not revert and (len(args) > 1 or (args and args[0] not in MODES)):
-        sys.exit("usage: rgb_overview_apply.py [blue|rgb|3band] | --revert | --check")
+        sys.exit("usage: rgb_overview_apply.py [blue|rgb|3band|custom --colours "
+                 "#rrggbb[,#rrggbb[,#rrggbb]]] | --revert | --check")
     mode = MODES[args[0]] if args and not revert else MODES["rgb"]
-    code, _ = plan(mode)
+    if mode == MODES["custom"] and not cols:
+        sys.exit("custom needs --colours #rrggbb[,#rrggbb[,#rrggbb]]")
+    code, _ = plan(mode, cols)
     cands = [d for d in hid.enumerate()
              if d["vendor_id"] == PIONEER_VID and d["usage"] == 0x01]
     if len(cands) != 1:
@@ -219,6 +228,21 @@ def main():
                 sys.exit("FAIL: snapshot routine verify - hook NOT armed")
             print("snapshot routine written - run again to arm")
             return 0
+        if mode == MODES["custom"]:          # the colour table, before the mode
+            from rgb_overview import custom_writes, CUSTOM_TAB
+            tw = custom_writes(cols)
+            want_t = bytes(b for _, b in tw)
+            live_t = read_block(h, CUSTOM_TAB, len(tw))
+            if live_t != want_t:
+                diff = [(a, b) for (a, b), cur_ in zip(tw, live_t) if cur_ != b]
+                for a, b in diff[:CHUNK_B]:
+                    bw(h, a, b)
+                if len(diff) > CHUNK_B:
+                    print("RESULT: PARTIAL (colour table) - run again")
+                    return 0
+                if read_block(h, CUSTOM_TAB, len(tw)) != want_t:
+                    sys.exit("FAIL: colour table verify - mode NOT set")
+                print(f"custom colour table written ({len(tw)} B)")
         cur_mode = br(h, MODE_ADDR, 1)[0]
         if cur_mode not in MODES.values():
             sys.exit(f"FAIL: mode byte reads {cur_mode:#x} - aborting")

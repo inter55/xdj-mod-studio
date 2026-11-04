@@ -45,13 +45,14 @@ static const u16 L_GATE[] = u"HOT CUE GATE";
 static const u16 L_THEME[] = u"THEME";
 
 static const u16 S_ON[] = u"ON", S_OFF[] = u"OFF", S_GATE[] = u"GATE";
-static const u16 S_BLUE[] = u"BLUE", S_RGB[] = u"RGB", S_3B[] = u"3-BAND";
+static const u16 S_BLUE[] = u"BLUE", S_RGB[] = u"RGB", S_3B[] = u"3-BAND",
+                 S_CUST[] = u"CUSTOM";
 static const u16 S_B1[] = u"1X", S_B2[] = u"2X", S_B4[] = u"4X",
                  S_B8[] = u"8X", S_B15[] = u"15X", S_B05[] = u"0.5X";
 static const u16 S_NONE[] = u"NOT INSTALLED";
 
 static const u16 *const V_MODS[] = {S_ON, S_OFF};
-static const u16 *const V_WAVE[] = {S_BLUE, S_RGB, S_3B};
+static const u16 *const V_WAVE[] = {S_BLUE, S_RGB, S_3B, S_CUST};
 static const u16 *const V_BRAKE[] = {S_B1, S_B2, S_B4, S_B8, S_B15, S_B05};
 static const u16 *const V_GATE[] = {S_OFF, S_GATE};
 static const u16 *const V_TNONE[] = {S_NONE};
@@ -72,7 +73,7 @@ int ut_commit(u32 *r);
 
 u32 ut_tab[NSTOCK + NOURS][13] = {
     [NSTOCK + K_MODS]  = REC(L_MODS, V_MODS, 2),
-    [NSTOCK + K_WAVE]  = REC(L_WAVE, V_WAVE, 3),
+    [NSTOCK + K_WAVE]  = REC(L_WAVE, V_WAVE, 4),
     [NSTOCK + K_BRAKE] = REC(L_BRAKE, V_BRAKE, 6),
     [NSTOCK + K_GATE]  = REC(L_GATE, V_GATE, 2),
     [NSTOCK + K_THEME] = REC(L_THEME, V_TNONE, 1),
@@ -102,7 +103,7 @@ static u32 current(int k, u32 *r)
 {
     switch (k) {
     case K_MODS:  return R8(MSOFF) ? 1 : 0;
-    case K_WAVE:  { u32 v = R8(MODEB); return v < 3 ? v : 0; }
+    case K_WAVE:  { u32 v = R8(MODEB); return v < 4 ? v : 0; }
     case K_BRAKE: { u32 v = R8(MSBRAKE); return v < 6 ? v : 0; }
     case K_GATE:  return R8(MSGATE) ? 1 : 0;
     default: {

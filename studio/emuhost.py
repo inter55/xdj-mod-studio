@@ -40,6 +40,8 @@ class EmuHost:
         self._thread = None
         self._mods = None                   # last requested mods
         self._mods_gen = 0
+        self.mods_note = ""                 # what happened to the last request (shown in Studio)
+        self.mods_busy = False
         self.deck_size = None               # (w, h) of the native deck
         self.fw_id = None
         self.stick_wanted = None            # path the user asked to insert
@@ -167,29 +169,64 @@ class EmuHost:
     # ---------------------------------------------------------------- mods
     def apply_mods(self, mods):
         """mods: {"theme": {"name", "spec"} | None, "wave": "blue|rgb|3band
-        |custom" | None}. Applied to the stock firmware
-        as soon as it is running; re-applied after every firmware switch.
-        Custom is preview-only (no deck cave): the emulator keeps stock."""
+        |custom" | None, "wave_colours": ["#rrggbb", ..] for custom}.
+        Applied to the stock firmware as soon as it is running; re-applied
+        after every firmware switch."""
         self.start()
         self._mods = dict(mods)
         self._mods_gen += 1
         gen = self._mods_gen
+        th = mods.get("theme")
+        tname = (th.get("name") or "custom") if th else "stock"
+        wname = mods.get("wave") or "blue"
+        self.mods_busy = True
+        self.mods_note = f"Applying theme {tname}, waveform {wname}: waiting for the deck to run…"
 
         def work():
-            if not self._wait_running(gen, 120):
-                return
-            app = self.app
-            if not app.fw_name.startswith("Stock"):
-                return                  # a built .UPD already carries its mods
-            m = self._mods
-            th = m.get("theme")
-            if th is not None:
-                app.apply_theme_spec(th.get("name") or "custom", th.get("spec"))
-            elif m.get("theme_stock"):
-                app.apply_theme_spec("stock", None)
-            self._wait_status_clear(gen)
-            if m.get("wave") in ("blue", "rgb", "3band"):
-                app.apply_wave(m["wave"])
+            try:
+                # a boot from reset takes minutes: wait for it rather than
+                # giving up quietly (the old 120 s limit left "stock" shown
+                # with no explanation)
+                if not self._wait_running(gen, 900):
+                    if gen == self._mods_gen:
+                        self.mods_note = "Not applied: the emulator did not start. Press Restart and apply again."
+                    return
+                app = self.app
+                if not app.fw_name.startswith("Stock"):
+                    self.mods_note = (f"Not applied: {app.fw_name} is a built update file and "
+                                      "carries its own mods. Pick Stock v1.15 under Firmware to try themes.")
+                    return
+                m = self._mods
+                th = m.get("theme")
+                self.mods_note = f"Applying theme {tname}…"
+                if th is not None:
+                    app.apply_theme_spec(th.get("name") or "custom", th.get("spec"))
+                elif m.get("theme_stock"):
+                    app.apply_theme_spec("stock", None)
+                self._wait_status_clear(gen)
+                if gen != self._mods_gen:
+                    return
+                if app.status.startswith("theme preview failed") or app.status.startswith("theme preview needs"):
+                    self.mods_note = "Not applied: " + app.status
+                    return
+                if m.get("wave") in ("blue", "rgb", "3band", "custom"):
+                    cols = None
+                    if m.get("wave") == "custom":
+                        import rgb_overview as RO
+                        cols = [RO.hex565(c) for c in (m.get("wave_colours") or [])
+                                if isinstance(c, str)]
+                    app.apply_wave(m["wave"], cols)
+                    if app.status.startswith("waveform") and "not applied" in app.status:
+                        self.mods_note = f"Theme {tname} applied; {app.status}"
+                        return
+                self.mods_note = (f"Applied: theme {tname}, waveform {wname}. Screens the deck "
+                                  "has not redrawn yet keep the old colours until you leave and "
+                                  "re-enter them.")
+            except Exception as e:
+                self.mods_note = f"Not applied: {type(e).__name__}: {e}"
+            finally:
+                if gen == self._mods_gen:
+                    self.mods_busy = False
         threading.Thread(target=work, daemon=True, name="emu-mods").start()
 
     def _wait_running(self, gen, timeout):
@@ -281,6 +318,8 @@ class EmuHost:
             out["state"] = "error" if self.error else "idle"
         s = getattr(self.app, "_sound", None) if self.app is not None else None
         out["sound"] = s.describe() if s is not None else {"on": False}
+        out["mods_note"] = self.mods_note
+        out["mods_busy"] = self.mods_busy
         for c in out["firmwares"]:
             c.pop("path", None)
         return out

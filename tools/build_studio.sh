@@ -72,19 +72,39 @@ if [ -f build/phasemeter/pm.bin ]; then
   mkdir -p "$REPO/build/phasemeter"
   cp build/phasemeter/pm.bin build/phasemeter/pm.syms "$REPO/build/phasemeter/"
 fi
+# Deck code (our own SH-4 / C674x C). With the cross compiler on this Mac
+# (tools/build_sh_gcc.sh -> work/sh-tools) every module is rebuilt; without
+# it the committed prebuilt/deck/ modules are staged into build/ instead
+# (the same files tools/shbuild.py gives the app from a plain checkout).
+if [ -x work/sh-tools/bin/sh-elf-gcc ]; then
+  SHCC=1
+else
+  SHCC=0
+  echo "no work/sh-tools/bin/sh-elf-gcc: shipping prebuilt/deck modules"
+  .venv/bin/python -c "import sys;sys.path[:0]=['tools'];import shbuild;print('staged', len(shbuild.stage_prebuilt('.', force=True)), 'prebuilt files')"
+fi
 # FLAC-only decoder build (Studio installs it unless the stick has .opus)
-VF_OPUS=0 VF_OUT="$PWD/build/xflac_flac" sh tools/xflac/build_vfile.sh >/dev/null
+# rebuilt only when the third-party decoder source is here (work/drflac,
+# work/opus: not in the repo); else the committed prebuilt/deck copy
+if [ "$SHCC" = 1 ] && [ -f work/drflac/dr_flac.h ]; then
+  VF_OPUS=0 VF_OUT="$PWD/build/xflac_flac" sh tools/xflac/build_vfile.sh >/dev/null
+elif [ ! -f build/xflac_flac/vfile.bin ]; then
+  mkdir -p build/xflac_flac
+  cp prebuilt/deck/xflac_flac/vfile.bin prebuilt/deck/xflac_flac/vfile.syms build/xflac_flac/
+fi
 mkdir -p "$REPO/build/xflac_flac"
 cp build/xflac_flac/vfile.bin build/xflac_flac/vfile.syms "$REPO/build/xflac_flac/"
 # UTILITY mod rows (our C)
-sh tools/utility/build.sh >/dev/null
+[ "$SHCC" = 1 ] && sh tools/utility/build.sh >/dev/null
 mkdir -p "$REPO/build/utility"
 cp build/utility/ut.bin build/utility/ut.syms "$REPO/build/utility/"
 # 8 hot cue pages (our C; build needs the SH compiler on this Mac)
-HCPAGE=$(.venv/bin/python -c "import sys;sys.path[:0]=['tools'];import perform_pads as P;print(hex(P.HCPAGE))")
-PMODE=$(.venv/bin/python -c "import sys;sys.path[:0]=['tools'];import perform_pads as P;print(hex(P.PST+2))")
-MSOFF=$(.venv/bin/python -c "import sys;sys.path[:0]=['tools'];import mysettings as M;print(hex(M.MSOFF))")
-HCPAGE=$HCPAGE PMODE=$PMODE MSOFF=$MSOFF sh tools/hotcue8/build.sh >/dev/null
+if [ "$SHCC" = 1 ]; then
+  HCPAGE=$(.venv/bin/python -c "import sys;sys.path[:0]=['tools'];import perform_pads as P;print(hex(P.HCPAGE))")
+  PMODE=$(.venv/bin/python -c "import sys;sys.path[:0]=['tools'];import perform_pads as P;print(hex(P.PST+2))")
+  MSOFF=$(.venv/bin/python -c "import sys;sys.path[:0]=['tools'];import mysettings as M;print(hex(M.MSOFF))")
+  HCPAGE=$HCPAGE PMODE=$PMODE MSOFF=$MSOFF sh tools/hotcue8/build.sh >/dev/null
+fi
 mkdir -p "$REPO/build/hotcue8"
 cp build/hotcue8/hc.bin build/hotcue8/hc.syms "$REPO/build/hotcue8/"
 # on-deck theme switching: our C always ships; the colour tables carry
@@ -92,9 +112,11 @@ cp build/hotcue8/hc.bin build/hotcue8/hc.syms "$REPO/build/hotcue8/"
 # (emu/fwhome.py builds them from the user's own firmware)
 mkdir -p "$REPO/build/themesw"
 if [ "$PUBLIC" = 1 ]; then
-  MSTNAME=$(.venv/bin/python -c "import sys;sys.path[:0]=['tools'];import mysettings as M;print(hex(M.MSTNAME))") \
-  MSTAPP=$(.venv/bin/python -c "import sys;sys.path[:0]=['tools'];import mysettings as M;print(hex(M.MSTAPP))") \
-    sh tools/themesw/build.sh >/dev/null
+  if [ "$SHCC" = 1 ]; then
+    MSTNAME=$(.venv/bin/python -c "import sys;sys.path[:0]=['tools'];import mysettings as M;print(hex(M.MSTNAME))") \
+    MSTAPP=$(.venv/bin/python -c "import sys;sys.path[:0]=['tools'];import mysettings as M;print(hex(M.MSTAPP))") \
+      sh tools/themesw/build.sh >/dev/null
+  fi
   cp build/themesw/ts.bin build/themesw/ts.syms "$REPO/build/themesw/"
   printf '0x9770000 0x9779000\n' > "$REPO/build/themesw/layout.txt"
 else
@@ -107,14 +129,31 @@ mkdir -p "$REPO/build/xflac"
 cp build/xflac/vfile.bin build/xflac/vfile.syms "$REPO/build/xflac/"
 # live stems mixer + live key shift (our C; the deck installers read these)
 # -- 2026-10-18: were missing, so Studio's stems/key-shift deck steps failed
-sh tools/keyshift_dsp/build_ksh.sh >/dev/null
+# (its DSP half needs the C6x compiler, work/tic6x-tools, or a built
+# tools/keyshift_dsp/ks.bin; without both the prebuilt/deck copies ship)
+if [ "$SHCC" = 1 ] && { [ -x work/tic6x-tools/bin/tic6x-elf-gcc ] || [ -f tools/keyshift_dsp/ks.bin ]; }; then
+  sh tools/keyshift_dsp/build_ksh.sh >/dev/null
+else
+  for f in stems/sm keyshift/ksh keyshift/ks; do
+    [ -f build/$f.bin ] || { mkdir -p build/${f%/*}; cp prebuilt/deck/$f.bin prebuilt/deck/$f.syms build/${f%/*}/; }
+  done
+fi
 mkdir -p "$REPO/build/stems" "$REPO/build/keyshift"
 cp build/stems/sm.bin build/stems/sm.syms "$REPO/build/stems/"
 cp build/keyshift/ksh.bin build/keyshift/ksh.syms build/keyshift/ks.bin build/keyshift/ks.syms "$REPO/build/keyshift/"
 # centre waveform colour module (our C): RGB / 3-band per-row colours
-.venv/bin/python -c "import sys;sys.path[:0]=['.','tools'];import rgb_detail as R;R.cw_build()"
+[ "$SHCC" = 1 ] && .venv/bin/python -c "import sys;sys.path[:0]=['.','tools'];import rgb_detail as R;R.cw_build()"
 mkdir -p "$REPO/build/centre"
 cp build/centre/cw.bin build/centre/cw.syms "$REPO/build/centre/"
+# USB-stick loader (our C): stage 1 for the deck install, stage 2 =
+# MODS.BIN the Studio's "Write to USB stick" puts on the stick
+if [ "$SHCC" = 1 ]; then
+  sh tools/usbloader/build.sh >/dev/null && sh tools/usbloader/build_s2.sh >/dev/null
+elif [ ! -f build/usbloader/s2.bin ]; then
+  mkdir -p build/usbloader && cp prebuilt/deck/usbloader/* build/usbloader/
+fi
+mkdir -p "$REPO/build/usbloader"
+cp build/usbloader/ul.bin build/usbloader/ul.syms build/usbloader/s2.bin build/usbloader/s2.syms "$REPO/build/usbloader/"
 cp TESTER_README.md "$REPO/" 2>/dev/null || true
 if [ "$PUBLIC" != 1 ]; then   # private tester build: firmware baked in
   cp work/MAIN.img "$REPO/work/"

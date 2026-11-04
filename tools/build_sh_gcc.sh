@@ -36,6 +36,10 @@ PATH="$P/bin:$PATH" ../gcc-14.2.0/configure --target=sh-elf --prefix="$P" \
   --with-endian=little --with-cpu=m4-single-only \
   --with-gmp=$HB/gmp --with-mpfr=$HB/mpfr --with-mpc=$HB/libmpc \
   --with-isl=$HB/isl --with-system-zlib >cfg.log
-PATH="$P/bin:$PATH" make -j8 MAKEINFO=true all-gcc all-target-libgcc >make.log
+PATH="$P/bin:$PATH" make -j8 MAKEINFO=true all-gcc >make.log
+# libgcc's SH extras (unwind-dw2-Os-4-200.o) can race libgcc_tm.h under -j:
+# "fatal error: libgcc_tm.h: No such file or directory" -> retry serially
+PATH="$P/bin:$PATH" make -j8 MAKEINFO=true all-target-libgcc >>make.log 2>&1 ||
+  PATH="$P/bin:$PATH" make MAKEINFO=true all-target-libgcc >>make.log
 PATH="$P/bin:$PATH" make MAKEINFO=true install-gcc install-target-libgcc >inst.log
 echo "built $P/bin/sh-elf-gcc"

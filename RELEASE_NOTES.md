@@ -1,3 +1,199 @@
+# XDJ Mod Studio -- next (not released yet)
+
+## New
+
+- **Write to USB stick (Mods page).** Next to "Install on deck": builds the
+  mods pack from the same picks (waveform style and colours, PERFORM pads
+  with hot cues and stems, themes, FLAC / Opus) and writes
+  PIONEER/MODS/MODS.BIN + PACK.BIN onto your library stick in seconds
+  (tools/usbpack.py --stick). The deck installs them itself whenever the
+  stick goes in -- once its one-time loader is on the deck (a permanent
+  update, still to come); until then the folder is ignored. Live key
+  shift, brake length and the phase meter stay cable-only for now.
+- **Custom waveform: 1, 2 or 3 colours -- on the deck too.** Theme Builder ›
+  Waveform › Custom › Colours 1 / 2 / 3. With 2 or 3 colours the waveform
+  blends from the first colour (quiet, bottom / centre line) to the last
+  (loud, top / peaks), on both the overview and the centre waveform. The
+  colours now go wherever the mods go (2026-11-04): the emulator (Test in
+  Emulator), the cable install (the style picked in Theme Builder is what
+  "Colour Waveforms" installs), the permanent update file and the USB-stick
+  pack. On the deck, UTILITY › WAVEFORM COLOR gained CUSTOM next to BLUE /
+  RGB / 3-BAND. The app keeps the one set of colours in its settings
+  (studio.json), so they survive a browser reset; changing them replaces
+  the previous set. Emulator-proven pixel for pixel
+  (tools/custom_wave_emu_test.py); not yet seen on a real deck.
+- **Lit buttons in your colour (preview, emulator, deck).** Theme Builder ›
+  Lit buttons › Your colour: QUANTIZE, MASTER, SYNC, SLIP and VINYL BRAKE
+  light up in one colour of your choice (also when pressed, and VINYL BRAKE
+  in brake mode), keeping each button's shading and top stripe; with a
+  light colour the labels turn dark so they stay readable. The "Lit
+  buttons" preview shows the player screen with all of them lit, and Test
+  in Emulator shows it live. For the deck, save the colour with a theme and
+  install Themes: UTILITY › THEME switches the lit colour together with the
+  theme, and OFF brings the stock colours back. White and grey come out
+  silver rather than flat white: the deck's exact theme switching needs a
+  little shading to tell the colours apart. **Not yet tried on a deck.**
+- **Emulator: 5x more audio.** The audio chip now gets 3 DSP cycles per SH
+  cycle instead of 0.6 (about 30 % of real-time sound instead of 6 %), with
+  no frame-rate loss: stopped deck 60 frames/s, playing deck 30-35. During
+  a stick mount or track load it stays at 0.6, so loads are as fast as
+  before. `XDJ_DSP_RATIO` / `XDJ_DSP_LOAD_RATIO` override.
+- **Emulator: faster audio chip.** The playing deck's busy-wait loop is
+  skipped cycle-exactly (83 -> 232 M DSP cycles/s on Apple Silicon);
+  `tools/dsp_idle_equiv.py` proves the result is identical.
+
+## Fixed
+
+- **Write to USB stick in the packaged app.** The app was built without the
+  USB-stick loader files, so the button failed with "file not found"
+  outside a developer checkout. They ship in the app now (proven: the
+  installed app wrote MODS.BIN + PACK.BIN and read them back).
+- **Building the app on a Mac with the SH compiler.** The build stopped
+  when it tried to rebuild the FLAC-only decoder or key shift without
+  their third-party source / DSP compiler; it now ships the committed
+  prebuilt copies of those two (byte-identical) instead.
+- Track Builder in a narrow window: the library now sits above the track
+  panel instead of squeezing both side by side (one visible row, tabs past
+  the edge, the stems hint one word per line, a clipped Make stems button).
+
+# XDJ Mod Studio v0.99.5 (XDJ-700, firmware 1.15)
+
+Follow-up to 0.99.4: window sizes and the Activity log. Same requirements
+as 0.99 (your own XDJ-700 v1.15 update file; Apple Silicon Mac on macOS
+14+, or the Windows zip). Mac: see the Gatekeeper note under 0.99.1 below.
+
+**Test status.** Tested on a real XDJ-700 with an Apple Silicon Mac:
+everything except FLAC playback and stems, which have not been tried with
+this release yet. The Windows build has not been tested yet.
+
+## Fixed in 0.99.5
+
+- **Text disappeared in a narrower window.** "How it works", the Home
+  setup checks, the mods list and the emulator panel cut their text to
+  "…"; the tab bar wrapped its labels onto two lines; the Track Builder
+  filter chips broke mid-word and the track list squeezed titles to
+  nothing. Text now wraps, the tab bar stays on one line (the brand
+  name and "(beta)" give way first), chips wrap as whole chips, and the
+  track list scrolls sideways instead of crushing its columns.
+- **Details in a running job closed by itself.** The Activity card is
+  redrawn every second while a job runs, and that snapped the Details
+  log shut. It stays open now, keeps its scroll position, and shows the
+  last 40 lines (was 14) in a taller box.
+
+---
+
+# XDJ Mod Studio v0.99.4 (XDJ-700, firmware 1.15)
+
+Follow-up to 0.99.3: saved themes. Same requirements as 0.99 (your own
+XDJ-700 v1.15 update file; Apple Silicon Mac on macOS 14+, or the
+Windows zip). Mac: see the Gatekeeper note under 0.99.1 below.
+
+## New in 0.99.4
+
+- **Saved themes dropdown** at the top of Theme Builder: every theme in
+  the project folder's `mods/themes.py`, the same list as the swatches.
+  Pick one and the sliders follow. The list refreshes as soon as a save
+  finishes, and the new theme is selected.
+- **Delete** button next to it: removes the selected theme from
+  `mods/themes.py` after a confirmation. The sliders keep its values, so
+  it can be saved again under any name. `stock` cannot be deleted.
+- Moving a slider marks the dropdown "Unsaved changes" until you save.
+
+---
+
+# XDJ Mod Studio v0.99.3 (XDJ-700, firmware 1.15)
+
+Follow-up to 0.99.2: Theme Builder ↔ Emulator. Same requirements as 0.99
+(your own XDJ-700 v1.15 update file; Apple Silicon Mac on macOS 14+, or
+the Windows zip). Mac: see the Gatekeeper note under 0.99.1 below.
+
+## New in 0.99.3
+
+- **Emulator tab sits next to Theme Builder** (Track Builder moved one
+  place right), since theme work bounces between the two.
+- **Apply from Theme Builder** button in the emulator's "Mods in the
+  emulator" panel, always visible: sends the current Theme Builder theme
+  and waveform style to the running emulator. The panel shows what Theme
+  Builder holds right now, warns when that differs from what the
+  emulator has, and reports what happened to the last apply.
+- **Test in Emulator could silently do nothing**: the apply gave up after
+  two minutes if the deck was still booting (a boot from reset takes
+  longer) and said nothing, so the panel kept saying "stock". It now
+  waits for the deck and reports success, "waiting for the deck", or the
+  reason it could not apply (for example a built update file selected
+  under Firmware, which carries its own mods).
+- Screens the deck has not redrawn keep their old colours until you leave
+  and re-enter them; the panel now says so.
+
+---
+
+# XDJ Mod Studio v0.99.2 (XDJ-700, firmware 1.15)
+
+Small follow-up to 0.99.1: Settings › Project folder. Same requirements
+as 0.99 (your own XDJ-700 v1.15 update file; Apple Silicon Mac on macOS
+14+, or the Windows zip). Mac: see the Gatekeeper note under 0.99.1 below.
+
+## New in 0.99.2
+
+- **Project folder guide** in Settings: what the folder holds, where the
+  default one is (inside the app), and four steps to a folder of your own
+  with your firmware file (`XDJ700.UPD` in that folder, or
+  `FIRMWARE/XDJ700_stock_v1.15.UPD`).
+- **Set up this folder** button: fills an empty folder of yours with the
+  mods, tools, prebuilt deck modules and the audio-chip disassembler from
+  the app, and copies your official update file when Studio already
+  knows it. Nothing already in the folder is overwritten, so your
+  `mods/themes.py` stays yours.
+- **Reset to default** button: back to the folder inside the app; your
+  own folder is left untouched.
+
+---
+
+# XDJ Mod Studio v0.99.1 (XDJ-700, firmware 1.15)
+
+Maintenance release on top of 0.99: the Studio app only, no deck-side
+changes. Same requirements as 0.99 (your own XDJ-700 v1.15 update file;
+Apple Silicon Mac on macOS 14+, or the Windows zip).
+
+## Mac: "XDJ Mod Studio is damaged and can't be opened"
+
+The app is signed but not notarized with Apple (no paid developer
+account), so a downloaded copy is blocked by Gatekeeper. On macOS 15 and
+later the message is "damaged" and right-click › Open no longer offers a
+way in.
+The app is fine; remove the download quarantine mark once:
+
+```bash
+xattr -dr com.apple.quarantine "/Applications/XDJ Mod Studio.app"
+```
+
+(adjust the path to wherever you put the app), then open it normally.
+Alternative: try to open it once, then System Settings › Privacy &
+Security › scroll down › **Open Anyway**.
+
+## Fixed in 0.99.1
+
+- **Theme Builder showed a black box** until the firmware was set up, with
+  no hint why. It now says so and offers the firmware setup right there;
+  the preview appears by itself once setup finishes, and a failed render
+  shows its reason instead of a broken image.
+- **Long freezes with a big USB library.** Rescanning 1000+ tracks took
+  half a minute and happened far too often: on nearly every theme preview,
+  on every setup check and on the app's first screen. The library is now
+  scanned once and refreshed in the background; previews, tab switches
+  and the Home page answer at once.
+- **Audio preview in Track Builder** now supports seeking (byte-range
+  requests), which the Mac app's web view needs to play files reliably.
+- The **Custom colour** swatch no longer shows under every waveform style,
+  and the unfinished Appearance setting is hidden again until 1.0.
+- **First-run firmware setup** from a source checkout failed late with a
+  traceback when the audio-chip disassembler was missing; it now checks
+  up front and tells you what to build. Developer README updated.
+- The public Mac build no longer needs the SH-4 cross compiler on the
+  build Mac: without it, the committed prebuilt deck modules ship.
+
+---
+
 # XDJ Mod Studio v0.99 (XDJ-700, firmware 1.15)
 
 Open-source mods for the Pioneer DJ XDJ-700, loaded into the deck's memory

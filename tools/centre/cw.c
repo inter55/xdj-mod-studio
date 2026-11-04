@@ -10,6 +10,12 @@
  *                   into the .EXT by Mod Studio; cumulative like the
  *                   overview: cream core = lows, + orange mids, + blue
  *                   highs, scaled to the track's loudest moment
+ *   mode 3 CUSTOM : the Studio's 1-3 colours (2026-11-04): 2-3 colours =
+ *                   one colour per row from the centre line out
+ *                   (cw_cust_ramp, the preview's grad565 ramp), 1 colour =
+ *                   the stock 8-entry palette tinted to it (cw_cust_pal);
+ *                   stock height either way. The installers fill the
+ *                   tables (cw_cust_kind 1 = ramp, 0 = palette).
  *   else / no data: the stock palette colour, stock height.
  * Returns the row count to use, or 0 = keep the painter's own height.
  */
@@ -35,6 +41,9 @@ typedef unsigned int u32;
 #define C_OUTER 0x1B1Au          /* blue: highs (overview C_LOW)    */
 
 u16 cw_tbl[64];
+u16 cw_cust_ramp[64];            /* mode 3, kind 1: colour per row         */
+u16 cw_cust_pal[8];              /* mode 3, kind 0: tinted stock palette   */
+u32 cw_cust_kind;
 static u32 last_hash, k7;        /* k7: rows per unit, Q16 */
 u32 cw_calls;
 
@@ -156,6 +165,14 @@ static u32 col(u32 idx8, u32 step, u32 white, u32 rmax, u32 pal)
         }
     }
     if (white > 7) white = 7;
+    if (mode == 3) {
+        if (cw_cust_kind) {
+            for (u32 k = 0; k < ROWS; k++) cw_tbl[k] = cw_cust_ramp[k];
+            return 0;
+        }
+        fill(cw_cust_pal[white], 0);
+        return 0;
+    }
     fill(R16(pal + 2 * white), 0);
     return 0;
 }

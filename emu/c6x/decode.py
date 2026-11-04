@@ -25,6 +25,9 @@ _EXE = "objdump.exe" if os.name == "nt" else "objdump"
 
 
 def _objdump():
+    env = os.environ.get("XDJ_TIC6X_OBJDUMP")      # explicit override
+    if env and os.path.exists(env):
+        return env
     try:                                    # frozen app: bundled repo copy
         from emu.paths import repo_root
         p = os.path.join(repo_root(), "work", "tic6x", _EXE)
@@ -32,10 +35,26 @@ def _objdump():
             return p
     except Exception:
         pass
-    return os.path.join(HERE, "..", "..", "work", "tic6x", _EXE)
+    p = os.path.abspath(os.path.join(HERE, "..", "..", "work", "tic6x", _EXE))
+    if os.path.exists(p):
+        return p
+    import shutil                           # a binutils tic6x-elf on PATH
+    for n in ("tic6x-elf-objdump", "tic6x-objdump"):
+        w = shutil.which(n)
+        if w:
+            return w
+    return p
 
 
 OBJDUMP = _objdump()
+HOWTO = ("the TI C6x disassembler (GNU objdump for tic6x) is missing: run "
+         "tools/build_tic6x_objdump.sh (builds work/tic6x/objdump from "
+         "binutils, about 10 minutes) or set XDJ_TIC6X_OBJDUMP")
+
+
+def available():
+    """True when the decoder can run (objdump present and executable)."""
+    return os.path.isfile(OBJDUMP) and os.access(OBJDUMP, os.X_OK)
 
 _LINE = re.compile(r"^\s*([0-9a-f]+):\s+([0-9a-f]{4}(?:[0-9a-f]{4})?)\s+(.*)$")
 
@@ -106,6 +125,8 @@ def parse_line(addr, raw, text):
 def decode_bytes(blob, vma):
     """{addr: Insn} for blob placed at DSP address vma (vma % 32 == 0)."""
     assert vma % 32 == 0, "decode ranges must start on a fetch packet"
+    if not available():
+        raise FileNotFoundError(f"{HOWTO} (looked at {OBJDUMP})")
     with tempfile.NamedTemporaryFile(suffix=".bin", delete=False) as f:
         f.write(blob)
         name = f.name

@@ -95,7 +95,7 @@ UIHTML = os.path.join(BUNDLE, "studio", "ui.html") if FROZEN else os.path.join(H
 
 APP_SUPPORT = app_support_dir()
 # the app's own release number (GitHub release tag v<APP_VERSION>)
-APP_VERSION = "0.99.3"
+APP_VERSION = "0.99.4"
 RELEASES_API = "https://api.github.com/repos/inter55/xdj-mod-studio/releases/latest"
 RELEASES_PAGE = "https://github.com/inter55/xdj-mod-studio/releases/latest"
 SETTINGS = os.path.join(APP_SUPPORT, "studio.json")
@@ -1332,6 +1332,41 @@ def j_firmware(log, prog, upd):
     prog(1.0, "firmware ready")
 
 
+def theme_delete(name):
+    """Remove one entry from the project's mods/themes.py (the single
+    `    'name': dict(...)` line tools/mod_builder.py writes). The file is
+    re-imported afterwards; if that fails the original is put back."""
+    if not re.fullmatch(r"[a-z0-9][a-z0-9-]*", name or "") or name == "stock":
+        return {"ok": False, "error": "That theme cannot be deleted."}
+    tp = os.path.join(ROOT, "mods", "themes.py")
+    try:
+        src = open(tp, encoding="utf-8").read()
+    except OSError as e:
+        return {"ok": False, "error": f"mods/themes.py: {e}"}
+    pat = re.compile(rf"^[ \t]*'{re.escape(name)}'[ \t]*:.*\n", re.M)
+    if not pat.search(src):
+        return {"ok": False, "error": f"'{name}' is not in mods/themes.py."}
+    new = pat.sub("", src, count=1)
+    bak = tp + ".bak"
+    shutil.copy2(tp, bak)
+    with open(tp, "w", encoding="utf-8") as f:
+        f.write(new)
+    try:
+        import importlib
+        import themes as T
+        importlib.reload(T)
+        assert name not in T.THEMES
+    except Exception as e:
+        shutil.copy2(bak, tp)
+        return {"ok": False, "error": f"could not remove '{name}': {type(e).__name__}: {e}"}
+    try:
+        os.unlink(bak)
+    except OSError:
+        pass
+    _THEMES[0] = None                       # theme_list() re-reads the file
+    return {"ok": True, "name": name, "themes": sorted(theme_list())}
+
+
 def j_theme_save(log, prog, name, spec):
     args = ["tools/mod_builder.py", "--name", name,
             "--hue", str(spec["hue"]), "--sat", str(spec["sat"]),
@@ -2071,6 +2106,8 @@ class H(BaseHTTPRequestHandler):
             if p == "/api/theme/save":
                 return self.send({"job": job(f"Save theme {b['name']}", j_theme_save,
                                              b["name"], b["spec"])})
+            if p == "/api/theme/delete":
+                return self.send(theme_delete((b.get("name") or "").strip().lower()))
             if p == "/api/theme/deck":
                 return self.send({"job": job(f"Install theme {b['name']} on deck",
                                              j_theme_deck, b["name"])})

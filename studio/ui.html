@@ -449,6 +449,7 @@ dialog h2 { font-size: 16px; margin-bottom: 6px; }
       <div id="nothemes" class="notice bad" hidden style="margin-bottom:12px"><div><b>No theme presets loaded.</b><div id="themeerr" class="small" style="user-select:text"></div><div class="small">Project folder: <code id="themeroot"></code>. Presets live in its <code>mods/themes.py</code>; point Settings at the folder that has it.</div></div></div>
       <div class="sec first">
         <h2>Theme</h2>
+        <div class="row" style="margin-bottom:10px"><select class="field grow" id="tsel" aria-label="Saved themes" title="Saved themes in the project folder (mods/themes.py)"></select><button class="btn sm" id="tdel" title="Remove this theme from mods/themes.py">Delete</button></div>
         <div class="sws" id="sws"></div>
         <div id="sliders">
           <div class="ctl"><span>Hue</span><input class="hue" type="range" id="hue" min="0" max="360" step="1"><output id="o-hue"></output></div>
@@ -940,7 +941,25 @@ function swatches() {
   $('#sws').innerHTML = Object.entries(th).map(([n, t]) => `<button class="sw" aria-pressed="${n === MOD.theme}" data-n="${esc(n)}" title="${esc(n)}">
     <i style="background:linear-gradient(135deg, ${t.swatch[0]} 50%, ${t.swatch[1]} 50%)"></i><span>${esc(n)}</span></button>`).join('');
   $$('.sw').forEach(b => b.onclick = () => { MOD.theme = b.dataset.n; MOD.touched = true; usePreset(); swatches(); markDirty(); });
+  // the same list as a dropdown (saved themes from the project's mods/themes.py)
+  const sel = $('#tsel'), names = Object.keys(th);
+  const cur = names.includes(MOD.theme) ? MOD.theme : '';
+  const opts = [`<option value="" ${cur ? '' : 'selected'}>${MOD.theme === 'custom' ? 'Unsaved changes — name and save below' : 'Saved themes…'}</option>`]
+    .concat(names.map(n => `<option value="${esc(n)}" ${n === cur ? 'selected' : ''}>${esc(n)}</option>`));
+  if (sel.innerHTML !== opts.join('')) sel.innerHTML = opts.join('');
+  $('#tdel').disabled = !cur || cur === 'stock';
 }
+$('#tsel').onchange = e => { if (!e.target.value) return; MOD.theme = e.target.value; MOD.touched = true; usePreset(); swatches(); markDirty(); };
+$('#tdel').onclick = async () => {
+  const name = MOD.theme;
+  if (!name || name === 'stock' || name === 'custom') return;
+  if (!await ask(`Delete theme “${name}”?`, 'It is removed from mods/themes.py in the project folder. The sliders keep its values, so you can save it again under any name.', 'Delete')) return;
+  const r = await api('/api/theme/delete', {name}); if (!r) return;
+  if (!r.ok) return toast(r.error || 'Could not delete the theme.', true);
+  toast(`Deleted “${name}”.`);
+  MOD.theme = 'custom';                    // sliders stay as they are
+  await state(); swatches(); markDirty();
+};
 function usePreset() {
   const t = ((ST.themes || {})[MOD.theme] || {}).spec;
   SL.forEach(k => $('#' + k).value = t ? (t[k] ?? DEF[k]) : DEF[k]);
@@ -998,7 +1017,15 @@ $('#tsave').onclick = async () => {
   if (!ST.themes_ok) return toast('Theme engine not found. Choose the project folder in Settings.', true);
   const r = await api('/api/theme/save', {name, spec: spec()}); if (!r) return;
   watch(); toast(`Saving “${name}”…`);
-  setTimeout(async () => { await state(); MOD.theme = name; swatches(); }, 2500);
+  // the save is a short job: refresh the theme list when it is done
+  const t0 = Date.now();
+  const tick = async () => {
+    const js = await api('/api/jobs') || [];
+    const j = js.find(x => x.title === `Save theme ${name}`);
+    if (j && j.state === 'running' && Date.now() - t0 < 60000) return setTimeout(tick, 700);
+    await state(); if (j && j.state === 'done') MOD.theme = name; swatches(); markDirty();
+  };
+  setTimeout(tick, 700);
 };
 
 /* Theme Builder -> emulator hand-off */

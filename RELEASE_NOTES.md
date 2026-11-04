@@ -1,3 +1,22 @@
+# XDJ Mod Studio v0.99.4 (XDJ-700, firmware 1.15)
+
+Follow-up to 0.99.3: saved themes. Same requirements as 0.99 (your own
+XDJ-700 v1.15 update file; Apple Silicon Mac on macOS 14+, or the
+Windows zip). Mac: see the Gatekeeper note under 0.99.1 below.
+
+## New in 0.99.4
+
+- **Saved themes dropdown** at the top of Theme Builder: every theme in
+  the project folder's `mods/themes.py`, the same list as the swatches.
+  Pick one and the sliders follow. The list refreshes as soon as a save
+  finishes, and the new theme is selected.
+- **Delete** button next to it: removes the selected theme from
+  `mods/themes.py` after a confirmation. The sliders keep its values, so
+  it can be saved again under any name. `stock` cannot be deleted.
+- Moving a slider marks the dropdown "Unsaved changes" until you save.
+
+---
+
 # XDJ Mod Studio v0.99.3 (XDJ-700, firmware 1.15)
 
 Follow-up to 0.99.2: Theme Builder ↔ Emulator. Same requirements as 0.99

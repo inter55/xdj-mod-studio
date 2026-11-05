@@ -62,7 +62,8 @@ waveforms, beat jump up to 64, 8 hot cues, live stems, key shift, Touch FX
 - **Live stems** — mute vocals, drums, bass or other while a track plays,
   from the PERFORM STEMS tab.
 - **Key shift** — move a track a few semitones while it plays, tempo
-  unchanged (MASTER TEMPO on).
+  unchanged (MASTER TEMPO on). On by default in 1.0, untick it on the
+  Mods page if you would rather leave it out.
 - **Touch FX (beta)** — an X/Y pad with Filter, Crush and Gate.
 - **Phase meter** — the scrolling beat meter from the XDJ-1000MK2.
 - **Themes** — save your own colour set in the app, pick it on the deck in

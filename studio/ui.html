@@ -1354,7 +1354,7 @@ async function kdlg(dirs) {
   const mins = dirs.reduce((s, d) => s + ((track(d)?.duration) || 0), 0) / 60;
   const rep = dirs.filter(d => track(d)?.can_replace).length;
   const extra = `<div class="small" style="margin-top:6px">The track is replaced by its stems version under the same name, so it stays in ARTIST / TRACK with its cues. The original is kept next to it as a backup.</div>
-      <div class="small faint" style="margin-top:4px">${rep < dirs.length ? `${dirs.length - rep} MP3/M4A track${dirs.length - rep > 1 ? 's' : ''} can't be replaced: ${dirs.length - rep > 1 ? 'they go' : 'it goes'} next to the original, under BROWSE › FOLDER.` : ''}</div>
+      <div class="small faint" style="margin-top:4px">${rep < dirs.length ? `${dirs.length - rep} MP3/M4A track${dirs.length - rep > 1 ? 's' : ''} aren't replaced in 1.0: ${dirs.length - rep > 1 ? 'they go' : 'it goes'} next to the original, under BROWSE › FOLDER (in-place replacement is planned for 1.1).` : ''}</div>
       <div class="est" id="dxest"></div>`;
   const est = () => { const t = 0.8 + mins * 0.45;
       return `≈ <b>${Math.round(mins * 52)} MB</b> on the stick for ${mins.toFixed(1)} min of audio · about <b>${t < 1 ? '1 min' : Math.round(t) + ' min'}</b>${dirs.length > 1 ? ` (${dirs.length} tracks)` : ''}`; };

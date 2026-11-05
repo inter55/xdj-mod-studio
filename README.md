@@ -77,8 +77,10 @@ but nobody has tried them on one yet:
 Making stems for a WAV or AIFF **replaces the track under its own name**, so
 it keeps its cues, its waveform and its place in your playlists. The original
 stays next to it as `your track.wav.pre-stems`; rename it back to undo. MP3
-and M4A can't be replaced (the deck picks its decoder from the extension), so
-those get a stems file beside the original under BROWSE › FOLDER.
+and M4A are not replaced in 1.0 — they get a stems file beside the original
+under BROWSE › FOLDER, because the deck picks its decoder from the extension
+and the stems data rides in a chunk only WAV/AIFF can carry. Replacing those
+in place is a 1.1 item, not a permanent limitation.
 
 If PERFORM › STEMS shows the mix only, or the KEY SHIFT buttons do nothing:
 

@@ -20,6 +20,8 @@ import sys
 
 sys.path[:0] = [".", "tools"]
 HOOK = 0x08D5FFA8
+POLL = 0x08C1D56C            # player task's buffer-level poll (fast mute trigger)
+POLL_ACC = 0x08BF2BCC        # its stock value: the host-port read accessor
 DIRECT = 0x08DDFFD4          # the media API's direct USB read slot (also fread)
 FREAD = 0x08C61A6C
 OUT = "build/stems"
@@ -76,7 +78,29 @@ def main():
         send(h, "$CDJ", 1.5)
         live = rd32(h, HOOK)
         print(f"audio read hook = {live:#x} (ours {entry:#x})")
+        poll = s["sm_poll_entry"]
+
+        def arm_poll():
+            """fast trigger: the poll pool -> sm_poll (only from stock)"""
+            pv = rd32(h, POLL)
+            if pv == poll:
+                return True
+            if pv != POLL_ACC:
+                print(f"poll pool {pv:#x} not stock - fast trigger left off "
+                      f"(mutes still work, at read-burst speed)")
+                return False
+            lw(h, POLL, poll)
+            if rd32(h, POLL) != poll:
+                lw(h, POLL, POLL_ACC)
+                print("poll pool verify failed - restored, fast trigger off")
+                return False
+            return True
+
         if arg == "--revert":
+            if rd32(h, POLL) == poll:
+                lw(h, POLL, POLL_ACC)
+                if rd32(h, POLL) != POLL_ACC:
+                    sys.exit("FAIL: poll pool not restored - REBOOT the deck")
             if live != entry:
                 print("not armed - nothing to do")
                 return 0
@@ -89,6 +113,7 @@ def main():
             print(f"RESULT: reverted (hook = {prev:#x})")
             return 0
         if live == entry:
+            arm_poll()
             print("RESULT: PASS (already armed)")
             return 0
         if not (0x08000000 <= live < 0x10000000):
@@ -118,7 +143,9 @@ def main():
             if rd32(h, DIRECT) != entry:
                 lw(h, DIRECT, FREAD)
                 sys.exit("FAIL: direct slot verify - restored")
-        print("RESULT: PASS - load a STEMS file; PERFORM > STEMS mutes/solos live")
+        fast = arm_poll()
+        print("RESULT: PASS - load a STEMS file; PERFORM > STEMS mutes/solos live"
+              + (" (fast trigger on)" if fast else ""))
         return 0
     finally:
         h.close()

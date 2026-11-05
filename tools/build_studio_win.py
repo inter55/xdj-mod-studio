@@ -114,6 +114,11 @@ def main():
     shutil.copy(os.path.join(NAT, "objdump.exe"), os.path.join(repo, "work", "tic6x"))
     shutil.copy(os.path.join(NAT, "_c6xcore.dll"), os.path.join(repo, "emu", "c6x"))
     shutil.copy(os.path.join(NAT, "_fastcore.dll"), os.path.join(repo, "emu"))
+    # the app's emulator: QEMU built by the workflow's qemu job (GPL;
+    # licence, patch and source note travel inside qemu-bin/)
+    wq = os.path.join(ROOT, "build", "win-qemu", "qemu-bin")
+    if os.path.isdir(wq):
+        shutil.copytree(wq, os.path.join(repo, "qemu-bin"))
     # sourceless, like the Mac app (mods/themes.py stays: the Theme Builder
     # appends user themes to it)
     compileall.compile_dir(repo, quiet=1, legacy=True)

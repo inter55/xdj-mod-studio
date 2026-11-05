@@ -1,0 +1,8 @@
+098993a8 B _end
+09891300 B _lc_applied
+09891320 B _lc_bad
+09891324 B _lc_seen
+0989131c B _lc_why
+09890000 T _ld_head
+098902ec T _ld_open
+09890a68 D _ld_state

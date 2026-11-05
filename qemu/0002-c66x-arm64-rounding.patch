@@ -1,0 +1,32 @@
+--- a/hw/cdj/c6x/c66x_priv.h	2026-11-03 15:28:54
++++ b/hw/cdj/c6x/c66x_priv.h
+@@ -206,6 +206,29 @@
+         abort();
+     }
+ }
++#elif defined(__aarch64__)
++/* Apple Silicon / arm64: the rounding mode is FPCR.RMode (bits 23:22: 00
++ * nearest, 01 +inf, 10 -inf, 11 zero). fesetround is a library call per
++ * float op -- 40 % of the DSP thread on an M-series Mac -- so set the bits
++ * directly. */
++static inline void host_round(unsigned rm)
++{
++    static const uint64_t rc[4] = { 0, 3ull << 22, 1ull << 22, 2ull << 22 };
++    /* FPCR reads/writes serialise on Apple cores: remember what this thread
++     * last set (a thread starts in round-to-nearest) and touch FPCR only on
++     * a change */
++    static __thread unsigned cur;
++    uint64_t f;
++
++    rm &= 3;
++    if (rm == cur) {
++        return;
++    }
++    cur = rm;
++    __asm__ volatile("mrs %0, fpcr" : "=r"(f));
++    f = (f & ~(3ull << 22)) | rc[rm];
++    __asm__ volatile("msr fpcr, %0" : : "r"(f));
++}
+ #else
+ static const int fe_mode[4] = { FE_TONEAREST, FE_TOWARDZERO, FE_UPWARD, FE_DOWNWARD };
+ 

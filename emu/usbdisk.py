@@ -88,7 +88,12 @@ def _short_name(name, used):
     import unicodedata
     flat = unicodedata.normalize("NFKD", name).encode("ascii", "ignore").decode()
     base, ext = os.path.splitext(flat)
-    clean = lambda t: "".join(c for c in t.upper() if c.isalnum() or c in "_-")
+    # every character FAT allows in a short name (not just letters/digits):
+    # "Cheers!" / "Slammin'" keep their plain short name like on a stick
+    # the Mac or Windows formatted; dropping the "!" made it "CHEERS~1" and
+    # the deck could not open /Contents/Cheers!/... (E-8302, 2026-11-02)
+    clean = lambda t: "".join(c for c in t.upper()
+                              if (c.isalnum() and ord(c) < 128) or c in "_-!#$%&'()@^`{}~")
     b, e = clean(base)[:8], clean(ext[1:])[:3]
     # 2026-10-18: like Windows/macOS FAT drivers, an all-lowercase (or all-
     # upper) 8.3 name keeps its plain short name ("export.pdb" ->

@@ -78,6 +78,7 @@ class SH7724:
         self.rx = [[], [], []]      # SCIF0/1/2 receive queues (bytes)
         self.pending = set()    # interrupt source names with flag set
         self.cyc = 0
+        self._evc = None        # the C core while it owns TMU/LCDC (play)
         # TMU: unit -> ch -> {tcor, tcnt, tcr, acc}
         self.tmu = {}
         for base in (0xFFD80000, 0xFFD90000):
@@ -125,6 +126,16 @@ class SH7724:
         return {"tcor": 0xFFFFFFFF, "tcnt": 0xFFFFFFFF, "tcr": 0, "acc": 0}
 
     # -- helpers ----------------------------------------------------------
+    def _scif_ct(self, ch=None):
+        """rx byte counts into the C core's SCIF status mirror (no-op
+        unless the play-mode event loop owns it)."""
+        evc = getattr(self, "_evc", None)
+        if evc is None:
+            return
+        for k in range(3):
+            n = len(self.rx[k])
+            evc.scif_rx[k] = n if n < 16 else 16
+
     def _touch(self, op, addr, val=None):
         if addr in self.touched:
             return
@@ -147,6 +158,15 @@ class SH7724:
         # are 16-bit (byte-split stores), so assemble both bytes first.
         if 0xA0000000 <= ipr < 0xC0000000:
             ipr &= 0x1FFFFFFF
+        evc = self.__dict__.get("_evc")
+        if evc is not None and 0x04080000 <= ipr < 0x04080027:
+            # play-mode C event loop owns the IPR bytes: reg[] is stale
+            # until _ev_out. Reading reg[] here gave USI0 level 0, so the
+            # USB interrupt was never delivered: the mount stalled and
+            # every pass shrank to 64 cycles (1-2 fps) -- 2026-11-01.
+            o = ipr - 0x04080000
+            v = evc.intc_ipr[o] | (evc.intc_ipr[o + 1] << 8)
+            return (v >> shift) & 0xF
         v = self.reg.get(ipr, 0) | (self.reg.get(ipr + 1, 0) << 8)
         return (v >> shift) & 0xF
 
@@ -498,7 +518,9 @@ class SH7724:
             return v
         if off == 0x14:  # SCFRDR
             if self.rx[ch]:
-                return self.rx[ch].pop(0)
+                b = self.rx[ch].pop(0)
+                self._scif_ct()
+                return b
             return 0
         if off == 0x1C:  # SCFDR: R count hi, T count lo
             return (min(len(self.rx[ch]), 16) << 8) & 0xFF00
@@ -836,6 +858,7 @@ class SH7724:
         while nbytes > 0:
             chunk = fr[:nbytes]
             self.rx[2].extend(chunk)
+            self._scif_ct()
             nbytes -= len(chunk)
 
     # -- DSP memory as seen through the HPI (sparse 64 KB pages) ----------
@@ -939,27 +962,31 @@ class SH7724:
     # -- idle fast-forward ------------------------------------------------------------
     def cycles_to_next_event(self):
         """CPU cycles until the next timer underflow / compare match that
-        would raise an enabled interrupt (0 if one is already pending)."""
+        would raise an enabled interrupt (0 if one is already pending).
+        TMU/LCDC are excluded while the C core owns them (play mode): the
+        C side bounds its own slices via core_ev_next."""
         if self.pending:
             return 0
+        evc = getattr(self, "_evc", None)
         best = None
         ratio = CPUFREQ // PCLK
-        for base, chs in self.tmu.items():
-            tstr = self.tstr.get(base + 0x04, 0)
-            for ch, st in chs.items():
-                if not (tstr & (1 << ch)) or not (st["tcr"] & 0x20):
-                    continue
-                div = {0: 4, 1: 16, 2: 64, 3: 256, 4: 1024}.get(st["tcr"] & 7, 4)
-                pcl = (st["tcnt"] + 1) * div - st["acc"]
-                c = max(1, pcl) * ratio
+        if evc is None:
+            for base, chs in self.tmu.items():
+                tstr = self.tstr.get(base + 0x04, 0)
+                for ch, st in chs.items():
+                    if not (tstr & (1 << ch)) or not (st["tcr"] & 0x20):
+                        continue
+                    div = {0: 4, 1: 16, 2: 64, 3: 256, 4: 1024}.get(st["tcr"] & 7, 4)
+                    pcl = (st["tcnt"] + 1) * div - st["acc"]
+                    c = max(1, pcl) * ratio
+                    best = c if best is None else min(best, c)
+            if self.reg.get(self.LDINTR + 1, 0) & 0x7F:
+                c = max(1, self._lcdc_left())
                 best = c if best is None else min(best, c)
         if self.cmstr & 1 and (self.cmcsr >> 4) & 3:
             div = {0: 8, 1: 32, 2: 128, 3: 512}.get(self.cmcsr & 7, 8)
             left = (self.cmcor - self.cmcnt) & 0xFFFFFFFF
             c = max(1, left * div - self.cm_acc) * ratio
-            best = c if best is None else min(best, c)
-        if self.reg.get(self.LDINTR + 1, 0) & 0x7F:
-            c = max(1, self._lcdc_left())
             best = c if best is None else min(best, c)
         for dv in (getattr(self, "usb", None), getattr(self, "iic", None)):
             c = dv.cycles_to_next() if dv is not None else None
@@ -977,6 +1004,23 @@ class SH7724:
     FRAME_CYC = CPUFREQ // int(os.environ.get("XDJ_LCD_HZ", "60"))
     LDINTR = 0xFE940468
 
+    # The 60 Hz frame count, which the app's wall-clock pacing reads
+    # (emu/ui.py _emu_loop). While the play-mode C event loop owns the LCDC
+    # (fastcpu._ev_attach) the live count is in the core; the plain value
+    # stays in __dict__ so snapshots pickle as before. Until 2026-11-01 the
+    # app read a frozen count there and never slept -- harmless below real
+    # time, unbounded audio lag above it.
+    @property
+    def frames(self):
+        evc = self.__dict__.get("_evc")
+        if evc is not None:
+            return evc.lcdc_frames
+        return self.__dict__.get("frames", 0)
+
+    @frames.setter
+    def frames(self, v):
+        self.__dict__["frames"] = v
+
     def _lcdc_tick(self, cyc):
         acc = getattr(self, "lcdc_acc", 0) + cyc
         if acc < self.FRAME_CYC:
@@ -993,15 +1037,19 @@ class SH7724:
         return self.FRAME_CYC - getattr(self, "lcdc_acc", 0)
 
     # -- tick --------------------------------------------------------------------------
-    def tick(self, cyc):
+    def tick(self, cyc, ev=False):
         self.cyc += cyc
         if getattr(self, "dspemu", None) is not None:
             self.dspemu.tick(cyc)
         if self.hle is not None:
             self.hle.tick(cyc)
-        self._lcdc_tick(cyc)
-        self._tmu_tick(0xFFD80000, cyc)
-        self._tmu_tick(0xFFD90000, cyc)
+        if not ev:                # play-mode C event loop owns these counters
+            self._lcdc_tick(cyc)
+            self._tmu_tick(0xFFD80000, cyc)
+            self._tmu_tick(0xFFD90000, cyc)
+        # CMT is NOT owned by the C event loop (fastcore's cmt_* slots are
+        # unused). Skipping it in play mode froze the CMT the USB stack
+        # starts on a stick insert: mount stuck at 0 reads, 1 fps (11-01).
         self._cmt_tick(cyc)
         u = getattr(self, "usb", None)
         if u is not None:

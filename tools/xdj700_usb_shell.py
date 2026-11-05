@@ -12,7 +12,10 @@ Usage (at the studio, deck connected over rear USB-B, powered on):
     .venv/bin/python tools/xdj700_usb_shell.py --list
     .venv/bin/python tools/xdj700_usb_shell.py --handshake [--vid PID] [--pid PID]
 
-Requires: pip install hid  (+ brew hidapi, already done on this machine)
+Requires: the bundled vendor/hid plus Homebrew's libhidapi (brew install
+hidapi). PYTHONPATH="$PWD/vendor" from a source checkout; the frozen app adds
+it itself. pip install hidapi is NOT enough: that is cython-hidapi, which has
+no hid.Device.
 Pioneer DJ USB vendor ID: 0x2B73 (XDJ-700 shows pid 0x0008).
 
 SAFETY: --bw is gated to the RAM window 0x08000000-0x0FFFFFFF (same as
@@ -24,10 +27,26 @@ import sys
 import os
 import time
 
+# The frozen app ships a working HID binding in vendor/ (added to sys.path by
+# its pathex); a source checkout should use the same one. pip's "hidapi" is
+# cython-hidapi, which has no hid.Device -- vendor/hid does, and only needs
+# libhidapi from Homebrew (brew install hidapi).
+VENDOR = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+                      "vendor")
+if os.path.isdir(os.path.join(VENDOR, "hid")) and VENDOR not in sys.path:
+    sys.path.insert(0, VENDOR)
+
 try:
     import hid
-except ImportError:
-    sys.exit("need the 'hid' package: .venv/bin/pip install hid")
+except ImportError as e:
+    sys.exit(
+        "need the 'hid' package (import failed: %r)\n"
+        "  macOS, from a source checkout:\n"
+        "    brew install hidapi\n"
+        "    PYTHONPATH=\"$PWD/vendor\" .venv/bin/python "
+        "tools/xdj700_usb_shell.py --list\n"
+        "  pip install hidapi installs cython-hidapi, which has no hid.Device;\n"
+        "  the bundled vendor/hid is the one the deck tools need." % (e,))
 
 PIONEER_VID = 0x2B73  # Pioneer DJ USB vendor ID (XDJ-700 shows pid 0x0008)
 

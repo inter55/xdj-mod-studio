@@ -44,7 +44,7 @@ def build():
 def install_hc(mem, code, syms):
     """same order as a deck installer: code (bss zeroed), chain, hook last"""
     base = syms["hc_table"]
-    for a in range(base, syms["hc_count"] + 4, 4):
+    for a in range(base, syms.get("end", syms["hc_count"] + 4), 4):
         mem.w32(a, 0)
     for i, b in enumerate(code):
         mem.w8(base + i, b)

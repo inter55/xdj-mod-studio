@@ -194,13 +194,13 @@ def background(fonts):
     pygame.draw.rect(s, (10, 10, 11), slot.inflate(-S(6), -S(5)))
     text(s, small, "USB", P(213, 44), DIM)
     text(s, small, "—  USB STOP", P(212, 106), INK)
-    # rekordbox badge
-    if not logo_img(s, "rekordbox_white.png", P(218, 182), S(62)):
-        rb = P(197, 183)
+    # rekordbox badge: centred on the USB column, just under USB STOP
+    if not logo_img(s, "rekordbox_white.png", P(212, 152), S(56)):
+        rb = P(193, 152)
         pygame.draw.circle(s, (214, 40, 50), rb, S(4.5), 3)
         pygame.draw.circle(s, (214, 40, 50), rb, S(1.6))
         text(s, label, "rekordbox", (rb[0] + S(7), rb[1]), INK, anchor="l")
-    text(s, small, "MP3/AAC/WAV/AIFF", P(219, 194), DIM)
+    text(s, small, "MP3/AAC/WAV/AIFF", P(212, 163), DIM)
     # model plate
     text(s, small, "MULTI PLAYER", P(588, 182), INK)
     text(s, big, "XDJ-700", P(588, 194))
@@ -227,27 +227,32 @@ def background(fonts):
     text(s, small, "VINYL MODE", P(538, 237), INK)
     text(s, small, "MASTER TEMPO", P(592, 276), INK)
     # jog: shadow well, chrome rim, dimple ring base, platter
-    disc(s, JOG_C, JOG_R + S(10), (4, 4, 5), (14, 14, 15))
-    disc(s, JOG_C, JOG_R + S(3), (190, 192, 198), (120, 122, 128))
-    disc(s, JOG_C, JOG_R, (44, 45, 49), (26, 27, 30))
+    # glossy black bezel the jog sits in (no chrome on the real deck)
+    disc(s, JOG_C, JOG_R + S(14), (3, 3, 4), (12, 12, 13))
+    pygame.draw.circle(s, (54, 55, 60), JOG_C, JOG_R + S(14), 1)
     text(s, label, "—  REV", P(292, 541), INK)
     text(s, label, "+  FWD", P(512, 541), INK)
-    # tempo fader: slot, scale, label box
+    # tempo fader: dark panel with a ribbed rail, dotted scale on the
+    # left (- / 0 / +), TEMPO printed inside at the bottom (product photo)
     f = FADER
-    pygame.draw.rect(s, (8, 8, 9), f.inflate(S(4), S(8)), border_radius=6)
-    pygame.draw.line(s, (0, 0, 0), (f.centerx, f.y + S(3)), (f.centerx, f.bottom - S(3)), S(2))
-    for i in range(21):
-        y = f.y + S(6) + i * (f.h - S(12)) // 20
-        w = S(7) if i % 5 == 0 else S(4)
-        pygame.draw.line(s, (140, 142, 148), (f.x - S(4) - w, y), (f.x - S(4), y), 1)
-    text(s, label, "–", (f.x - S(16), f.y + S(6)))
-    text(s, small, "0", (f.x - S(16), f.centery))
-    text(s, label, "+", (f.x - S(16), f.bottom - S(6)))
-    tb = pygame.Rect(0, 0, S(26), S(9))
-    tb.midtop = (f.centerx, f.bottom + S(4))
-    pygame.draw.rect(s, (20, 20, 22), tb, border_radius=3)
-    pygame.draw.rect(s, (150, 152, 158), tb, 1, border_radius=3)
-    text(s, small, "TEMPO", tb.center)
+    pan = pygame.Rect(0, 0, f.w + S(18), f.h + S(34))
+    pan.midtop = (f.centerx, f.y - S(8))
+    pygame.draw.rect(s, (8, 8, 9), pan.inflate(S(3), S(3)), border_radius=S(4))
+    pygame.draw.rect(s, (24, 24, 27), pan, border_radius=S(3))
+    pygame.draw.rect(s, (70, 71, 76), pan, 1, border_radius=S(3))
+    for y in range(f.y, f.bottom, S(3)):                     # rail ribs
+        for x0, x1 in ((pan.x + S(4), f.centerx - S(4)),
+                       (f.centerx + S(4), pan.right - S(4))):
+            pygame.draw.line(s, (52, 53, 58), (x0, y), (x1, y), 1)
+            pygame.draw.line(s, (14, 14, 16), (x0, y + 1), (x1, y + 1), 1)
+    pygame.draw.rect(s, (2, 2, 3), (f.centerx - S(2), f.y, S(4), f.h))  # slot
+    sx = pan.x - S(10)
+    for y in range(f.y + S(4), f.bottom - S(2), S(4)):          # dotted scale
+        pygame.draw.circle(s, (150, 152, 158), (sx, y), 1)
+    text(s, label, "–", (sx - S(8), f.y + S(6)))
+    text(s, small, "0", (sx - S(8), f.centery))
+    text(s, label, "+", (sx - S(8), f.bottom - S(4)))
+    text(s, small, "TEMPO", (f.centerx, pan.bottom - S(10)))
     return s
 
 
@@ -291,21 +296,91 @@ def draw_control(surf, name, lit, fonts):
             y += 17
 
 
+_JOG = {}
+
+
+def _bowl(w, h):
+    """One scalloped finger bowl of the jog ring, long side horizontal: a
+    dark DISH -- light only on its far rim, darkest toward the near side,
+    like the photo's oval dimples (a bright centre reads as a bump)."""
+    b = pygame.Surface((w + 4, h + 4), pygame.SRCALPHA)
+    pygame.draw.ellipse(b, (64, 65, 70, 255), (2, 2, w, h))          # rim light
+    for k in range(9):
+        t = k / 8.0
+        v = int(34 - 22 * t)
+        ww, hh = int(w * (0.94 - .45 * t)), int(h * (0.9 - .45 * t))
+        r = pygame.Rect(0, 0, ww, hh)
+        r.center = (w // 2 + 2, h // 2 + 2 + int(h * .07 * t))
+        pygame.draw.ellipse(b, (v, v, v + 2, 255), r)
+    pygame.draw.ellipse(b, (8, 8, 9, 255), (2, 2, w, h), 1)
+    return b
+
+
+def _jog_ring():
+    """The ring of 24 bowls + the row of small dots inside it, at 0 deg."""
+    if "ring" in _JOG:
+        return _JOG["ring"]
+    R = JOG_R
+    ring = pygame.Surface((2 * R + 4, 2 * R + 4), pygame.SRCALPHA)
+    c = (R + 2, R + 2)
+    disc(ring, c, R, (30, 30, 33), (16, 16, 18))
+    rc = (JOG_IN + S(9) + R) / 2.0
+    bw = int(2 * math.pi * rc / 24 * 0.97)
+    bh = int((R - JOG_IN - S(9)) * 0.92)
+    sprite = _bowl(bw, bh)
+    for i in range(24):
+        a = i * 2 * math.pi / 24
+        rot = pygame.transform.rotozoom(sprite, -math.degrees(a) - 90, 1)
+        x, y = c[0] + rc * math.cos(a), c[1] + rc * math.sin(a)
+        ring.blit(rot, (x - rot.get_width() / 2, y - rot.get_height() / 2))
+    rd = JOG_IN + S(6)
+    for i in range(72):                                   # perforation dots
+        a = i * 2 * math.pi / 72
+        pygame.draw.circle(ring, (16, 16, 18),
+                           (int(c[0] + rd * math.cos(a)), int(c[1] + rd * math.sin(a))), max(1, S(1.3)))
+    _JOG["ring"] = ring
+    return ring
+
+
+def _jog_platter(touched):
+    key = ("plat", touched)
+    if key in _JOG:
+        return _JOG[key]
+    r = JOG_IN
+    p = pygame.Surface((2 * r + 4, 2 * r + 4), pygame.SRCALPHA)
+    c = (r + 2, r + 2)
+    pygame.draw.circle(p, (6, 6, 7), c, r + 2)               # raised rim edge
+    pygame.draw.circle(p, (66, 67, 72), c, r + 1, 1)
+    base = 30 if touched else 20
+    for k in range(r, 0, -2):                               # brushed rings
+        v = base + (2 if (k // 2) % 2 else 0) + int(6 * (1 - k / r))
+        pygame.draw.circle(p, (v, v, v + 2), c, k)
+    sheen = pygame.Surface(p.get_size(), pygame.SRCALPHA)   # diagonal gloss
+    for k in range(16):
+        a0 = math.radians(-24 + k * 1.6)
+        a1 = math.radians(-52 - k * 1.6)
+        pts = [c, (c[0] + r * math.cos(a0), c[1] + r * math.sin(a0)),
+               (c[0] + r * math.cos(a1), c[1] + r * math.sin(a1))]
+        pygame.draw.polygon(sheen, (255, 255, 255, 2), pts)
+        pts = [c, (c[0] - r * math.cos(a0), c[1] - r * math.sin(a0)),
+               (c[0] - r * math.cos(a1), c[1] - r * math.sin(a1))]
+        pygame.draw.polygon(sheen, (255, 255, 255, 1), pts)
+    p.blit(sheen, (0, 0))
+    _JOG[key] = p
+    return p
+
+
 def draw_jog(surf, jog_count, touched, fonts):
-    """Rotating dimple ring (the part you see turn on the real deck) and the
-    matte platter; the platter brightens while touched."""
-    cx, cy = JOG_C
-    ring_r = (JOG_R + JOG_IN) // 2
-    dr = S(10.5)
-    rot = jog_count * 0.0025
-    for i in range(24):                       # recessed dimples
-        a = rot + i * math.pi / 12
-        x, y = int(cx + ring_r * math.cos(a)), int(cy + ring_r * math.sin(a))
-        pygame.draw.circle(surf, (78, 79, 84), (x, y + 2), dr)        # lit lower lip
-        disc(surf, (x, y), dr, (8, 8, 9), (30, 31, 34))
-    disc(surf, JOG_C, JOG_IN + S(2), (150, 152, 158), (90, 92, 98))
-    base = (84, 85, 90) if touched else (64, 65, 70)
-    disc(surf, JOG_C, JOG_IN, base, (40, 41, 45), (255, 255, 255, 12))
+    """Bowl ring that turns with the jog (cached per degree: the ring
+    repeats every 15 deg) and the glossy black platter."""
+    deg = int(jog_count * 0.0025 * 180 / math.pi) % 15
+    key = ("rot", deg)
+    if key not in _JOG:
+        _JOG[key] = pygame.transform.rotozoom(_jog_ring(), -deg, 1)
+    r = _JOG[key]
+    surf.blit(r, (JOG_C[0] - r.get_width() // 2, JOG_C[1] - r.get_height() // 2))
+    pl = _jog_platter(bool(touched))
+    surf.blit(pl, (JOG_C[0] - pl.get_width() // 2, JOG_C[1] - pl.get_height() // 2))
 
 
 def draw_rotary(surf, rotary, pushed):
@@ -330,12 +405,19 @@ def draw_rotary(surf, rotary, pushed):
 
 
 def draw_fader(surf, fader_raw):
+    """Black slider cap with a white index line and grip ridges."""
     f = FADER
     fy = f.y + int(fader_raw / 499.0 * (f.h - S(12)))
-    cap = pygame.Rect(0, 0, S(34), S(15))
-    cap.midtop = (f.centerx, fy - S(1))
-    pygame.draw.rect(surf, (6, 6, 7), cap.inflate(4, 4), border_radius=4)
+    cap = pygame.Rect(0, 0, f.w + S(10), S(20))
+    cap.midtop = (f.centerx, fy - S(4))
+    pygame.draw.rect(surf, (0, 0, 0), cap.inflate(4, 6), border_radius=3)
     surf.blit(pygame.transform.smoothscale(
-        _vgrad(8, 8, (222, 223, 228), (120, 122, 128)), cap.size), cap)
-    pygame.draw.rect(surf, (90, 92, 98), cap, 1, border_radius=3)
-    pygame.draw.line(surf, (20, 20, 22), (cap.x + 4, cap.centery), (cap.right - 4, cap.centery), 2)
+        _vgrad(8, 8, (62, 63, 68), (16, 16, 18)), cap.size), cap)
+    for k in range(1, 4):                                   # grip ridges
+        y = cap.y + k * cap.h // 8
+        pygame.draw.line(surf, (80, 81, 86), (cap.x + 2, y), (cap.right - 3, y), 1)
+        y = cap.bottom - k * cap.h // 8
+        pygame.draw.line(surf, (8, 8, 9), (cap.x + 2, y), (cap.right - 3, y), 1)
+    pygame.draw.line(surf, (245, 245, 248), (cap.x + 2, cap.centery),
+                     (cap.right - 3, cap.centery), 2)
+    pygame.draw.rect(surf, (96, 97, 103), cap, 1, border_radius=2)

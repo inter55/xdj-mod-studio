@@ -28,6 +28,7 @@ LIB = os.path.join(HERE, "_fastcore.dll" if sys.platform == "win32"
                    else "_fastcore.so")
 
 R_LIMIT, R_IDLE, R_SLEEP, R_IO, R_FALLBACK = range(5)
+_EV_STATS = {}         # XDJ_EV_STATS=1: run-loop counters (debugging)
 MD, RB, BL = 1 << 30, 1 << 29, 1 << 28
 SLICE = 8192           # max SH steps per core_run (device tick granularity)
 
@@ -95,7 +96,23 @@ class Core(ctypes.Structure):
                  ("tdg_cfast", u32), ("tdg_runs_c", u32),
                  ("tdg_lcx", ctypes.c_int32), ("tdg_lcy", ctypes.c_int32),
                  ("tdg_lc_dirty", u32), ("tdg_pad3", u32),
-                 ("irq_cb", IRQ_CB), ("tdg_cont", TDG_CONT)])
+                 ("irq_cb", IRQ_CB), ("tdg_cont", TDG_CONT),
+                 # play-mode C event loop (2026-10-27): mirrors the tail of
+                 # fastcore.c's Core exactly; core_sizeof checks the layout
+                 ("ev_on", u32), ("ev_pad0", u32),
+                 ("tmu", (((u32 * 4) * 3) * 2)),
+                 ("tstr", u32 * 2),
+                 ("cmt_str", u32), ("cmt_csr", u32), ("cmt_cnt", u32),
+                 ("cmt_cor", u32), ("cmt_acc", u32),
+                 ("lcdc_acc", u32), ("lcdc_ldintr", u32),
+                 ("lcdc_frame_cyc", u32), ("lcdc_frames", u32),
+                 ("intc_ipr", ctypes.c_uint8 * 0x28),
+                 ("intc_imr", ctypes.c_uint8 * 13),
+                 ("ev_lat", ctypes.c_uint8), ("ev_pad1", ctypes.c_uint8 * 7),
+                 ("ev_cyc", u64),
+                 ("port_on", u32), ("scif_on", u32), ("scif_rx", u32 * 3),
+                 ("hpid_wr", u32), ("hint_bit", u32),
+                 ("port", vp)])
 
 _DMAC_BASES = (0xFE008000, 0xFDC08000, 0xFE009000)
 _DMA_KEYS = ("sar", "dar", "tcr", "chcr")
@@ -163,6 +180,87 @@ class _DmaBase(collections.abc.MutableMapping):
                         "ch": {n: dict(v) for n, v in self._ch.items()}},))
 
 
+_TMU_KEYS = ("tcor", "tcnt", "tcr", "acc")
+
+
+class _TmuCh(collections.abc.MutableMapping):
+    """dev.tmu[base][ch] backed by the C core's shared words (ev_on)."""
+    __slots__ = ("_a", "_u", "_ch")
+
+    def __init__(self, unit_arr, ch):
+        self._a, self._u, self._ch = unit_arr, None, ch
+
+    def __getitem__(self, k):
+        return self._a[self._ch][ _TMU_KEYS.index(k)]
+
+    def __setitem__(self, k, v):
+        self._a[self._ch][_TMU_KEYS.index(k)] = v & 0xFFFFFFFF
+
+    def __delitem__(self, k):
+        raise TypeError("cannot delete")
+
+    def __iter__(self):
+        return iter(_TMU_KEYS)
+
+    def __len__(self):
+        return 4
+
+    def __reduce__(self):
+        return (dict, (dict(self),))
+
+
+class _TstrView(collections.abc.MutableMapping):
+    """dev.tstr {base+4: byte} over Core.tstr while the C core owns it."""
+    __slots__ = ("_c",)
+    _BASES = (0xFFD80004, 0xFFD90004)
+
+    def __init__(self, core):
+        self._c = core
+
+    def __getitem__(self, k):
+        return self._c.tstr[self._BASES.index(k)] & 0xFF
+
+    def __setitem__(self, k, v):
+        self._c.tstr[self._BASES.index(k)] = v & 0xFF
+
+    def __delitem__(self, k):
+        raise TypeError("cannot delete")
+
+    def __iter__(self):
+        return iter(self._BASES)
+
+    def __len__(self):
+        return 2
+
+    def __reduce__(self):
+        return (dict, (dict(self),))
+
+
+class _ImrView(collections.abc.MutableMapping):
+    """dev.imr {idx: byte} over Core.intc_imr while the C core owns it."""
+    __slots__ = ("_c",)
+
+    def __init__(self, core):
+        self._c = core
+
+    def __getitem__(self, k):
+        return self._c.intc_imr[k]
+
+    def __setitem__(self, k, v):
+        self._c.intc_imr[k] = v & 0xFF
+
+    def __delitem__(self, k):
+        raise TypeError("cannot delete")
+
+    def __iter__(self):
+        return iter(range(13))
+
+    def __len__(self):
+        return 13
+
+    def __reduce__(self):
+        return (dict, ({k: self[k] for k in self},))
+
 
 _lib = None
 
@@ -201,6 +299,13 @@ def load_lib():
     lib.core_run.restype = ctypes.c_int
     lib.core_enter_interrupt.argtypes = [ctypes.POINTER(Core), u32, u32]
     lib.core_set_sr.argtypes = [ctypes.POINTER(Core), u32]
+    try:                          # play-mode C event loop (2026-10-27)
+        lib.core_ev_next.argtypes = [ctypes.POINTER(Core)]
+        lib.core_ev_next.restype = u64
+        lib.core_ev_tick.argtypes = [ctypes.POINTER(Core), u64]
+        lib.core_ev_deliver.argtypes = [ctypes.POINTER(Core)]
+    except AttributeError:
+        pass                      # reference build: play mode just stays off
     lib.core_read_virt.argtypes = [ctypes.POINTER(Core), u32, ctypes.c_int,
                                    ctypes.POINTER(ctypes.c_int)]
     lib.core_read_virt.restype = u32
@@ -575,6 +680,129 @@ class FastSH4:
                    for b, v in dev.dma.items()}
         self.core.dmac_on = 0
 
+    # -- play-mode C event loop ------------------------------------------------
+    def _ev_attach(self):
+        """Hand the device timers to the C core (play mode, XDJ_EV_C=0
+        off). TMU/LCDC/INTC register state becomes shared (views over the
+        C arrays, like the DMAC registers) so Python-side reads stay live;
+        the PORT mirror and IPR/LDINTR bytes are copied in and written
+        back at snapshot. NOT cycle-exact: timer IRQs arrive within one
+        pass and the C side delivers them itself."""
+        c = self.core
+        dev = self.mem.dev
+        if c.ev_on or os.environ.get("XDJ_EV_C", "1") == "0" or \
+                os.environ.get("XDJ_PLAY") != "1":
+            return
+        for u, base in enumerate((0xFFD80000, 0xFFD90000)):
+            c.tstr[u] = dev.tstr.get(base + 4, 0) & 0xFF
+            for ch in range(3):
+                st = dev.tmu[base][ch]
+                for k, key in enumerate(("tcor", "tcnt", "tcr", "acc")):
+                    c.tmu[u][ch][k] = st[key] & 0xFFFFFFFF
+        c.lcdc_frame_cyc = dev.FRAME_CYC
+        c.lcdc_acc = getattr(dev, "lcdc_acc", 0)
+        c.lcdc_frames = getattr(dev, "frames", 0)
+        v = dev.reg.get(0xFE940468, 0) | (dev.reg.get(0xFE940469, 0) << 8)
+        c.lcdc_ldintr = v & 0xFFFF
+        for i in range(13):
+            c.intc_imr[i] = dev.imr[i] & 0xFF
+        for i in range(0x28):
+            c.intc_ipr[i] = dev.reg.get(0x04080000 + i, 0) & 0xFF
+        port = bytearray(0x10000)
+        for a, by in dev.reg.items():
+            if 0x04050000 <= a < 0x04060000:
+                port[a - 0x04050000] = by
+        self._port_seen = {a - 0x04050000 for a in dev.reg
+                           if 0x04050000 <= a < 0x04060000}
+        self._port_view = (ctypes.c_char * 0x10000).from_buffer(port)
+        self._port_bytes = port
+        c.port = ctypes.addressof(self._port_view)
+        c.port_on = 1
+        c.scif_on = 1
+        self._scif_counts()
+        de = getattr(dev, "dspemu", None)
+        c.hint_bit = (1 if (de.hpic & 4) else 0) if de is not None else 0
+        c.hpid_wr = 0
+        c.ev_lat = 0
+        c.ev_cyc = dev.cyc
+        # swap the Python dicts for views over the C arrays (pickling a
+        # view yields a plain dict, so snapshots are unaffected)
+        tmu = {}
+        for u, base in enumerate((0xFFD80000, 0xFFD90000)):
+            tmu[base] = {ch: _TmuCh(c.tmu[u], ch) for ch in range(3)}
+        dev.tmu = tmu
+        dev.tstr = _TstrView(c)
+        dev.imr = _ImrView(c)
+        dev._evc = c
+        c.ev_on = 1
+
+    def _ev_out(self):
+        """C mirror -> Python (snapshots, trace fallback, detach)."""
+        c = self.core
+        if not c.ev_on:
+            return
+        dev = self.mem.dev
+        dev.tmu = {base: {ch: dict(st) for ch, st in chs.items()}
+                   for base, chs in dev.tmu.items()}
+        dev.tstr = {base + 4: c.tstr[u]
+                    for u, base in enumerate((0xFFD80000, 0xFFD90000))}
+        dev.imr = {i: c.intc_imr[i] for i in range(13)}   # a dict, as sh7724 keeps it
+        dev._evc = None
+        c.ev_on = 0
+        c.port_on = 0
+        c.scif_on = 0
+        c.hpid_wr = 0
+        dev.lcdc_acc = c.lcdc_acc
+        dev.frames = c.lcdc_frames
+        dev.reg[0xFE940468] = c.lcdc_ldintr & 0xFF
+        dev.reg[0xFE940469] = (c.lcdc_ldintr >> 8) & 0xFF
+        for i in range(0x28):
+            if c.intc_ipr[i]:
+                dev.reg[0x04080000 + i] = c.intc_ipr[i]
+        port, base = self._port_bytes, 0x04050000
+        seen = getattr(self, "_port_seen", set())
+        for off in range(0x10000):
+            b = port[off]
+            if b or off in seen:
+                dev.reg[base + off] = b
+        self._port_view = None                 # release the from_buffer view
+        c.port = 0
+
+    def _scif_counts(self):
+        """rx byte counts -> C (SCFSR/SCFDR polls stay inside the core)."""
+        c = self.core
+        dev = self.mem.dev
+        if not c.scif_on:
+            return
+        for ch in range(3):
+            n = len(dev.rx[ch])
+            c.scif_rx[ch] = n if n < 16 else 16
+
+    def _ev_pass(self, cyc):
+        """One Python pass done at device cycle `cyc`: advance the C
+        timers, deliver their IRQs, refresh the pin mirrors."""
+        c = self.core
+        lib = self.lib
+        lib.core_ev_tick(c, cyc)
+        lib.core_ev_deliver(c)
+        if c.ev_on:
+            # rx queues can change mid-slice (panel echo via the DMAC
+            # callbacks): SCFSR/SCFDR polls in C must see live counts,
+            # or the firmware's panel handshake stalls (2026-11-01).
+            self._scif_counts()
+        de = getattr(self.mem.dev, "dspemu", None)
+        if de is not None:
+            c.hint_bit = 1 if (de.hpic & 4) else 0
+            if c.hpid_wr:
+                if getattr(de, "_hpid_code_hit", False):
+                    c.hpid_wr = 0      # a code page went through HPID
+            elif (c.cs6_fast and de.threaded and
+                  getattr(de, "_thr", None) is not None and
+                  not getattr(de, "_hpid_code_hit", False) and
+                  not getattr(de, "_acc", None) and
+                  os.environ.get("XDJ_HPID_WR", "1") != "0"):
+                c.hpid_wr = 1          # DSP on its thread: stores are plain RAM
+
     def _irq_from_c(self, which):
         try:
             self.mem.dev.tdg.raise_irq("TDG_TRI" if which else "TDG_INI")
@@ -627,6 +855,7 @@ class FastSH4:
     def __getstate__(self):
         self._cs6_out()
         self._tdg_out()
+        self._ev_out()
         c = self.core
         d = {n: getattr(c, n) for n in _REGS}
         d.update(b0=self.b0, b1=self.b1, rhi=self.rhi, fr=self.fr,
@@ -662,6 +891,11 @@ class FastSH4:
         c.hpid_acc = 0
         c.hpid_addr = 0
         c.hpid_cnt = 0
+        c.ev_on = 0                    # re-armed from the dicts on next run
+        c.port_on = 0
+        c.scif_on = 0
+        c.hpid_wr = 0
+        c.port = 0
         self._cs6_in()
         self._tdg_in()
 
@@ -888,7 +1122,11 @@ class FastSH4:
         return res
 
     # -- run --------------------------------------------------------------------
-    def run(self, limit=1000000):
+    def run(self, limit=1000000, max_cycles=None):
+        """run up to `limit` steps; `max_cycles` (optional) also stops once
+        that much device time has passed -- play mode's sleep/idle jumps
+        let one step cover up to 4M cycles, so a step limit alone can be
+        0.6 s of emulated time (the app's wall-clock pacing needs ~ms)."""
         if self.trace is not None or self.mmu_on():
             return self._py_run(limit)
         lib, c, mem = self.lib, self.core, self.mem
@@ -928,41 +1166,101 @@ class FastSH4:
                 de.hpia = h
         self._tdg_attach()
         self._dmac_attach()
+        self._ev_attach()
         c.low_is_ram = 1 if mem.low_is_ram else 0
         c.fb_writes = 0
         done = u64()
         n = 0
         slice_ = _slice()
         cref = ctypes.byref(c)
+        ev = bool(c.ev_on)
+
+        def _tick(cyc, _ev=ev, _mt=mem.tick):
+            # ev kwarg not understood by frozen-tick test stubs
+            if _ev:
+                try:
+                    _mt(cyc, ev=True)
+                except TypeError:
+                    _mt(cyc)
+            else:
+                _mt(cyc)
         try:
-            while n < limit:
+            stats = {} if os.environ.get("XDJ_EV_STATS") else None
+            cmax = None if max_cycles is None else dev.cyc + max_cycles
+            while n < limit and (cmax is None or dev.cyc < cmax):
                 if dev.pending and not (c.sr & BL):
                     got = dev.take_interrupt((c.sr >> 4) & 0xF)
                     if got is not None:
                         lib.core_enter_interrupt(cref, got[0], got[1])
                 if c.sleeping:
                     cyc = dev.cycles_to_next_event()
-                    mem.tick(min(max(cyc, 100), 4_000_000))
+                    jump = min(max(cyc, 100), 4_000_000)
+                    if ev:
+                        # bound by the next C-side timer event so its IRQ
+                        # wakes the machine on time
+                        kc = lib.core_ev_next(cref)
+                        if kc + 16 < jump:
+                            jump = max(100, kc + 16)
+                    _tick(jump)
                     n += 1
+                    if ev:
+                        # the SH clock keeps running while it sleeps: the
+                        # DSP is time-locked to c.cycles and must see this
+                        # time, or play mode starves it (2026-10-27)
+                        c.cycles += jump
+                        self._ev_pass(dev.cyc)
+                    if stats is not None:
+                        stats["sleep"] = stats.get("sleep", 0) + 1
                     continue
                 cte = dev.cycles_to_next_event()
                 k = min(limit - n, slice_, cte if cte > 0 else 64)
+                if ev:
+                    kc = lib.core_ev_next(cref)
+                    if kc < k:
+                        k = max(1, kc)
                 k = max(k, 1)
                 reason = lib.core_run(cref, k, ctypes.byref(done))
                 d = done.value
                 if d:
-                    mem.tick(d)
+                    _tick(d)
                     n += d
+                    if ev:
+                        self._ev_pass(dev.cyc)
+                    if stats is not None:
+                        r = str(reason)
+                        stats[r] = stats.get(r, 0) + 1
+                        stats["d" + r] = stats.get("d" + r, 0) + d
+                        stats["k" + r] = stats.get("k" + r, 0) + k
+                        _EV_STATS.update(stats)
                 if c.exc_n or c.exc_lost:
                     self._drain_exc()
-                if reason == R_IDLE:
+                if reason == R_IDLE and ev and \
+                        (c.pc & 0x1FFFFFFF) != (c.idle_pc & 0x1FFFFFFF):
+                    # the pass-end _ev_pass above already ENTERED an
+                    # interrupt (pc = vector, SR.BL set). The idle shortcut
+                    # must not run now: `c.pc = c.pr` overwrote the vector,
+                    # the idle task then ran with interrupts blocked forever
+                    # (after a USB insert: mount stuck, 1-2 fps; 11-01).
+                    n += 1
+                elif reason == R_IDLE:
                     cyc = dev.cycles_to_next_event()
                     if cyc > 0:
-                        mem.tick(min(cyc + 16, 4_000_000))
+                        jump = min(cyc + 16, 4_000_000)
+                        if ev:
+                            kc = lib.core_ev_next(cref)
+                            if kc + 16 < jump:
+                                jump = max(16, kc + 16)
+                        _tick(jump)
                         if mc is not None:
                             mc.idle_cycles += cyc
+                        if ev:
+                            c.cycles += jump    # SH clock runs while idle
                     c.pc = c.pr
                     n += 1
+                    if ev:
+                        self._ev_pass(dev.cyc)
+                    if stats is not None:
+                        stats["idle"] = stats.get("idle", 0) + 1
                 elif reason == R_FALLBACK:
                     mem.fb_writes += c.fb_writes
                     c.fb_writes = 0

@@ -2,9 +2,16 @@
 """preflight.py NEW.UPD [STOCK.UPD] -- check a built .UPD before flashing.
 
 Every check is a thing that, if wrong, means the deck rejects the file or
-fails mid-write. The boot-stub check is the brick-critical one: that code is
-what implements recovery mode (power on holding IN + RELOOP/EXIT), so if it is
-intact a bad main image can still be re-flashed.
+fails mid-write. The boot-stub check is the brick-critical one: that code runs
+before the payload and is what implements recovery mode (power on holding
+IN + RELOOP/EXIT), so if it is byte-identical to stock a bad main image can
+still be re-flashed from the top USB port. Note what this does NOT buy you:
+the stub only compares the 16-bit block checksum (MAIN.img 0x0B7C). A correct
+checksum means it runs the payload without looking at it, so a well-summed but
+broken payload will crash rather than fail safe -- recovery mode still gets
+there, because it is chosen at power-on before any payload code executes.
+Recovery has been used on hardware: the deck that was bricked on 2026-09-05
+was recovered with Pioneer's own 1.15 file through this path. See SAFETY.md.
 
 Exit status 0 = all checks passed, 1 = at least one FAIL.
 """

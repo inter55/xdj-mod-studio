@@ -1,14 +1,22 @@
 # XDJ Mod Studio: XDJ-700 Mods
 
 Open-source mods for the **XDJ-700** (firmware 1.15): RGB and 3-band
-waveforms, live key shift, stems, beat jump pads, live colour themes and
-more. Fully open source (MIT). There's also a Mac and Windows app,
-**Mod Studio**, which prepares your tracks, designs themes, runs your deck's
-firmware in a built-in emulator and installs the mods.
+waveforms, live key shift, stems, 8 hot cues, beat jump pads, Touch FX, live
+colour themes and more. Fully open source (MIT). There's also a Mac and
+Windows app, **Mod Studio**, which prepares your tracks, designs themes,
+runs your deck's firmware in a built-in emulator and installs the mods.
 
-**Nothing is ever flashed.** Mods are loaded into the deck's working memory
-over USB through the deck's own service connection. Switch the deck off and
-on and it is completely stock again.
+There are three ways to get the mods onto the deck:
+
+- **Cable (the default).** Nothing is flashed: the mods are loaded into the
+deck's working memory over USB through the deck's own service connection.
+Switch the deck off and on and it is completely stock again.
+- **USB stick.** Flash a small loader once, after which your normal rekordbox
+stick carries the mods and no laptop is needed at the gig. See
+[docs/USBLOADER.md](docs/USBLOADER.md).
+- **Firmware update file.** A real Pioneer update with the mods baked in, so
+they survive a power cycle. This one does write to the deck's flash and it
+can brick the deck; keep the official 1.15 file to hand as the way back.
 
 > Independent community project, not affiliated with, endorsed by or
 > supported by Pioneer DJ / AlphaTheta. "Pioneer DJ", "XDJ", "CDJ" and
@@ -37,8 +45,9 @@ but nobody has tried them on one yet:
 | Faster stem mute (beta) | rewrites the audio the deck already buffered; < 1 s in the emulator |
 | Phase meter | this deck's beats; the master row needs link data |
 | Vinyl brake length | UTILITY › VINYL BRAKE LENGTH, 0.5×–15× |
-| 8 hot cues | pages A–C / D–F / G–H |
+| 8 hot cues | pages A–C / D–F / G–H, and you can set one from an empty pad while the track plays; the cues live on your stick, not the deck |
 | FLAC and Ogg Opus playback | own decoders on the deck |
+| Touch FX (beta) | PERFORM › TOUCH FX, an X/Y pad with Filter, Crush and Gate; needs MASTER TEMPO on and shares the DSP hook with live key shift, so one or the other. Echo, Pitch, Flanger, Roll and Reverb are drawn but not implemented |
 
 ## For DJs: Mod Studio
 
@@ -60,6 +69,26 @@ but nobody has tried them on one yet:
    3 minutes. This project never distributes Pioneer's firmware.
 3. Try the mods in the emulator, then connect the deck over USB and click
    **Install**. Power-cycle the deck any time to go back to stock.
+4. Optional: once you trust it, build the **USB-stick loader** or a
+   **firmware update file** in the app so the mods survive a power cycle.
+
+### Stems
+
+Making stems for a WAV or AIFF **replaces the track under its own name**, so
+it keeps its cues, its waveform and its place in your playlists. The original
+stays next to it as `your track.wav.pre-stems`; rename it back to undo. MP3
+and M4A can't be replaced (the deck picks its decoder from the extension), so
+those get a stems file beside the original under BROWSE › FOLDER.
+
+If PERFORM › STEMS shows the mix only, or the KEY SHIFT buttons do nothing:
+
+- **Key shift is an install option, not stock.** Tick **Live key shift** when
+  you install, and put MASTER TEMPO on; with the mod left out the buttons have
+  nothing driving them.
+- **STEMS only mutes what has been separated.** The deck cannot split audio.
+  Select the tracks in **Library** and press **Make stems** (needs ffmpeg and
+  Demucs), then build the deck's stems file from **Stems sidecar › Build deck
+  stems file**. On any other track the STEMS pads do nothing.
 
 ## For DJs: OneLibrary USB sticks made readable for the XDJ-700
 
@@ -101,13 +130,32 @@ rekordbox exports.
 ## For developers
 
 ```bash
-python3 -m venv .venv && .venv/bin/pip install numpy pillow capstone hidapi pygame
+python3 -m venv .venv && .venv/bin/pip install numpy pillow capstone pygame
+brew install hidapi                    # libhidapi.dylib for the deck tools
+sh tools/build_tic6x_objdump.sh        # C674x objdump; needs Xcode CLT
 .venv/bin/python -m emu.fwhome setup /path/to/XDJ700_v1.15.UPD --dev
 ```
 
 `--dev` also places the generated files at the paths the research tools
 expect (`work/`, `cache/`, `studio/assets/`, `tools/data/`, all git-ignored).
 Run Mod Studio from source with `.venv/bin/python -m studio.app`.
+
+The deck tools need a `hid` module with `hid.Device`. `pip install hidapi`
+installs cython-hidapi, which does not have it, so use the copy in `vendor/`:
+
+```bash
+PYTHONPATH="$PWD/vendor" .venv/bin/python tools/xdj700_usb_shell.py --list
+```
+
+`tools/build_tic6x_objdump.sh` builds the GNU objdump used for the audio DSP
+(`work/tic6x/objdump`, ~5 minutes). `fwhome setup` needs it for the
+"booting with the real audio chip" step and stops early with a clear message
+if it is missing; the Xcode command-line tools (`xcode-select --install`)
+supply `make` and a compiler.
+
+On first launch macOS asks for **Local Network** permission. Denying it
+changes nothing: Mod Studio serves its interface on `127.0.0.1` and reaches
+the deck over USB, so neither path uses the local network.
 
 Deck code is written in SH-4 assembly (`tools/shasm.py`) or C built with a
 local `sh-elf-gcc` (`tools/build_sh_gcc.sh`). Every mod has an emulator test

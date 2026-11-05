@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>XDJ Mod Studio: free XDJ-700 mods (RGB waveforms, key shift, stems)</title>
-<meta name="description" content="Open-source XDJ-700 mods: RGB and 3-band waveforms, live key shift, stems, beat jump pads and live themes. USB-stick loader, cable session or a baked firmware update file.">
+<meta name="description" content="Open-source XDJ-700 mods: RGB and 3-band waveforms, live key shift, stems, 8 hot cues, beat jump pads, Touch FX and live themes. USB-stick loader, cable session or a baked firmware update file.">
 <meta property="og:title" content="XDJ Mod Studio: free XDJ-700 mods">
 <meta property="og:type" content="website">
 <meta property="og:url" content="https://inter55.github.io/xdj-mod-studio/">
@@ -12,20 +12,20 @@
 <link rel="canonical" href="https://inter55.github.io/xdj-mod-studio/">
 <script type="application/ld+json">
 {"@context":"https://schema.org","@type":"SoftwareApplication","name":"XDJ Mod Studio",
- "description":"Free, open-source mods for the Pioneer DJ XDJ-700: RGB and 3-band waveforms, live key shift, stems, beat jump pads and themes.",
+ "description":"Free, open-source mods for the Pioneer DJ XDJ-700: RGB and 3-band waveforms, live key shift, stems, 8 hot cues, beat jump pads, Touch FX and themes.",
  "applicationCategory":"MultimediaApplication","operatingSystem":"macOS, Windows",
  "url":"https://inter55.github.io/xdj-mod-studio/","downloadUrl":"https://github.com/inter55/xdj-mod-studio/releases/latest",
  "codeRepository":"https://github.com/inter55/xdj-mod-studio","license":"https://opensource.org/licenses/MIT",
  "offers":{"@type":"Offer","price":"0","priceCurrency":"USD"}}
 </script>
-<meta property="og:description" content="RGB and 3-band waveforms, live key shift, stems and live themes for the XDJ-700. Stick loader, cable session or a baked firmware update file.">
-<meta name="theme-color" content="#0b0b10">
+<meta property="og:description" content="RGB and 3-band waveforms, live key shift, stems, 8 hot cues and live themes for the XDJ-700. Stick loader, cable session or a baked firmware update file.">
+<meta name="theme-color" content="#0e0f12">
 <link rel="icon" href="favicon.svg" type="image/svg+xml">
 <style>
 :root {
-  --bg: #0b0b10; --bg2: #12121a; --card: #171722; --line: #262634;
-  --text: #ecebf3; --dim: #a5a3b8; --faint: #6f6d84;
-  --purple: #9b4dff; --teal: #19d3c5; --amber: #ffb547; --red: #ff5a6e;
+  --bg: #0e0f12; --bg2: #16181c; --card: #16181c; --line: #2a2d35;
+  --text: #eceef2; --dim: #a0a4af; --faint: #6b6f7b;
+  --blue: #3d8bff; --green: #3ecf8e; --amber: #ffb020; --red: #ff5d5d;
   --radius: 14px;
 }
 * { box-sizing: border-box; }
@@ -35,7 +35,7 @@ body {
   font: 16px/1.6 -apple-system, BlinkMacSystemFont, "Segoe UI", Inter, Roboto, "Helvetica Neue", Arial, sans-serif;
   -webkit-font-smoothing: antialiased;
 }
-a { color: var(--teal); text-decoration: none; }
+a { color: var(--blue); text-decoration: none; }
 a:hover { text-decoration: underline; }
 .wrap { max-width: 1080px; margin: 0 auto; padding: 0 20px; }
 header.top {
@@ -53,19 +53,19 @@ nav a:hover { color: var(--text); text-decoration: none; }
   font-weight: 600; font-size: 15px; border: 1px solid var(--line); color: var(--text); background: var(--card);
 }
 .btn:hover { text-decoration: none; border-color: var(--faint); }
-.btn.primary { background: linear-gradient(135deg, var(--purple), #6f3bff); border-color: transparent; color: #fff; }
+.btn.primary { background: linear-gradient(180deg, #5299ff, #3279ee); border-color: var(--blue); color: #fff; box-shadow: inset 0 1px 0 #ffffff40; }
 .btn.primary:hover { filter: brightness(1.08); }
 .hero { padding-top: 72px; padding-bottom: 40px; display: grid; grid-template-columns: 1.05fr .95fr; gap: 40px; align-items: center; }
-.eyebrow { color: var(--teal); font-weight: 600; font-size: 13px; letter-spacing: 1.6px; text-transform: uppercase; }
+.eyebrow { color: var(--amber); font-weight: 600; font-size: 13px; letter-spacing: 1.6px; text-transform: uppercase; }
 h1 { font-size: clamp(34px, 5.4vw, 56px); line-height: 1.05; margin: 10px 0 18px; letter-spacing: -1px; }
-h1 .grad { background: linear-gradient(90deg, var(--purple), var(--teal)); -webkit-background-clip: text; background-clip: text; color: transparent; }
+h1 .grad { color: var(--blue); }
 .lead { color: var(--dim); font-size: 18px; max-width: 560px; }
 .cta { display: flex; gap: 12px; flex-wrap: wrap; margin-top: 26px; }
 .badges { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 22px; }
 .badge { font-size: 12px; color: var(--dim); border: 1px solid var(--line); padding: 4px 10px; border-radius: 999px; }
 .screen {
   background: #000; border-radius: 12px; border: 1px solid var(--line); padding: 14px;
-  box-shadow: 0 30px 80px -30px rgba(155, 77, 255, .45);
+  box-shadow: 0 24px 70px -28px rgba(0, 0, 0, .75);
 }
 .screen .lbl { display: flex; justify-content: space-between; font-size: 11px; color: var(--faint); margin: 2px 2px 8px; letter-spacing: 1px; }
 .screen canvas { width: 100%; display: block; border-radius: 6px; background: #05050a; }
@@ -82,10 +82,6 @@ h2 { font-size: clamp(26px, 3.4vw, 36px); margin: 0 0 10px; letter-spacing: -.5p
 .card h3 { margin: 10px 0 6px; font-size: 17px; }
 .card p { margin: 0; color: var(--dim); font-size: 14.5px; }
 .ico { width: 38px; height: 38px; border-radius: 10px; display: grid; place-items: center; background: var(--bg2); border: 1px solid var(--line); }
-.tag { display: inline-block; font-size: 11px; font-weight: 700; letter-spacing: .6px; padding: 2px 8px; border-radius: 999px; margin-top: 12px; }
-.tag.hw { color: #0b0b10; background: var(--teal); }
-.tag.emu { color: #0b0b10; background: var(--amber); }
-.tag.wip { color: var(--dim); border: 1px solid var(--line); }
 .two { display: grid; grid-template-columns: 1fr 1fr; gap: 28px; align-items: start; }
 .steps { counter-reset: s; list-style: none; padding: 0; margin: 0; }
 .steps li { counter-increment: s; position: relative; padding: 0 0 22px 48px; color: var(--dim); }
@@ -94,14 +90,26 @@ h2 { font-size: clamp(26px, 3.4vw, 36px); margin: 0 0 10px; letter-spacing: -.5p
   content: counter(s); position: absolute; left: 0; top: -2px; width: 32px; height: 32px; border-radius: 50%;
   display: grid; place-items: center; font-weight: 700; color: var(--text); background: var(--bg2); border: 1px solid var(--line);
 }
-.safe { border-color: color-mix(in srgb, var(--teal) 40%, var(--line)); }
+.safe { border-color: color-mix(in srgb, var(--green) 40%, var(--line)); }
 .safe ul { margin: 8px 0 0; padding-left: 18px; color: var(--dim); }
 .safe li { margin: 6px 0; }
 table { width: 100%; border-collapse: collapse; font-size: 14.5px; }
 th, td { text-align: left; padding: 11px 12px; border-bottom: 1px solid var(--line); vertical-align: top; }
 th { color: var(--faint); font-weight: 600; font-size: 12px; letter-spacing: .8px; text-transform: uppercase; }
 td:first-child { font-weight: 600; }
-td .tag { margin: 0; }
+.card { transition: transform .18s cubic-bezier(.2,.7,.3,1), border-color .18s cubic-bezier(.2,.7,.3,1); }
+@media (hover:hover) { .card:hover { transform: translateY(-2px); border-color: var(--faint); } }
+/* entrance: one small stagger on load, none if the user prefers still */
+@keyframes rise { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: none; } }
+@media (prefers-reduced-motion: no-preference) {
+  .hero > div > *, .hero .screen, .seg {
+    animation: rise .5s cubic-bezier(.2,.7,.3,1) backwards;
+  }
+  .hero .eyebrow { animation-delay: .0s; } .hero h1 { animation-delay: .07s; }
+  .hero .lead { animation-delay: .14s; } .hero .cta { animation-delay: .21s; }
+  .hero .badges { animation-delay: .28s; } .hero .screen { animation-delay: .18s; }
+  .hero .seg { animation-delay: .34s; }
+}
 .tablewrap { overflow-x: auto; background: var(--card); border: 1px solid var(--line); border-radius: var(--radius); }
 details { background: var(--card); border: 1px solid var(--line); border-radius: 12px; padding: 14px 18px; margin-bottom: 10px; }
 summary { cursor: pointer; font-weight: 600; }
@@ -128,14 +136,13 @@ footer p { margin: 6px 0; max-width: 820px; }
 <header class="top">
   <div class="wrap">
     <a class="brand" href="#">
-      <svg width="28" height="28" viewBox="0 0 64 64" aria-hidden="true"><defs><linearGradient id="g" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#9b4dff"/><stop offset="1" stop-color="#19d3c5"/></linearGradient></defs><circle cx="32" cy="32" r="29" fill="none" stroke="url(#g)" stroke-width="5"/><circle cx="32" cy="32" r="17" fill="none" stroke="#ecebf3" stroke-opacity=".35" stroke-width="3"/><circle cx="32" cy="32" r="5" fill="#ecebf3"/><rect x="29.5" y="1" width="5" height="13" rx="2.5" fill="#19d3c5"/></svg>
+      <svg width="28" height="28" viewBox="0 0 64 64" aria-hidden="true"><circle cx="32" cy="32" r="29" fill="none" stroke="#3d8bff" stroke-width="5"/><circle cx="32" cy="32" r="17" fill="none" stroke="#eceef2" stroke-opacity=".35" stroke-width="3"/><circle cx="32" cy="32" r="5" fill="#eceef2"/><rect x="29.5" y="1" width="5" height="13" rx="2.5" fill="#3d8bff"/></svg>
       XDJ-700 Mods
     </a>
     <nav>
       <a href="#features">Features</a>
       <a href="#safety">Safety</a>
       <a href="#start">Get started</a>
-      <a href="#status">Status</a>
       <a href="#faq">FAQ</a>
     </nav>
     <a class="btn" href="https://github.com/inter55/xdj-mod-studio">GitHub</a>
@@ -147,7 +154,7 @@ footer p { margin: 6px 0; max-width: 820px; }
   <div>
     <div class="eyebrow">Open source · Cable, stick or update file · XDJ-700 firmware 1.15</div>
     <h1>Give your <span class="grad">XDJ-700</span> the features it never got.</h1>
-    <p class="lead">RGB and 3-band waveforms, live key shift, stems, beat jump pads and live colour themes. The recommended route is the USB-stick loader: one firmware update installs it, and after that the mods travel on your stick and survive a power cycle. Cable mode installs nothing — it sends the mods into the deck's memory for the session, and a power cycle puts it back to stock.</p>
+    <p class="lead">RGB and 3-band waveforms, live key shift, stems, 8 hot cues, beat jump pads and live colour themes. The recommended route is the USB-stick loader: one firmware update installs it, and after that the mods travel on your stick and survive a power cycle. Cable mode installs nothing — it sends the mods into the deck's memory for the session, and a power cycle puts it back to stock.</p>
     <div class="cta">
       <a class="btn primary" href="https://github.com/inter55/xdj-mod-studio/releases">Download Mod Studio</a>
       <a class="btn" href="#safety">How it stays safe</a>
@@ -179,40 +186,34 @@ footer p { margin: 6px 0; max-width: 820px; }
     <p class="sub">Each mod is a small patch the deck runs from memory. Pick the ones you want in Mod Studio and change most of them on the deck itself, in the deck's own <b>UTILITY</b> list (hold MENU, scroll to the end).</p>
     <div class="grid">
       <div class="card">
-        <div class="ico"><svg width="22" height="22" viewBox="0 0 24 24"><g stroke-width="2.4" stroke-linecap="round"><path d="M4 9v6" stroke="#ff5a6e"/><path d="M8 5v14" stroke="#ffb547"/><path d="M12 8v8" stroke="#19d3c5"/><path d="M16 4v16" stroke="#9b4dff"/><path d="M20 10v4" stroke="#ff5a6e"/></g></svg></div>
+        <div class="ico"><svg width="22" height="22" viewBox="0 0 24 24"><g stroke-width="2.4" stroke-linecap="round"><path d="M4 9v6" stroke="#ff5d5d"/><path d="M8 5v14" stroke="#ffb547"/><path d="M12 8v8" stroke="#3ecf8e"/><path d="M16 4v16" stroke="#3d8bff"/><path d="M20 10v4" stroke="#ff5d5d"/></g></svg></div>
         <h3>RGB &amp; 3-Band waveforms</h3>
         <p>Colour waveforms in the overview strip and the big centre display, from the colour data rekordbox already exports. Switch style on the deck in UTILITY.</p>
-        <span class="tag hw">HARDWARE PROVEN</span>
       </div>
       <div class="card">
-        <div class="ico"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="#19d3c5" stroke-width="2.2" stroke-linecap="round"><path d="M12 19V5M6 11l6-6 6 6"/></svg></div>
+        <div class="ico"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="#3ecf8e" stroke-width="2.2" stroke-linecap="round"><path d="M12 19V5M6 11l6-6 6 6"/></svg></div>
         <h3>Live key shift</h3>
         <p>PERFORM › KEY SHIFT moves any track up or down in key while it plays, with MASTER TEMPO on. Tempo stays put, and the panel shows the track's real key.</p>
-        <span class="tag hw">HARDWARE PROVEN</span>
       </div>
       <div class="card">
         <div class="ico"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="#ffb547" stroke-width="2.2" stroke-linecap="round"><path d="M9 18V6l10-2v12"/><circle cx="6.5" cy="18" r="2.5"/><circle cx="16.5" cy="16" r="2.5"/></svg></div>
         <h3>Stems</h3>
-        <p>Split a track into vocals, drums, bass and other on your computer, then mute them live from PERFORM › STEMS. On the deck a mute is heard after about 30 seconds; a faster mute is in beta.</p>
-        <span class="tag hw">HARDWARE PROVEN</span>
+        <p>Split a track into vocals, drums, bass and other on your computer, then mute them live from PERFORM › STEMS. The stems version takes the track's place under its own name, so its cues and playlists still work; your original is kept as a backup.</p>
       </div>
       <div class="card">
-        <div class="ico"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="#9b4dff" stroke-width="2.2"><rect x="3" y="3" width="8" height="8" rx="2"/><rect x="13" y="3" width="8" height="8" rx="2"/><rect x="3" y="13" width="8" height="8" rx="2"/><rect x="13" y="13" width="8" height="8" rx="2"/></svg></div>
+        <div class="ico"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="#3d8bff" stroke-width="2.2"><rect x="3" y="3" width="8" height="8" rx="2"/><rect x="13" y="3" width="8" height="8" rx="2"/><rect x="3" y="13" width="8" height="8" rx="2"/><rect x="13" y="13" width="8" height="8" rx="2"/></svg></div>
         <h3>Beat jump pads</h3>
-        <p>A new PERFORM tab: tap to jump back or forward, swipe the row for sizes from 1 up to 64 beats.</p>
-        <span class="tag hw">HARDWARE PROVEN</span>
+        <p>A new PERFORM tab: tap to jump back or forward, swipe the row for sizes from 1 up to 64 beats. The same page carries <b>8 hot cues</b>, and pressing an empty pad while the track plays stores that point.</p>
       </div>
       <div class="card">
-        <div class="ico"><svg width="22" height="22" viewBox="0 0 24 24"><circle cx="8" cy="9" r="4" fill="#9b4dff"/><circle cx="16" cy="9" r="4" fill="#19d3c5" fill-opacity=".85"/><circle cx="12" cy="15.5" r="4" fill="#ff5a6e" fill-opacity=".8"/></svg></div>
+        <div class="ico"><svg width="22" height="22" viewBox="0 0 24 24"><circle cx="8" cy="9" r="4" fill="#3d8bff"/><circle cx="16" cy="9" r="4" fill="#3ecf8e" fill-opacity=".85"/><circle cx="12" cy="15.5" r="4" fill="#ff5d5d" fill-opacity=".8"/></svg></div>
         <h3>Live themes</h3>
         <p>Recolour the whole interface from the deck's UTILITY list (THEME), and OFF brings back the exact stock colours.</p>
-        <span class="tag hw">HARDWARE PROVEN</span>
       </div>
       <div class="card">
         <div class="ico"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="#ecebf3" stroke-width="2"><rect x="3" y="5" width="18" height="12" rx="2"/><path d="M8 21h8M12 17v4"/></svg></div>
         <h3>Mod Studio + emulator</h3>
         <p>A Mac and Windows app that prepares tracks, designs themes and installs mods. It also runs your own deck firmware in an emulator, so you can try everything before touching the hardware.</p>
-        <span class="tag hw">WORKS TODAY</span>
       </div>
     </div>
   </div>
@@ -224,6 +225,7 @@ footer p { margin: 6px 0; max-width: 820px; }
       <h2>Built so you can't brick it</h2>
       <p class="sub" style="margin-bottom:18px">The XDJ-700 has a service connection over USB that can read and write the deck's working memory. Cable mode uses only that, and a power cycle brings the deck back to stock.</p>
       <p style="color:var(--dim)">Because the patches live in memory, <b style="color:var(--text)">switching the deck off and on returns it to stock.</b> That's also how you remove the mods. To use them again, plug in and click Install.</p>
+      <p style="color:var(--dim);margin-top:14px">The other two modes are opt-in and do write to the deck's flash: the <b>USB-stick loader</b> (flashed once, after which your stick carries the mods) and a <b>firmware update file</b> with the mods baked in. Both want a careful first flash, and the official 1.15 update file is the way back.</p>
     </div>
     <div class="card safe">
       <h3 style="margin-top:0">Safety rules in every tool</h3>
@@ -247,7 +249,7 @@ footer p { margin: 6px 0; max-width: 820px; }
         <li><b>Download Mod Studio</b>Get it from the Releases page. Mac: the first time, right-click the app and choose Open. Windows: unzip it and run <i>XDJ Mod Studio.exe</i>; if SmartScreen warns, choose More info → Run anyway.</li>
         <li><b>Add your firmware file</b>Use the official XDJ-700 v1.15 update file from Pioneer DJ's support site. The app never ships Pioneer's firmware; it reads yours.</li>
         <li><b>Try it in the emulator</b>Insert your rekordbox USB library, load a track and switch waveform styles. No deck needed.</li>
-        <li><b>Install on the deck</b>Connect USB, tick the mods you want, and click Install. It takes about 15–25 minutes, with a progress bar and time estimate. The app asks you when to remove the stick.</li>
+        <li><b>Install on the deck</b>Connect USB, tick the mods you want, and click Install. It takes about 15–25 minutes, with a progress bar and time estimate. The app asks you when to remove the stick. Later, if you want the mods to survive a power cycle, build the USB-stick loader or a firmware update file instead.</li>
       </ol>
     </div>
     <div class="card">
@@ -255,44 +257,22 @@ footer p { margin: 6px 0; max-width: 820px; }
       <p style="margin-bottom:12px">Mod Studio's Track Builder can:</p>
       <ul style="color:var(--dim);margin:0;padding-left:18px">
         <li>add 3-band waveform data to tracks rekordbox didn't analyse that way,</li>
-        <li>split stems on your computer (Demucs) into one stems file you can mute live on the deck.</li>
+        <li>split stems on your computer (Demucs) and replace a track with a version you can mute live on the deck.</li>
       </ul>
-      <p style="margin-top:12px">A stems file is still a normal WAV or AIFF, so it plays on any deck and in rekordbox.</p>
+      <p style="margin-top:12px">A stems file is still a normal WAV or AIFF, so it plays on any deck and in rekordbox. The original stays beside it as <code>.pre-stems</code>, so undoing it is a rename.</p>
     </div>
   </div>
 </section>
 
-<section id="status">
-  <div class="wrap">
-    <h2>Honest status</h2>
-    <p class="sub"><span class="tag hw" style="margin:0">HARDWARE PROVEN</span> means tested on a real XDJ-700. <span class="tag emu" style="margin:0">EMULATOR ONLY</span> means it works on the deck's real firmware in the emulator, so it should work on a real deck too, but nobody has tested it on one yet.</p>
-    <div class="tablewrap">
-      <table>
-        <tr><th>Feature</th><th>State</th><th>Notes</th></tr>
-        <tr><td>RGB &amp; 3-band waveforms</td><td><span class="tag hw">HARDWARE PROVEN</span></td><td>Overview strip and centre display, plus the PERFORM screen strip.</td></tr>
-        <tr><td>Live key shift</td><td><span class="tag hw">HARDWARE PROVEN</span></td><td>Key up/down live with MASTER TEMPO on, tempo unchanged, clean on both speakers.</td></tr>
-        <tr><td>Live themes</td><td><span class="tag hw">HARDWARE PROVEN</span></td><td>Switch themes in UTILITY › THEME; OFF restores the stock colours exactly.</td></tr>
-        <tr><td>Live stems</td><td><span class="tag hw">HARDWARE PROVEN</span></td><td>Mute vocals / drums / bass / other from PERFORM › STEMS. A mute is heard after about 30 seconds.</td></tr>
-        <tr><td>Beat jump pads</td><td><span class="tag hw">HARDWARE PROVEN</span></td><td>PERFORM › BEAT JUMP, tap and swipe paging.</td></tr>
-        <tr><td>Faster stem mute (beta)</td><td><span class="tag emu">EMULATOR ONLY</span></td><td>Rewrites the audio the deck has already buffered: heard in under a second in the emulator.</td></tr>
-        <tr><td>Phase meter</td><td><span class="tag emu">EMULATOR ONLY</span></td><td>This deck's beats and downbeats above the waveform; the master row needs link data.</td></tr>
-        <tr><td>FLAC and Opus playback</td><td><span class="tag emu">EMULATOR ONLY</span></td><td>Our own decoders on the deck present the file as a WAV.</td></tr>
-        <tr><td>Mod settings in UTILITY</td><td><span class="tag hw">HARDWARE PROVEN</span></td><td>MODS, waveform colour, vinyl brake length, hot cue gate and theme at the end of the stock UTILITY list (hold MENU).</td></tr>
-        <tr><td>Vinyl brake length</td><td><span class="tag emu">EMULATOR ONLY</span></td><td>UTILITY › VINYL BRAKE LENGTH: 0.5× to 15× the stock slow-down.</td></tr>
-        <tr><td>8 hot cue pages</td><td><span class="tag emu">EMULATOR ONLY</span></td><td>Hot cues A–H, swiped in pages of three.</td></tr>
-      </table>
-    </div>
-  </div>
-</section>
 
 <section id="faq">
   <div class="wrap">
     <h2>FAQ</h2>
-    <details><summary>Will this void my warranty or damage the deck?</summary><p>The mods only change the deck's working memory, which is cleared every time it powers off. Nothing is written to the firmware chip. Even so, this is unofficial software and you use it at your own risk.</p></details>
+    <details><summary>Will this void my warranty or damage the deck?</summary><p>In cable mode the mods only change the deck's working memory, which is cleared every time it powers off. The USB-stick loader and the baked update file do write to the deck once. Either way this is unofficial software and you use it at your own risk.</p></details>
     <details><summary>How do I remove the mods?</summary><p>Switch the deck off and on. It starts up completely stock.</p></details>
-    <details><summary>Do I have to reinstall after every power-cycle?</summary><p>Yes, in cable mode. Mod Studio remembers your choices, so reinstalling is a single click.</p></details>
+    <details><summary>Do I have to reinstall after every power-cycle?</summary><p>In cable mode, yes. Mod Studio remembers your choices, so reinstalling is one click. The USB-stick loader and the baked firmware update file both survive a power cycle, at the cost of writing to the deck once.</p></details>
     <details><summary>Does it work on the XDJ-1000 / MK2 or CDJs?</summary><p>No. Everything is built for the XDJ-700 on firmware 1.15 only.</p></details>
-    <details><summary>Windows?</summary><p>Yes, in beta: download the Windows zip from Releases (64-bit Windows 10/11). Every build is checked automatically on a clean Windows machine: the app starts, its pages load and the emulator engine loads. Nobody has yet run their firmware in the emulator or installed mods on a real deck from Windows (both are proven on a Mac), and the emulator has no sound on Windows yet. If you try it, please open an issue and say how it went.</p></details>
+    <details><summary>Windows?</summary><p>Yes, in beta: download the Windows zip from Releases (64-bit Windows 10/11). Every build is checked automatically on a clean Windows machine: the app starts, its pages load and the emulator engine loads. Nobody is known to have installed mods on a real deck from Windows yet (that is proven on a Mac), and emulator sound on Windows is newer than on the Mac — if it is silent, set <code>XDJ_DECK_SOUND=1</code>. If you try it, please open an issue and say how it went.</p></details>
     <details><summary>Is it open source?</summary><p>Yes. Everything is on GitHub under the MIT licence: the Mac and Windows apps, the emulator, every mod and the tools that build them. The only thing not included is Pioneer DJ's firmware, which you add yourself.</p></details>
     <details><summary>Why isn't the firmware included?</summary><p>It's Pioneer DJ's software. You download the official update file yourself, and the tools work on that.</p></details>
   </div>

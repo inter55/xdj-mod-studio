@@ -16,9 +16,11 @@ printf 'import os\nos.environ.setdefault("XDJ_REPO_BAKED", "%s")\n' "$(pwd)" \
   > build/studio-app-hook.py
 mkdir -p build/studio-app
 # DSP C core, freshly built so the frozen app never needs a compiler
-# (cfast skips its `cc` rebuild when the .so is newer than the source)
-if [ emu/c6x/c6xcore.c -nt emu/c6x/_c6xcore.so ]; then
-  cc -O2 -shared -fPIC -o emu/c6x/_c6xcore.so emu/c6x/c6xcore.c -lm
+# (cfast skips its `cc` rebuild when the .so is newer than the source;
+# build_lib adds the play-mode PGO profile, ~+20% at real speed)
+if [ emu/c6x/c6xcore.c -nt emu/c6x/_c6xcore.so ] ||
+   { [ -f emu/c6x/c6xcore.profdata ] && [ emu/c6x/c6xcore.profdata -nt emu/c6x/_c6xcore.so ]; }; then
+  .venv/bin/python -c 'import emu.c6x.cfast as cf; cf.build_lib(cf.LIB)'
 fi
 .venv/bin/python -m PyInstaller --noconfirm XDJStudio.spec --distpath dist --workpath build/studio-app
 # Bundled libSDL2 aborts inside pygame.base init (stack-chk fail); the
@@ -111,10 +113,24 @@ sh tools/keyshift_dsp/build_ksh.sh >/dev/null
 mkdir -p "$REPO/build/stems" "$REPO/build/keyshift"
 cp build/stems/sm.bin build/stems/sm.syms "$REPO/build/stems/"
 cp build/keyshift/ksh.bin build/keyshift/ksh.syms build/keyshift/ks.bin build/keyshift/ks.syms "$REPO/build/keyshift/"
+# The app's emulator: QEMU (GPL) + its libraries, Homebrew-free (QEMU_BIN
+# overrides the build). Firmware image + DSP module are NOT here: they come
+# from the user's own update file (emu/fwhome.py).
+sh tools/bundle_qemu.sh "$REPO/qemu-bin"
 # centre waveform colour module (our C): RGB / 3-band per-row colours
 .venv/bin/python -c "import sys;sys.path[:0]=['.','tools'];import rgb_detail as R;R.cw_build()"
 mkdir -p "$REPO/build/centre"
 cp build/centre/cw.bin build/centre/cw.syms "$REPO/build/centre/"
+# light-mode text add-on, TOUCH FX screen + its DSP engine cave (our C;
+# 2026-11-01: never shipped, so deck steps 5l / 5x failed in the apps --
+# the same packaging gap Reddit hit for build/centre in 0.9.x)
+for f in lighttext/lt.bin lighttext/lt.syms touchfx/tfx.bin touchfx/tfx.syms \
+         fx/ksh.bin fx/ksh.syms fx/fx.bin fx/fx.syms \
+         usbloader/ld.bin usbloader/ld.syms; do
+  [ -f "build/$f" ] || { echo "ERROR: build/$f missing"; exit 1; }
+  mkdir -p "$REPO/build/$(dirname "$f")"
+  cp "build/$f" "$REPO/build/$f"
+done
 cp TESTER_README.md "$REPO/" 2>/dev/null || true
 if [ "$PUBLIC" != 1 ]; then   # private tester build: firmware baked in
   cp work/MAIN.img "$REPO/work/"

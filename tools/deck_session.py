@@ -28,6 +28,12 @@ RAM-only; a power-cycle always returns the deck to stock):
                                      chip -- no restart, stick out; PERFORM
                                      > KEY SHIFT < > then shifts live, MASTER
                                      TEMPO ON)
+  5x TOUCH FX                       (tools/keyshift_hot_apply.py --engine fx:
+                                     the same live audio-chip patch as 5k,
+                                     carrying the FX engine instead -- one
+                                     of the two; then tools/touchfx_apply.py:
+                                     the PERFORM > TOUCH FX screen; MASTER
+                                     TEMPO ON)
   5d PERFORM pads                  (tools/perform_pads_apply.py: BEAT JUMP
                                      row + hot-cue swipe, the touchscreen
                                      pads; hooks armed with
@@ -164,7 +170,16 @@ def main():
     ap.add_argument("--keyshift", action="store_true",
                     help="also 5k: real-time key shift (live patch of the audio "
                          "chip, no restart; opt-in until proven on hardware)")
+    ap.add_argument("--touchfx", action="store_true",
+                    help="also 5x: TOUCH FX (live patch of the audio chip like "
+                         "--keyshift, carrying the FX engine instead; needs the "
+                         "pads; opt-in until proven on hardware)")
     a = ap.parse_args()
+    if a.touchfx and a.keyshift:
+        sys.exit("pick one: --keyshift or --touchfx (they share the audio "
+                 "chip's hook; real-time key shift OR TOUCH FX)")
+    if a.touchfx and a.no_pads:
+        sys.exit("--touchfx needs the PERFORM pads (drop --no-pads)")
     # public checkouts have no build/ output (gitignored): stage the
     # committed prebuilt deck modules so the *apply tools find them
     try:
@@ -276,7 +291,12 @@ def main():
         print("5d  PERFORM pads skipped (not selected)")
     else:
         print("5d  PERFORM pads (keep the PERFORM screen closed)")
-        r = until_pass(["tools/perform_pads_apply.py"], "perform")
+        pp = ["tools/perform_pads_apply.py"]
+        if not a.keyshift:
+            pp.append("--hide-ks")       # no KEY SHIFT tab without the mod
+        if a.no_stems:
+            pp.append("--hide-stems")    # no STEMS tab without the mod
+        r = until_pass(pp, "perform")
         if r is not True:
             sys.exit("STOP: PERFORM pads install failed - switch the deck off and on, then install again (once).")
         if a.no_hotcues:
@@ -301,13 +321,6 @@ def main():
         r = until_pass(["tools/theme_switch_apply.py", "--precheck"], "themes")
         if r is not True:
             sys.exit("STOP: theme install failed - switch the deck off and on, then install again (once).")
-    if a.no_flac:
-        print("5h  FLAC skipped (not selected)")
-    else:
-        print("5h  FLAC playback (keep the USB stick OUT until the end)")
-        r = until_pass(["tools/flac_apply.py"] + (["--no-opus"] if a.no_opus else []), "flac")
-        if r is not True:
-            sys.exit("STOP: FLAC install failed - switch the deck off and on, then install again (once).")
     if not a.brake or a.brake == 1:
         print("5v  vinyl brake length skipped (opt-in: --brake X)")
     else:
@@ -346,9 +359,31 @@ def main():
         if r is not True:
             sys.exit("STOP: key shift install failed - power-cycle the deck "
                      "(everything installed before it is fine after a re-run).")
-    if os.environ.get("XDJ_LIGHT") != "1":
-        pass                     # light theme held back for 1.0 (XDJ_LIGHT=1)
-    elif a.no_themes:
+    if not a.touchfx:
+        print("5x  TOUCH FX skipped (opt-in: --touchfx)")
+    else:
+        print("5x  TOUCH FX engine (stick still OUT; no chip restart)")
+        r = until_pass(["tools/keyshift_hot_apply.py", "--engine", "fx", "--probe"],
+                       "fx engine probe")
+        if r is not True:
+            sys.exit("STOP: FX engine probe failed (read-only: nothing was "
+                     "changed on the audio chip) - everything else is "
+                     "installed; tell Claude what it printed.")
+        r = until_pass(["tools/keyshift_hot_apply.py", "--engine", "fx"], "fx engine")
+        if r is not True:
+            sys.exit("STOP: FX engine install failed - power-cycle the deck "
+                     "(everything installed before it is fine after a re-run).")
+        print("5x  TOUCH FX screen (read-only area check, then install)")
+        out = run(["tools/touchfx_apply.py", "--survey"])
+        if "SURVEY OK" not in out:
+            print("    TOUCH FX area not empty on this deck - screen skipped "
+                  "(the engine is in but has no screen); tell Claude.")
+        else:
+            r = until_pass(["tools/touchfx_apply.py", "--engine-ok"], "touchfx")
+            if r is not True:
+                sys.exit("STOP: TOUCH FX screen install failed - switch the "
+                         "deck off and on, then install again (once).")
+    if a.no_themes:
         print("5l  light add-on skipped (needs theme switching)")
     else:
         # the LIGHT theme's tables rode the normal 5e install; this adds the
@@ -364,10 +399,34 @@ def main():
             if r is not True:
                 sys.exit("STOP: light add-on install failed - switch the "
                          "deck off and on, then install again (once).")
+    # 2026-11-03 deck: FLAC used to sit in the middle and its "a track is
+    # loaded" refusal ended the whole run -> the phase meter, TOUCH FX and
+    # the light add-on were never installed (LIGHT = white text on a light
+    # screen). FLAC is now LAST and a FLAC problem never stops the rest.
+    flac_ok = True
+    if a.no_flac:
+        print("5h  FLAC skipped (not selected)")
+    else:
+        print("5h  FLAC playback (keep the USB stick OUT until the end)")
+        fa = ["tools/flac_apply.py"] + (["--no-opus"] if a.no_opus else [])
+        r = until_pass(fa, "flac")
+        t_wait = time.time()
+        while r == "refused" and time.time() - t_wait < 600:
+            print("    A track is loaded: TAKE THE USB STICK OUT of the deck. "
+                  "Waiting (up to 10 min) ...", flush=True)
+            time.sleep(20)
+            r = until_pass(fa, "flac")
+        if r is not True:
+            flac_ok = False
+            print("    FLAC NOT installed -- everything else IS installed "
+                  "and working. (FLAC needs the stick out of the deck.)",
+                  flush=True)
     print(f"DONE in {(time.time() - t0) / 60:.0f} min: insert the stick and "
           f"load a track. Waveform = {a.mode}; PERFORM has BEAT JUMP / "
-          f"HOT CUE / KEY SHIFT / STEMS; hold MENU > UTILITY (scroll to "
-          f"the end) has the mod settings.")
+          f"HOT CUE{' / KEY SHIFT' if a.keyshift else ''}"
+          f"{'' if a.no_stems else ' / STEMS'}{' / TOUCH FX' if a.touchfx else ''}; hold MENU > UTILITY (scroll to "
+          f"the end) has the mod settings."
+          + ("" if flac_ok else " (FLAC was NOT installed.)"))
     print("If the stick was in the deck at any point during the install: "
           "eject it and put it back once, so the deck re-reads the file "
           "types (otherwise FLAC/Opus files still show 'unsupported').")

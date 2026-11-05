@@ -15,7 +15,7 @@ cd "$ROOT/tools/hotcue8"
   -Wl,--section-start=.entry=$BASE -Wl,-Ttext=$(printf '0x%X' $((BASE + 0x80))) \
   -o "$OUT/hc.elf" hchook.S hc.c -lgcc
 "$SH/sh-elf-objcopy" -O binary -j .entry -j .text -j .rodata -j .data "$OUT/hc.elf" "$OUT/hc.bin"
-"$SH/sh-elf-nm" "$OUT/hc.elf" | grep -E " (_hc_)" > "$OUT/hc.syms"
+"$SH/sh-elf-nm" "$OUT/hc.elf" | grep -E " (_hc_|_end$)" > "$OUT/hc.syms"
 "$SH/sh-elf-size" "$OUT/hc.elf"
 N=$("$SH/sh-elf-objdump" -d "$OUT/hc.elf" | awk -F'\t' 'NF>=3{print $3}' | grep -cE '^(f[a-z.]+|frchg|fschg)\s|fpscr|fpul' || true)
 echo "FPU instructions: $N (must be 0)"; [ "$N" = 0 ]

@@ -48,13 +48,25 @@ MODE_PLAYING = 5
 # contiguous passages separated by quiet holds, and the deck's pitch is
 # exact. Above ~95% production it returns to the smooth take-what's-there
 # mode (gapless at 100%).
-BURST_ENTER = 0.85
-BURST_EXIT = 0.95
+BURST_ENTER = 0.93
+BURST_EXIT = 0.98
 BURST_WINDOW = 0.5                          # s between production samples
 # How much audio to bank before releasing a burst (seconds). At fraction f
 # of real time, a burst lasts BURST_S and the following hold ~BURST_S/f:
 # 0.25 s passages every ~2.3 s at 11%, near-seamless as f -> 1.
 BURST_S = float(os.environ.get("XDJ_DSP_BURST_S", "0.25"))
+
+
+def bank_seconds(rate):
+    """Audio to bank before a burst, from the measured production rate.
+    A fixed 0.25 s made a deck running at 70-90 % of real time (WAV/AIFF on
+    a busy Mac) play ~2 s, gap, ~2 s, gap... -- the stutter the user heard
+    on a plain AIFF (2026-11-01). A passage lasts bank/(1-rate): banking
+    0.2/(1-rate) s gives ~3 s passages at 70 %, ~10 s at 85 %, ~22 s at 90 %
+    (capped at 3 s of banked audio). Slow decks (MP3) keep BURST_S."""
+    if rate <= 0.5:
+        return BURST_S
+    return min(3.0, max(BURST_S, 0.2 / max(0.03, 1.0 - rate)))
 
 
 class DspSound:
@@ -130,7 +142,7 @@ class DspSound:
                 # L/R planes drifted. (The not-primed first-take
                 # relaxation is smooth-mode only: in burst mode the hold
                 # itself guarantees the first audible take is full.)
-                burst_min = max(nfr * 2, int(BURST_S * 2 * SR))
+                burst_min = max(nfr * 2, int(bank_seconds(self.prod_rate) * 2 * SR))
                 if self.burst:
                     if self._releasing:
                         if avail < nfr * 2:

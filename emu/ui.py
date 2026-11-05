@@ -143,6 +143,21 @@ def _deck_playing(m):
         return de.bus.read(0x11837BF8, 4) == 2
     return bool(m.mem.r32(0x0B6C4264) & 4)
 
+
+def _deck_has_track(m):
+    """Is anything on the deck that may need the audio chip? True unless the
+    SH mode word 0x0B6C4264 is 0 (nothing loaded, nothing loading) AND the
+    DSP is not playing/paused. Seen values: 0 idle, 2 loading, 3 playing,
+    5 paused, 14 error/browse-over-track (CLAUDE.md §150/§151). Written as
+    "everything but idle" rather than a list of known modes: a mode we have
+    not seen (a second load from the browse screen over a paused track,
+    say) must never freeze the DSP mid-handshake -- that is E-8302. The
+    DSP's own status cannot tell idle from loading (1 for both)."""
+    if m.mem.r8(0x0B6C4264) != 0:
+        return True
+    de = getattr(m.mem.dev, "dspemu", None)
+    return de is not None and de.bus.read(0x11837BF8, 4) in (2, 3)
+
 class DeckState:
     """Physical control state. Buttons are MOMENTARY (held while pressed);
     the firmware does any toggling, exactly as on the deck."""
@@ -193,6 +208,11 @@ def _radial(r, inner, outer, hi=None):
 
 
 class EmuApp:
+    PACE_CYCLES = 4_000_000      # play mode: emulated SH cycles per paced pass (8 ms)
+    # play mode: the deck may run this far ahead of the wall clock, so the
+    # audio consumer (whole 93 ms AudioQueue buffers) always finds a full
+    # buffer waiting; pacing with no cushion stalled it on every jitter
+    PACE_LEAD = float(os.environ.get("XDJ_PACE_LEAD", "0.1"))
     # geometry lives in emu/deck.py (measured from Pioneer's product photo)
     CONTROLS = deck.CONTROLS
     KEYS = {  # keyboard -> control
@@ -222,10 +242,19 @@ class EmuApp:
         # audio driver above does not matter: decksound goes through
         # AudioToolbox directly.
         os.environ.setdefault("XDJ_HLE_DSP", "1")
-        # the app's emulator runs in play mode: the audio chip on its own
+        # The app's emulator runs in play mode: the audio chip on its own
         # thread, devices ticked in larger slices -- much faster, not
         # cycle-exact. Test / mod-validation tools never set it (exact).
         os.environ.setdefault("XDJ_PLAY", "1")
+        # The play-mode C event loop stays ON (2026-11-01). It was switched
+        # off here earlier the same day after app_speed_bench showed 17 fps
+        # and a dead MENU press; the causes were (a) the idle shortcut
+        # overwriting an interrupt entry (fastcpu R_IDLE, the USB-insert
+        # livelock), (b) clicks held through an input burst = long presses
+        # (key_event/pointer bursts now start at release), and (c) that
+        # bench plays an MP3 (DSP-bound). The Python loop only looked
+        # faster by starving the audio chip: 22 % of real-time audio on a
+        # WAV vs 85 % with the C loop (scratchpad appaud, XDJ_PLAY).
         pygame.init()
         self.view = "deck"
         self.paused = False
@@ -441,6 +470,7 @@ class EmuApp:
         m = self.machine
         dev = m.mem.dev
         t0, f0 = time.time(), getattr(dev, "frames", 0)
+        play = os.environ.get("XDJ_PLAY") == "1"
         try:
             while self._emu_alive and m is self.machine:
                 if self.paused and not self.bursting():
@@ -453,7 +483,13 @@ class EmuApp:
                 # firmware-side wait (dialog timers, handshakes) then took
                 # tens of seconds of wall clock. Pacing is unchanged: the
                 # loop still sleeps to the 60 Hz frame clock.
-                m.run(limit=1_000_000)
+                # Play mode runs faster than real time (2026-11-01) and its
+                # sleep jumps make 1M steps up to 0.6 s of emulated time:
+                # cap a pass at ~8 ms so the pacing below holds the deck
+                # (and its audio) to the wall clock.
+                cap = (self.PACE_CYCLES if play and self.realtime
+                       and not self.bursting() else None)
+                m.run(limit=1_000_000, max_cycles=cap)
                 self._burst_sound(m, dev)
                 if self.burst_until is not None and m.cpu.steps >= self.burst_until:
                     try:
@@ -469,6 +505,11 @@ class EmuApp:
                     # the last burst window; a wall ceiling stops runaway).
                     now = time.time()
                     disk_active = False
+                    # set before the disk check: with NO stick inserted the
+                    # first input burst to time out crashed the whole
+                    # emulator loop here (UnboundLocalError) -- the deck
+                    # then ignored every later click (2026-11-01)
+                    playing = False
                     disk = getattr(dev, "usb_disk", None)
                     if disk is not None:
                         # ops is a MONOTONIC IO counter: the access ring
@@ -523,8 +564,18 @@ class EmuApp:
                     # disk every slice; a real read surge re-opens one.
                     self._reburst(m, dev)
                 if not self.realtime or self.bursting():
+                    # Re-anchor the pacing clock while fast-forwarding:
+                    # otherwise the frames a burst raced ahead count as
+                    # "ahead of the wall clock" once it ends and the loop
+                    # SLEPT the deck until real time caught up -- after
+                    # every click and every USB read the deck froze for
+                    # as long as it had just skipped (5-9 fps measured
+                    # browsing, 2026-11-01; "USB takes far too long").
+                    t0, f0 = time.time(), getattr(dev, "frames", 0)
                     continue
                 ahead = (getattr(dev, "frames", 0) - f0) / 60.0 - (time.time() - t0)
+                if play:
+                    ahead -= self.PACE_LEAD   # audio cushion (see PACE_LEAD)
                 if ahead > 0.005:
                     time.sleep(min(ahead, 0.05))
                 elif ahead < -0.5:           # fell behind: don't try to catch up
@@ -777,9 +828,9 @@ class EmuApp:
         live = m.mem.r32(hook)
         if live == syms["hc_entry"]:
             return
-        if any(m.mem.r8(a) for a in range(base, syms["hc_count"] + 4, 16)):
+        if any(m.mem.r8(a) for a in range(base, syms.get("end", syms["hc_count"] + 4), 16)):
             return
-        for a in range(base, syms["hc_count"] + 4, 4):
+        for a in range(base, syms.get("end", syms["hc_count"] + 4), 4):
             m.mem.w32(a, 0)
         for i, b in enumerate(img):
             m.mem.w8(base + i, b)
@@ -799,8 +850,9 @@ class EmuApp:
                 sys.path.insert(0, os.path.join(ROOT, "tools"))
                 sys.path.insert(0, os.path.join(ROOT, "mods"))
                 import theme_switch as TS
-                data = TS.blob(TS.default_names())
+                data, lit = TS.build(TS.default_names())
             except Exception:
+                lit = []
                 from . import fwhome
                 tp = os.path.join(fwhome.home(), "themesw_tables.bin")
                 data = open(tp if os.path.exists(tp) else os.path.join(d, "tables.bin"), "rb").read()
@@ -818,6 +870,12 @@ class EmuApp:
             m.mem.w8(cb + 4 + i, b)
         for i, b in enumerate(data):
             m.mem.w8(db + i, b)
+        # lit buttons (a theme with a lit colour): their pictures -> private
+        # colours before the switch is armed, only while they read stock
+        for a, st, pv in lit:
+            if bytes(m.mem.r8(a + i) for i in range(len(st))) == st:
+                for i, b in enumerate(pv):
+                    m.mem.w8(a + i, b)
         import mysettings as MSET
         if not m.mem.r8(MSET.MSTNAME):
             for i, b in enumerate(b"OFF\0"):
@@ -856,6 +914,8 @@ class EmuApp:
         m.mem.w32(hook, entry)
         if m.mem.r32(direct) == fread:
             m.mem.w32(direct, entry)
+        if "sm_poll_entry" in syms and m.mem.r32(0x08C1D56C) == 0x08BF2BCC:
+            m.mem.w32(0x08C1D56C, syms["sm_poll_entry"])   # fast mute trigger
 
     def _install_keyshift(self, m):
         """Real-time key shift (tools/keyshift_dsp/ksh.c, deck step 5k): the
@@ -926,9 +986,16 @@ class EmuApp:
         if m is None:
             return
         keys = self.st.frame_keys()
+        # the jog counts as "turning" for a moment after each change (a
+        # real jog streams pulses; one GUI drag event = one burst of them)
+        now = time.time()
+        if self.st.jog_count != getattr(self, "_jog_sent", None):
+            self._jog_sent, self._jog_t = self.st.jog_count, now
+        moving = now - getattr(self, "_jog_t", 0) < 0.08
         m.mem.dev.panel_frame = panl.build_frame(
             keys, fader_raw=self.st.fader_raw, jog=self.st.jog_count,
-            rotary=self.st.rotary, needle=self.st.needle,
+            jog_period=300 if moving else 0xFFFF, jog_moving=moving,
+            needle=self.st.needle,
             tempo=self.st.fader_raw,
             touch=self._touch_px)
         # The browse knob is NOT a frame field: KY 0x42/0x43 (Rotary-
@@ -938,10 +1005,14 @@ class EmuApp:
         if last is None:
             self._rot_sent = self.st.rotary
         elif self.st.rotary != last:
+            # ONE detent per injected frame: the browser polls the counter
+            # and a jump of several steps between polls was taken as a single
+            # (or accelerated) move, so quick knob turns lost detents (user,
+            # 2026-11-01). A real knob sends one KY 0x42/0x43 per detent.
             a = panl.ROTARY_COUNTER
-            v = (m.mem.r16(a) + self.st.rotary - last) & 0xFFFF
-            m.mem.w16(a, v)
-            self._rot_sent = self.st.rotary
+            d = 1 if self.st.rotary > last else -1
+            m.mem.w16(a, (m.mem.r16(a) + d) & 0xFFFF)
+            self._rot_sent = last + d
 
     # -- firmware screen -------------------------------------------------------
     def _update_screen(self):
@@ -979,6 +1050,13 @@ class EmuApp:
         try:
             m = self.machine
             if m is None or self.sim is None:
+                return
+            # The real audio chip makes the firmware draw its own waveform
+            # and time. SimPlay keyed on mode 5, which with the real chip
+            # means PAUSED -- it painted a made-up waveform + clock over a
+            # paused deck, even over menus (user, 2026-11-01). Only the old
+            # no-playback stand-in ever needs it.
+            if getattr(m.mem.dev, "dspemu", None) is not None:
                 return
             track, pos = self.sim.update(m, self.usb_path, time.time())
             if track is None:
@@ -1107,11 +1185,8 @@ class EmuApp:
             self._update_screen()
             self._draw_simplay()
         d.blit(self.screen_surf, (SCR_X, SCR_Y))
-        if self._touch_px:                  # fingertip marker
-            hl = pygame.Surface((36, 36), pygame.SRCALPHA)
-            pygame.draw.circle(hl, (255, 255, 255, 70), (18, 18), 18)
-            d.blit(hl, (SCR_X + self._touch_px[0] - 18,
-                        SCR_Y + self._touch_px[1] - 18))
+        # (no fingertip marker: the user found the touch circles weird, and
+        # the deck's own screen already reacts to a touch; 2026-11-01)
         self._leds = self._panel_leds()
         f = self._fonts()
         deck.draw_jog(d, self.st.jog_count, self.st.jog_touch, f)
@@ -1120,7 +1195,7 @@ class EmuApp:
         deck.draw_rotary(d, self.st.rotary, "RotaryPush" in self.st.held)
         deck.draw_fader(d, self.st.fader_raw)
         t = self.small.render(f"{self.st.rate() * 100:+.2f}%", True, DIM)
-        d.blit(t, (self.FADER.centerx - t.get_width() // 2, self.FADER.bottom + deck.S(16)))
+        d.blit(t, (self.FADER.centerx - t.get_width() // 2, self.FADER.bottom + deck.S(36)))
 
     # -- toolbar ---------------------------------------------------------------------
     def _tb_items(self):
@@ -1213,6 +1288,9 @@ class EmuApp:
                     self._stock_words = np.frombuffer(raw[:len(raw) // 2 * 2], "<u2")
                 stock = self._stock_words
                 new = stock if sp is None else T.recolour(stock.copy(), sp)[0]
+                if sp and sp.get("lit"):        # lit buttons (mods/litbuttons.py)
+                    import litbuttons as LB
+                    LB.apply_words(new, stock, sp["lit"])
                 prev = self._theme_words if self._theme_words is not None else stock
                 ram = np.frombuffer(m.mem.ram0, dtype="<u2", count=len(stock))
                 safe = (ram == prev) & (new != prev)
@@ -1230,9 +1308,13 @@ class EmuApp:
         nothing audible. Running the DSP's Python is ~4x the SH's whole
         cost (11.7M vs 48.7M steps/s measured), and it advances on WALL
         time -- so the mount FAT walk was mostly waiting on the DSP.
-        Correctness: bursts never run while mode==5 (playing, checked
-        here too); if the user presses PLAY inside a window the burst
-        ends immediately and the model is running again."""
+        Correctness: bursts never run while playing (checked here too); if
+        the user presses PLAY inside a window the burst ends immediately
+        and the model is running again. A track LOAD is not audible but it
+        uses the DSP: the firmware's load handshake waits for the DSP's
+        block counter (0x11837CCC), so holding the DSP through it made
+        every app-path load die as E-8302 (2026-11-01; same flow with only
+        the hold disabled: ctr 133 -> 1013 over 14.5 s, red 0)."""
         de = getattr(dev, "dspemu", None)
         if de is None:
             return
@@ -1245,6 +1327,8 @@ class EmuApp:
             if playing:
                 self.burst_until = None        # keep audio at real time
                 de.hold = False
+            elif _deck_has_track(m):
+                de.hold = False                # load/seek handshake needs it
             else:
                 de.hold = True
         else:
@@ -1578,15 +1662,32 @@ class EmuApp:
             self._burst_usb = True
             self._burst_t0 = time.time()
 
+    def _press_start(self):
+        """A button / touch / knob push went DOWN: stop any fast-forward
+        first. The hold is timed on the wall clock (MIN_HOLD), so pressing
+        during a burst (the one the previous click opened) stretched a
+        0.25 s click into seconds of deck time -- the deck took it as a
+        LONG press: BROWSE opened SEARCH instead of closing, the knob push
+        showed the scroll hint (user: "clicks don't register", measured
+        2026-11-01: 6 of 7 BROWSE taps lost while a burst ran). The release
+        reopens the burst, so the reaction itself is still fast."""
+        if self.burst_until is not None:
+            self.burst_until = None
+            de = getattr(getattr(self.machine, "mem", None), "dev", None)
+            de = getattr(de, "dspemu", None)
+            if de is not None:
+                de.hold = False
+
     MIN_HOLD = 0.25
     MIN_TICKS = 3
 
     def key_event(self, name, down):
-        """A deck key by its pygame name ("space", "c", "left", "[" ...)."""
-        if down:
-            self._input_burst()
+        """A deck key by its pygame name ("space", "c", "left", "[" ...).
+        The fast-forward burst starts at the RELEASE (see _input_burst):
+        a burst under a held key turned every click into a long press."""
         if name in self.KEYS:
             if down:
+                self._press_start()
                 self._key_up_pending.discard(name)
                 self._key_t0[name] = [time.time(), 0]
             else:
@@ -1596,10 +1697,15 @@ class EmuApp:
                     self._key_up_pending.add(name)   # released in tick()
                     return
             self._set(self.KEYS[name], down)
-        elif name in ("left", "right"):
+            if not down:
+                self._input_burst()
+            return
+        if down:
+            self._input_burst()
+        if name in ("left", "right"):
             self.st.jog_touch = down
             if down:
-                self.st.jog_count += -16 if name == "left" else 16
+                self.st.jog_count += -200 if name == "left" else 200
         elif name in ("up", "down") and down:
             self.st.rotary += -1 if name == "up" else 1
         elif name in ("=", "+") and down:
@@ -1621,7 +1727,7 @@ class EmuApp:
             self._up_pending = False
             self._pointer_release()
         self._hold_t0, self._hold_ticks = time.time(), 0
-        self._input_burst()
+        self._press_start()
         if self.view == "screen":               # the canvas is the screen
             if 0 <= p[0] < FB_W and 0 <= p[1] < FB_H:
                 self._touch_px = (p[0], p[1])
@@ -1639,7 +1745,12 @@ class EmuApp:
             self.fader_to(p[1])
         elif (p[0] - self.JOG_C[0]) ** 2 + (p[1] - self.JOG_C[1]) ** 2 \
                 <= self.JOG_R ** 2:
-            self.st.jog_touch = True
+            # like the real jog: the top platter (inner part) is touch-
+            # sensitive (VINYL mode: stop + scratch), the outer ring only
+            # turns (pitch bend)
+            r2 = (p[0] - self.JOG_C[0]) ** 2 + (p[1] - self.JOG_C[1]) ** 2
+            self.st.jog_touch = r2 <= (0.72 * self.JOG_R) ** 2
+            self._jog_drag = True
             self._jog_ang = math.atan2(p[1] - self.JOG_C[1],
                                        p[0] - self.JOG_C[0])
         elif pygame.Rect(SCR_X, SCR_Y, SCR_W, SCR_H).collidepoint(p):
@@ -1652,7 +1763,7 @@ class EmuApp:
             q = p if self.view == "screen" else (p[0] - SCR_X, p[1] - SCR_Y)
             self._touch_px = (min(max(q[0], 0), FB_W - 1),
                               min(max(q[1], 0), FB_H - 1))
-        if self.st.jog_touch and self._jog_ang is not None:
+        if getattr(self, "_jog_drag", False) and self._jog_ang is not None:
             a = math.atan2(p[1] - self.JOG_C[1], p[0] - self.JOG_C[0])
             dd = (a - self._jog_ang + math.pi) % (2 * math.pi) - math.pi
             self.st.jog_count += int(dd * 300)
@@ -1680,6 +1791,7 @@ class EmuApp:
             if not t0 or (now - t0[0] >= self.MIN_HOLD and t0[1] >= self.MIN_TICKS):
                 self._key_up_pending.discard(k)
                 self._set(self.KEYS[k], False)
+                self._input_burst()
 
     def _pointer_release(self):
         n = self._pressed
@@ -1692,6 +1804,8 @@ class EmuApp:
         self._touch_px = None
         self.fader_drag = False
         self.st.jog_touch = False
+        self._jog_drag = False
+        self._input_burst()      # the deck's reaction runs fast, the press did not
 
     def release_all(self):
         """Let go of everything (focus lost, tab hidden): nothing may stay

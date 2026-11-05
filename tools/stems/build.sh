@@ -8,7 +8,7 @@ BASE=${SM_BASE:-0x09836000}
 mkdir -p "$OUT"
 cd "$ROOT/tools/stems"
 "$SH/sh-elf-gcc" -m4-nofpu -mdiv=call-div1 -ml -O2 -Wall -ffreestanding -fno-builtin \
-  -DPMASK=${PMASK:?}u \
+  -DPMASK=${PMASK:?}u ${SM_CFLAGS:-} \
   -ffunction-sections -fdata-sections -nostdlib -Wl,--gc-sections -Wl,-e,_sm_table \
   -Wl,--section-start=.entry=$BASE -Wl,-Ttext=$(printf '0x%X' $((BASE + 0x10))) \
   -o "$OUT/sm.elf" smhook.S sm.c -lgcc

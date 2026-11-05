@@ -20,6 +20,11 @@ from emu.machine import Machine
 from emu import dspsound as D
 
 SECS = float(sys.argv[1]) if len(sys.argv) > 1 else 8.0
+# PACE=1: hold emulated time to the wall clock like emu/ui.py (play mode
+# runs faster than real time since 2026-11-01; unpaced, the producer just
+# outruns the consumer and `lag` grows)
+PACE = os.environ.get("PACE", "0") == "1"
+LEAD = float(os.environ.get("XDJ_PACE_LEAD", "0.1"))     # = EmuApp.PACE_LEAD
 # A snapshot that is really PLAYING (DSP status 0x11837BF8 == 2): stick7's
 # "Control clip.wav" auto-playing after load. emu_dsp_sound.pkl.gz is a
 # PAUSED deck (the DSP loops its output ring there, now muted by the model).
@@ -56,9 +61,23 @@ def main():
     t0 = time.time()
     n_calls = 0
     next_call = time.time()
+    dev = m.mem.dev
+    f0 = getattr(dev, "frames", 0)
+    t0p = t0
+    behind = 0
     while time.time() - t0 < SECS:
-        m.cpu.run(limit=200_000)
+        if PACE:
+            m.run(limit=1_000_000, max_cycles=4_000_000)   # as emu/ui.py
+        else:
+            m.cpu.run(limit=200_000)
         de.sync()
+        if PACE:      # the app's _emu_loop rule: LCDC frames held to the wall clock
+            ahead = (getattr(dev, "frames", 0) - f0) / 60.0 - (time.time() - t0p) - LEAD
+            if ahead > 0.005:
+                time.sleep(min(ahead, 0.05))
+            elif ahead < -0.5:
+                behind += 1
+                t0p, f0 = time.time(), getattr(dev, "frames", 0)
         if time.time() >= next_call:              # AudioQueue pace (10.7 Hz)
             s._callback(None, None, bref)
             next_call += 4096 / 44100.0
@@ -67,7 +86,7 @@ def main():
     rows = (arena != 0).any(axis=1).sum()
     rt = n_calls / SECS * 4096 / 44100 * 100
     print(f"consumer calls={n_calls} (= {rt:.0f}% AudioQueue rate)"
-          f"; served={s.served} frames")
+          f"; served={s.served} frames" + (f"; fell >0.5 s behind {behind}x" if PACE else ""))
     print(f"gaps={s.gaps} half={s.half} max_stall={s.max_stall} "
           f"lag={s.lag} words, r_edge={s.r_edge} l_edge={s.l_edge} "
           f"primed={s.primed} skipped={s.trimmed_total}")

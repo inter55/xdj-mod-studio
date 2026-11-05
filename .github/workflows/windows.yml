@@ -66,8 +66,69 @@ jobs:
           name: win-natives
           path: out/
 
+  qemu:
+    # The app's emulator on Windows: cdj-nxs2-qemu (GPL-2.0-or-later) at the
+    # commit our patch is made against, built + packaged by its own release
+    # script under MSYS2 (as its release workflow does), then the QEMU
+    # folder (exe, DLLs, audio-chip library, keymaps) is kept.
+    runs-on: windows-2022
+    defaults:
+      run:
+        shell: msys2 {0}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/checkout@v4
+        with:
+          repository: Stijn-Jacobs/cdj-nxs2-qemu
+          ref: 63a518686cfb40382493f5a9a68fefcc4bdcb0cd
+          path: qemu-ref
+      - uses: msys2/setup-msys2@v2
+        with:
+          msystem: MINGW64
+          update: true
+          install: mingw-w64-x86_64-python git unzip
+      - name: Our patch (knob, 16-bit jog, USB hot-plug)
+        run: |
+          git -C qemu-ref apply ../qemu/0001-xdj700-knob-and-jog16.patch
+          git -C qemu-ref apply ../qemu/0002-c66x-arm64-rounding.patch
+      - name: Prerequisites
+        working-directory: qemu-ref
+        run: |
+          pkgs="$(PYTHONPATH=. python -m launcher packages)"
+          [ -z "$pkgs" ] || pacman -S --needed --noconfirm $pkgs
+      - uses: actions/cache@v4
+        with:
+          path: |
+            qemu-ref/qemu-src
+            ${{ runner.temp }}/build
+          key: qemu-win-${{ hashFiles('qemu/*.patch') }}-63a5186
+      - name: Build and package
+        working-directory: qemu-ref
+        run: |
+          root="$(cygpath -u "$RUNNER_TEMP")/build"
+          export QEMU_BUILD="$root/qemu-build-mingw" QEMU_EB_BUILD="$root/qemu-build-mingw-eb"
+          export C66X_JIT_LIBDIR="$root/c6x" JOBS=4
+          bash packaging/release.sh --out dist --cache "$root/downloads"
+      - name: Keep the QEMU folder
+        run: |
+          mkdir -p x out/qemu-bin
+          unzip -q qemu-ref/dist/CDJ-Emulator-*.zip -d x
+          q="$(dirname "$(find x -name qemu-system-sh4.exe | head -1)")"
+          cp -r "$q"/. out/qemu-bin/
+          cp qemu-ref/LICENSE out/qemu-bin/LICENSE-QEMU.txt
+          cp qemu/*.patch out/qemu-bin/
+          printf '%s\n' "QEMU (GPL-2.0-or-later) with the machine models of" \
+            "https://github.com/Stijn-Jacobs/cdj-nxs2-qemu at 63a5186 plus the" \
+            ".patch file(s) beside this note = the full source of this build." \
+            > out/qemu-bin/QEMU-SOURCE.txt
+          ls out/qemu-bin
+      - uses: actions/upload-artifact@v4
+        with:
+          name: win-qemu
+          path: out/
+
   app:
-    needs: natives
+    needs: [natives, qemu]
     runs-on: windows-latest
     steps:
       - uses: actions/checkout@v4
@@ -78,6 +139,10 @@ jobs:
         with:
           name: win-natives
           path: build/win-natives
+      - uses: actions/download-artifact@v4
+        with:
+          name: win-qemu
+          path: build/win-qemu
       - name: Python packages
         run: python -m pip install --quiet pyinstaller numpy pillow pygame capstone
       - name: Build the app

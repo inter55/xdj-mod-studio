@@ -19,6 +19,7 @@ READ(10), WRITE(10) into an overlay, ...), backed by emu/usbdisk.py.
 
 Register offsets are relative to 0x04D80000 (USB0, P2 0xA4D80000).
 """
+import os
 import struct
 
 BASE = 0x04D80000
@@ -45,6 +46,12 @@ CTR_SEL = {v: k for k, v in SEL_CTR.items()}
 
 PID_NAK, PID_BUF, PID_STALL = 0, 1, 2
 DELAY = 3000            # CPU cycles from "go" to the packet completing (~6 us)
+NAK_RETRY = 25_000      # IN token re-poll after a NAK (~50 us)
+# XDJ_USB_HS=1: the stick enumerates HIGH-SPEED (512-byte bulk packets,
+# device qualifier). Tried 2026-11-01 against E-8302: no change, and the
+# mount took ~1.7x longer, so full speed (the old model) stays default.
+HIGH_SPEED = os.environ.get("XDJ_USB_HS", "0") == "1"   # off: measured slower
+BULK_MPS = 512 if HIGH_SPEED else 64
 
 
 def _pctr(n):
@@ -154,7 +161,7 @@ class USBHost:
                 return v | 4                     # reset in progress
             if self.attached and v & 0x10:
                 self.reset_done = True
-                return v | 2                     # full speed
+                return v | (3 if HIGH_SPEED else 2)   # RHST: HS / FS
             return v
         if o == INTSTS0:
             return self._intsts0()
@@ -248,6 +255,13 @@ class USBHost:
                 self._setup_pending = False
             self.r[o] = new & ~(0x4000 | 0x0800 | 0x0100 | 0x0080 | 0x0200)
             if (new & 3) == PID_BUF:
+                if n and self.valid[n] and not self._dir_out(n):
+                    # Armed for IN while a packet already sits unread (we
+                    # fetch eagerly; on hardware this packet -- the BOT CSW
+                    # -- arrives AFTER the arm): report it as ready again.
+                    # The firmware had cleared BRDY for it and then waited
+                    # its 8.4 s BOT timeout (2026-11-01).
+                    self._set(BRDYSTS, 1 << n)
                 self._kick()
             return
         if o == CFIFOSEL or o == D0FIFOSEL or o == D1FIFOSEL:
@@ -435,7 +449,12 @@ class USBHost:
         ep = self.pipecfg[n][PIPECFG] & 0xF
         pkt = self.stick.bulk_in(ep, self._mxps(n))
         if pkt is None:
-            return                               # NAK: retried on the next kick
+            # NAK. A real controller keeps re-sending IN tokens while the
+            # pipe is BUF; without a scheduled retry nothing kicked this
+            # pipe again and the firmware sat out its 8.4 s BOT timeout
+            # (4 per mount of the user's library = 33 of 34 s; 2026-11-01)
+            self._kick(NAK_RETRY)
+            return
         if pkt == "stall":
             self.r[_pctr(n)] = (self.r.get(_pctr(n), 0) & ~3) | PID_STALL
             self._set(NRDYSTS, 1 << n)
@@ -481,8 +500,9 @@ class MassStorage:
                          0x0781, 0x5567, 0x0100, 1, 2, 3, 1)
     CONFIG = (struct.pack("<BBHBBBBB", 9, 2, 32, 1, 1, 0, 0x80, 50) +
               struct.pack("<BBBBBBBBB", 9, 4, 0, 0, 2, 8, 6, 0x50, 0) +
-              struct.pack("<BBBBHB", 7, 5, 0x80 | EP_IN, 2, 64, 0) +
-              struct.pack("<BBBBHB", 7, 5, EP_OUT, 2, 64, 0))
+              struct.pack("<BBBBHB", 7, 5, 0x80 | EP_IN, 2, BULK_MPS, 0) +
+              struct.pack("<BBBBHB", 7, 5, EP_OUT, 2, BULK_MPS, 0))
+    QUALIFIER = struct.pack("<BBHBBBBBB", 10, 6, 0x0200, 0, 0, 0, 64, 1, 0)
     STRINGS = {0: b"\x04\x03\x09\x04", 1: _sdesc("XDJ Emu"),
                2: _sdesc("Virtual USB Stick"), 3: _sdesc("0123456789AB")}
 
@@ -509,8 +529,8 @@ class MassStorage:
             d = {1: self.DEVICE, 2: self.CONFIG}.get(kind)
             if kind == 3:
                 d = self.STRINGS.get(i)
-            if kind == 6:                                  # qualifier: FS only
-                return None
+            if kind == 6:                                  # device qualifier
+                return self.QUALIFIER[:ln] if HIGH_SPEED else None
             return None if d is None else d[:ln]
         if rt == 0x00 and rq == 5:
             self.addr = val & 0x7F

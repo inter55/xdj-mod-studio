@@ -12,6 +12,7 @@ The emulated CPU runs a short slice per command so hooks and caves live.
 Control lines: "#SAVE path" saves the machine, "#QUIT" stops.
 """
 import os
+import struct
 import socket
 import sys
 
@@ -32,6 +33,10 @@ def reports(text):
     for i in range(0, len(b), 16):
         out += b[i:i + 16].ljust(16, b"\0")
     return bytes(out)
+
+
+WLOG = (open(os.environ["MOCK_WRITE_LOG"], "ab")
+        if os.environ.get("MOCK_WRITE_LOG") else None)
 
 
 def handle(m, line):
@@ -58,6 +63,11 @@ def handle(m, line):
                 vals = " ".join(f"{m.mem.r8(addr + i):02X}" for i in range(cnt))
                 return reports(vals + " \r\n")
             addr &= ~mask
+            if WLOG:                    # stick packs replay this (tools/stick_pack.py)
+                old = bytes(m.mem.r8(addr + i) for i in range(n))
+                WLOG.write(struct.pack("<IB", addr, n) + old +
+                           bytes((val >> (8 * i)) & 0xFF for i in range(n)))
+                WLOG.flush()
             for i in range(n):
                 m.mem.w8(addr + i, (val >> (8 * i)) & 0xFF)
             if SLICE:

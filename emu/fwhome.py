@@ -77,6 +77,22 @@ def path(name):
     return dev if os.path.exists(dev) else h
 
 
+def check_audio_objdump():
+    """Fail before the long boot, not at 84 %.
+
+    The second boot ("booting with the real audio chip") decodes DSP code with
+    GNU objdump for tic6x. Without it setup used to run for minutes and then
+    die with FileNotFoundError in the middle of the run.
+    """
+    from .c6x import decode as C6D
+    if not os.path.exists(C6D.OBJDUMP):
+        raise ValueError(
+            "the audio-chip disassembler is missing: " + C6D.OBJDUMP + "\n"
+            "  build it first (about 5-10 minutes, needs the Xcode "
+            "command-line tools: xcode-select --install):\n"
+            "    sh tools/build_tic6x_objdump.sh")
+
+
 def ready():
     return all(os.path.exists(path(n)) for n in READY_FILES)
 
@@ -111,6 +127,7 @@ def setup(upd, progress=lambda f, note: None, steps=None):
     if not ver:
         raise ValueError(f"not the XDJ-700 v1.15 update file (sha256 {h[:12]}...). "
                          "Download XDJ-700 firmware 1.15 from Pioneer DJ's site.")
+    check_audio_objdump()
     d = home()
     os.makedirs(d, exist_ok=True)
     progress(0.02, "unpacking the update file")

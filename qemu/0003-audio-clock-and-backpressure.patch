@@ -1,0 +1,284 @@
+--- a/hw/sh4/cdj/common/cdj_host_audio.c
++++ b/hw/sh4/cdj/common/cdj_host_audio.c
+@@ -279,5 +279,23 @@
+     a->wr = (a->wr + 1) % a->cap;
+     a->fill++;
+     a->frames_in++;
++    qemu_mutex_unlock(&a->lock);
++}
++
++uint32_t cdj_host_audio_fill(CdjHostAudio *a)
++{
++    uint32_t fill;
++
++    if (!a) {
++        return 0;
++    }
++    qemu_mutex_lock(&a->lock);
++    fill = a->fill;
+     qemu_mutex_unlock(&a->lock);
++    return fill;
+ }
++
++uint32_t cdj_host_audio_cap(CdjHostAudio *a)
++{
++    return a ? a->maxlat : 0;
++}
+--- a/hw/sh4/cdj/common/cdj_host_audio.h
++++ b/hw/sh4/cdj/common/cdj_host_audio.h
+@@ -36,4 +36,10 @@
+ CdjHostAudio *cdj_host_audio_open(const CdjHostAudioCfg *cfg);
+ 
+ void cdj_host_audio_put(CdjHostAudio *a, int16_t left, int16_t right);
++
++/* Frames the ring is holding, and the latency cap in frames (0 = no cap):
++ * a producer that is ahead of the host's read waits on these instead of
++ * handing over audio the sink would have to drop. */
++uint32_t cdj_host_audio_fill(CdjHostAudio *a);
++uint32_t cdj_host_audio_cap(CdjHostAudio *a);
+ #endif
+--- a/hw/sh4/cdj/boards/cdj2000/dsp_audio_out.c
++++ b/hw/sh4/cdj/boards/cdj2000/dsp_audio_out.c
+@@ -41,6 +41,15 @@
+     }
+ }
+ 
++bool cdj_dsp_audio_full(void)
++{
++    uint32_t cap = cdj_host_audio_cap(sink);
++
++    /* Back off a little before the cap: the trim path at the cap is what
++     * skips the read pointer, and that is heard as the track jumping ahead. */
++    return cap && cdj_host_audio_fill(sink) * 8 >= cap * 7;
++}
++
+ void cdj_dsp_audio_word(unsigned mcasp, uint32_t word)
+ {
+     if (!sink || mcasp != DAC_MCASP) {
+--- a/hw/sh4/cdj/boards/cdj2000/dsp_audio_out.h
++++ b/hw/sh4/cdj/boards/cdj2000/dsp_audio_out.h
+@@ -11,4 +11,9 @@
+ 
+ /* The same for a chip whose transfers deliver one word at a time. */
+ void cdj_dsp_audio_word(unsigned mcasp, uint32_t word);
++
++/* True while the host's ring is close to its latency cap: the chip stops
++ * producing until the host has read some, as it would stall on its own
++ * FIFO. Without it the ring overflows and the sink drops frames. */
++bool cdj_dsp_audio_full(void);
+ #endif
+--- a/hw/sh4/cdj/boards/cdj2000/dsp_host.c
++++ b/hw/sh4/cdj/boards/cdj2000/dsp_host.c
+@@ -38,6 +38,7 @@
+ #define QUANTUM_NS      (1000 * 1000)
+ #define CHUNK_NS        (100 * 1000)
+ #define SLICE_CYCLES    2000
++#define GOV_WINDOW_NS   (200 * 1000 * 1000)
+ #define REACT_STEP      2000
+ #define REACT_MAX       (4 * 1000 * 1000)
+ #define SLACK_POLL_NS   (1000 * 1000)
+@@ -128,12 +129,84 @@
+     }
+ }
+ 
++/*
++ * The clock the host can pay for.
++ *
++ * A host that cannot run the core at its modelled clock does not run it late
++ * and make it up: every slice the thread fails to finish is time the core
++ * never gets back, so the lag grows without bound and is paid back later as a
++ * burst of audio into the sink. Busy for a whole window and still behind means
++ * the clock is more than the host delivers, so drop it to what the host did
++ * deliver; once the thread has slack, climb back a few percent per window.
++ *
++ * Only the clock changes. EDMA3 and McASP are paced from @dsp_ns, which is
++ * virtual time, so the audio still leaves at 44.1 kHz -- a lower clock buys
++ * the host time by computing fewer cycles per emulated microsecond, it does
++ * not slow the output down.
++ */
++static void host_govern(CdjDspHost *h)
++{
++    int64_t wall = get_clock();
++    uint64_t cycle = c66x_get_cycle(h->core);
++    uint64_t busy, dc;
++    int64_t dw, dv;
++
++    if (!h->govern) {
++        return;
++    }
++    if (!h->gov_wall) {
++        h->gov_wall = wall;
++        h->gov_dsp_ns = h->dsp_ns;
++        h->gov_busy = h->busy_ns;
++        h->gov_cycle = cycle;
++        return;
++    }
++    dw = wall - h->gov_wall;
++    if (dw < GOV_WINDOW_NS) {
++        return;
++    }
++    dv = h->dsp_ns - h->gov_dsp_ns;
++    busy = h->busy_ns - h->gov_busy;
++    dc = cycle - h->gov_cycle;
++
++    if (busy * 10 >= (uint64_t)dw * 9 && dv * 100 < dw * 97) {
++        /* Saturated and still behind: the host delivers this much. */
++        uint64_t host_mhz = busy ? dc * 1000 / busy : h->mhz;
++        uint64_t mhz = MAX(host_mhz * 97 / 100, h->mhz_floor);
++
++        if (mhz + 2 < h->mhz) {
++            info_report("%s: host delivers %" PRIu64 " MHz; clock %" PRIu64
++                        " -> %" PRIu64 " MHz", h->name, host_mhz, h->mhz, mhz);
++            h->mhz = mhz;
++            h->cycles_per_chunk = mhz * CHUNK_NS / 1000;
++        }
++    } else if (busy * 5 < (uint64_t)dw * 4 && h->mhz < h->mhz_run) {
++        uint64_t mhz = MIN(h->mhz + h->mhz / 32 + 1, h->mhz_run);
++
++        if (mhz > h->mhz + 2) {
++            info_report("%s: slack; clock %" PRIu64 " -> %" PRIu64 " MHz",
++                        h->name, h->mhz, mhz);
++        }
++        h->mhz = mhz;
++        h->cycles_per_chunk = mhz * CHUNK_NS / 1000;
++    }
++    h->gov_wall = wall;
++    h->gov_dsp_ns = h->dsp_ns;
++    h->gov_busy = h->busy_ns;
++    h->gov_cycle = cycle;
++}
++
+ static void *host_thread(void *opaque)
+ {
+     CdjDspHost *h = opaque;
+     uint64_t done, run;
+     int64_t t0;
+ 
++    /* On Apple Silicon the scheduling class decides whether this thread may
++     * use the fast cores at all: the reference emulator asks for the same
++     * class at the top of its DSP thread. */
++    cdj_thread_prefer_fast_core();
++
+     while (qatomic_read(&h->running)) {
+         int64_t virt = qemu_clock_get_ns(QEMU_CLOCK_VIRTUAL);
+ 
+@@ -143,6 +216,15 @@
+         }
+         if (h->dsp_ns >= virt + QUANTUM_NS) {
+             g_usleep(1000);
++            continue;
++        }
++        /* The sink is the clock. While the host's ring is nearly full the
++         * core stops, exactly as the chip would stall on its audio FIFO:
++         * the output then runs at the host's rate and nothing is dropped.
++         * Without this the ring overflows and the sink trims by skipping the
++         * read pointer -- heard as the track jumping ahead, then dragging. */
++        if (h->full && !qatomic_read(&h->host_waiting) && h->full(h->chip)) {
++            g_usleep(200);
+             continue;
+         }
+         qemu_mutex_lock(&h->lock);
+@@ -181,7 +263,12 @@
+                 break;
+             }
+         }
+-        h->report_busy_ns += get_clock() - t0;
++        {
++            int64_t spent = get_clock() - t0;
++
++            h->report_busy_ns += spent;
++            h->busy_ns += spent;
++        }
+         qemu_mutex_unlock(&h->lock);
+         /* An idle core has waited out the rest of its slices. */
+         qemu_mutex_lock(&h->progress_lock);
+@@ -207,6 +294,7 @@
+             h->report_cycle = cycle;
+             h->report_jit = jit;
+         }
++        host_govern(h);
+         if (h->after_chunk) {
+             qemu_mutex_lock(&h->lock);
+             if (!qatomic_read(&h->paused)) {
+@@ -542,6 +630,21 @@
+     h->cycles_per_chunk = (mhz ? strtoull(mhz, NULL, 0) : default_mhz)
+                           * CHUNK_NS / 1000;
+     h->slice_cycles = SLICE_CYCLES;
++    h->mhz = h->cycles_per_chunk / (CHUNK_NS / 1000);
++    h->mhz_run = h->mhz;
++    {
++        g_autofree char *gov_var = g_strdup_printf("CDJ_%s_GOVERN", env_prefix);
++        g_autofree char *flr_var = g_strdup_printf("CDJ_%s_MHZ_FLOOR", env_prefix);
++        const char *gov = getenv(gov_var);
++        const char *flr = getenv(flr_var);
++
++        h->govern = gov ? atoi(gov) != 0 : true;
++        h->mhz_floor = flr ? strtoull(flr, NULL, 0) : h->mhz_run * 2 / 3;
++        h->mhz_floor = MIN(h->mhz_floor, h->mhz_run);
++        info_report("%s: %" PRIu64 " MHz, governor %s%s%" PRIu64 " MHz floor",
++                    name, h->mhz_run, h->govern ? "on, " : "off",
++                    h->govern ? "" : "", h->mhz_floor);
++    }
+     qemu_mutex_init(&h->lock);
+     qemu_mutex_init(&h->progress_lock);
+     qemu_mutex_init(&h->posted_lock);
+--- a/hw/sh4/cdj/boards/cdj2000/dsp_host.h
++++ b/hw/sh4/cdj/boards/cdj2000/dsp_host.h
+@@ -73,6 +73,14 @@
+     GByteArray *snap;           /* the core's image in a snapshot */
+     int64_t dsp_ns;             /* the virtual time the core has run up to */
+     int64_t lag_max_ns;
++    /* CDJ_<PREFIX>_GOVERN: the clock the host can actually pay for. @mhz is
++     * what the core runs at now, @mhz_run the clock it was asked for and
++     * @mhz_floor the least it may drop to. */
++    bool govern;
++    uint64_t mhz, mhz_run, mhz_floor;
++    uint64_t busy_ns;           /* host time spent running the core, all of it */
++    int64_t gov_wall, gov_dsp_ns;
++    uint64_t gov_busy, gov_cycle;
+     /* CDJ_REPORT: the lag, idle and compiled shares and the host time spent
+      * running the core, every 5 s of the core's clock. */
+     int64_t report_ns, report_lag_ns, report_busy_ns;
+@@ -106,6 +114,9 @@
+     /* Called with the core's lock held after each chunk it has run, with
+      * the DSP's own clock; NULL for chips that need nothing paced. */
+     void (*after_chunk)(void *chip, int64_t dsp_ns);
++    /* Called on the core's thread: true when its output cannot take more,
++     * and the core should wait rather than run ahead. */
++    bool (*full)(void *chip);
+     void *chip;
+     CdjDspWires wires;
+     Notifier profile_exit;      /* C66X_JIT_PROFILE: free the core at exit */
+@@ -113,7 +124,9 @@
+     DspAddrTable busr, busw;
+ } CdjDspHost;
+ 
+-/* CDJ_<PREFIX>=0 turns the core off; CDJ_<PREFIX>_MHZ sets its clock. */
++/* CDJ_<PREFIX>=0 turns the core off; CDJ_<PREFIX>_MHZ sets its clock;
++ * CDJ_<PREFIX>_GOVERN=0 pins that clock instead of letting it drop to what the
++ * host delivers, and CDJ_<PREFIX>_MHZ_FLOOR the least the governor may drop to. */
+ void cdj_dsp_host_init(CdjDspHost *h, const char *name, const char *env_prefix,
+                        unsigned default_mhz,
+                        void (*set_pins)(void *chip, unsigned bits), void *chip);
+--- a/hw/sh4/cdj/boards/cdj2000/dsp_c6747.c
++++ b/hw/sh4/cdj/boards/cdj2000/dsp_c6747.c
+@@ -205,6 +205,11 @@
+     CdjC6747 *s = opaque;
+ 
+     c66x_set_irq(s->host.core, EDMA_IRQ, level);
++}
++
++static bool audio_backpressure(void *opaque)
++{
++    return cdj_dsp_audio_full();
+ }
+ 
+ static void edma_after_chunk(void *opaque, int64_t dsp_ns)
+@@ -583,6 +588,7 @@
+     s->edma.set_irq = edma_set_irq;
+     s->edma.chip = s;
+     s->host.after_chunk = edma_after_chunk;
++    s->host.full = audio_backpressure;
+     s->host.ram = edma_ram;
+     s->host.slice_cycles = C6747_SLICE_CYCLES;
+ 

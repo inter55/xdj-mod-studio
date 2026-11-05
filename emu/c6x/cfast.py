@@ -58,6 +58,33 @@ LD_T = ctypes.CFUNCTYPE(None, u32, u32, u32)
 _lib = None
 
 
+PROF = os.path.join(HERE, "c6xcore.profdata")
+
+
+def build_lib(out, src=SRC, pgo=True):
+    """compile the core to `out` (temp name + rename: a running test never
+    loads a half-written file). With the profile from tools/c6x_pgo.py
+    (play-mode run) clang lays the interpreter out for the hot paths:
+    +20% DSP speed while playing (2026-11-01). Same C semantics, so the
+    result is bit-identical; a compiler that can't read the profile gets
+    the plain -O2 build."""
+    tmp = out + ".tmp"
+    base = ["cc", "-O2", "-shared", "-fPIC", "-o", tmp, src, "-lm"]
+    if pgo and os.path.exists(PROF):
+        try:
+            subprocess.check_call(base[:2] + ["-fprofile-instr-use=" + PROF,
+                                   "-Wno-profile-instr-out-of-date",
+                                   "-Wno-profile-instr-unprofiled",
+                                   "-Wno-profile-instr-missing"] + base[2:],
+                                  stderr=subprocess.DEVNULL)
+            os.replace(tmp, out)
+            return
+        except (subprocess.CalledProcessError, OSError):
+            pass
+    subprocess.check_call(base)
+    os.replace(tmp, out)
+
+
 def load_lib():
     global _lib
     if _lib is not None:
@@ -65,10 +92,10 @@ def load_lib():
     # Windows: the app ships a prebuilt DLL (no compiler on user PCs); the
     # .c still travels with it because the OP list above is read from it
     if sys.platform != "win32" and os.path.exists(SRC) and (not os.path.exists(LIB) or
-                                os.path.getmtime(LIB) < os.path.getmtime(SRC)):
-        tmp = LIB + ".tmp"
-        subprocess.check_call(["cc", "-O2", "-shared", "-fPIC", "-o", tmp, SRC, "-lm"])
-        os.replace(tmp, LIB)
+                                os.path.getmtime(LIB) < os.path.getmtime(SRC) or
+                                (os.path.exists(PROF) and
+                                 os.path.getmtime(LIB) < os.path.getmtime(PROF))):
+        build_lib(LIB)
     lib = ctypes.CDLL(LIB)
     P = ctypes.c_void_p
     sig = {
@@ -95,10 +122,14 @@ def load_lib():
         "c6x_counts": ([P, ctypes.c_int], u64),
         "c6x_splx_pending": ([P], ctypes.c_int),
         "c6x_set_idle_loop": ([P, u32, u32, u32], None),
+        "c6x_add_idle_head": ([P, u32], ctypes.c_int),
         "c6x_skip": ([P, u64], None),
         "c6x_set_dff": ([P, ctypes.c_int], None),
         "c6x_dff_stat": ([P, ctypes.c_int], u64),
         "c6x_settle": ([P], None), "c6x_dff_frozen": ([P], ctypes.c_int),
+        "c6x_sp_info": ([P, ctypes.POINTER(u32), ctypes.c_int], ctypes.c_int),
+        "c6x_hist": ([P, ctypes.c_int], u32),
+        "c6x_prof": ([P, ctypes.c_int, ctypes.POINTER(u32)], u64),
         "c6x_ifr_or": ([P, u32], None), "c6x_ifr_and": ([P, u32], None),
     }
     for name, (args, res) in sig.items():
@@ -638,6 +669,9 @@ class CCpu:
     insn_count = property(_g(lambda s: s.lib.c6x_counts(s.h, 1)))
     interrupts = property(lambda s: s.lib.c6x_counts(s.h, 2))
     py_calls = property(lambda s: s.lib.c6x_counts(s.h, 3))
+    idle_jumped = property(lambda s: s.lib.c6x_counts(s.h, 4))   # busy-wait cycles jumped (exact)
+    idle_jumps = property(lambda s: s.lib.c6x_counts(s.h, 5))
+    idle_refhits = property(lambda s: s.lib.c6x_counts(s.h, 6))
 
     # ---- run
     def run_cycles(self, n):
@@ -718,8 +752,16 @@ def watch_log(cpu):
     return n, res
 
 
-def set_idle_loop(cpu, head, lo, hi):
+def set_idle_loop(cpu, head, lo, hi, more=()):
     """arm the busy-wait skip (XDJ-700 v1.15: 0xC004C8CC, stack
-    0x11804AE0..0x11805C00, from cdj-nxs2-qemu models/xdj700.conf)"""
+    0x11804AE0..0x11805C00, from cdj-nxs2-qemu models/xdj700.conf).
+    more: further loop heads of the same idle task (same stack), e.g. the
+    playing deck's channel-poll loop 0xC0048C2E."""
     if hasattr(cpu, "lib"):
         cpu.lib.c6x_set_idle_loop(cpu.h, head, lo, hi)
+        # a prebuilt core from before the multi-head skip (the Windows DLL)
+        # has no c6x_add_idle_head: keep the single loop rather than fail
+        add = getattr(cpu.lib, "c6x_add_idle_head", None)
+        if add is not None:
+            for h in more:
+                add(cpu.h, h)

@@ -23,7 +23,10 @@ import time
 sys.path[:0] = [".", "tools"]
 from emu.machine import Machine          # noqa: E402
 
-B = os.path.join("build", "keyshift")
+B = os.environ.get("KSH_DIR", os.path.join("build", "keyshift"))
+# KSH_DIR=build/fx KSH_PAYLOAD=fx.bin: the same installer carrying the TOUCH FX
+# engine (tools/fx_dsp/build_fxh.sh) instead of key shift
+PAYLOAD = os.environ.get("KSH_PAYLOAD", "ks.bin")
 POOL_FLUSH = 0x08C92E20
 CALL, CALL_OLD, CALL_NEW = 0xC0008D64, 0x0027D290, 0x00ACEC10
 LAND = 0xC005F4C0
@@ -69,7 +72,7 @@ def main():
     t0 = time.time()
     S = syms()
     blob = open(os.path.join(B, "ksh.bin"), "rb").read()
-    ks = open(os.path.join(B, "ks.bin"), "rb").read()
+    ks = open(os.path.join(B, PAYLOAD), "rb").read()
     m = Machine.load(snap)
     mem, d = m.mem, m.mem.dev.dspemu
     assert d is not None, "snapshot has no real DSP"

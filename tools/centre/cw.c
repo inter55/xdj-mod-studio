@@ -38,6 +38,60 @@ u16 cw_tbl[64];
 static u32 last_hash, k7;        /* k7: rows per unit, Q16 */
 u32 cw_calls;
 
+/* 2026-10-28: the 3-band palette follows the deck theme. The theme
+ * switcher (tools/themesw/ts.c) keeps the stock artwork colours S and
+ * per-theme colours D_t at TS_DATA, sorted ascending, with the active
+ * theme in hdr.cur (0 = stock/OFF). We map our three band colours
+ * through the active theme's table once per theme change; colours not
+ * in S (or no theme blob) keep the stock triad. RGB mode is untouched:
+ * its colours are the track's own analysis data. */
+#ifndef TS_DATA
+#define TS_DATA 0x09779000u
+#endif
+#ifndef TS_END
+#define TS_END 0x09790000u
+#endif
+static u32 last_cur_t = 0xFFFFFFFFu;
+static u16 t_core = C_CORE, t_midc = C_MIDC, t_outer = C_OUTER;
+
+static u16 tmap(u16 v, const u16 *S, const u16 *D, u32 ns)
+{
+    u32 lo = 0, hi = ns;
+    while (lo < hi) {
+        u32 mid = (lo + hi) >> 1;
+        if (S[mid] < v) lo = mid + 1; else hi = mid;
+    }
+    return (lo < ns && S[lo] == v) ? D[lo] : v;
+}
+
+static void theme_sync(void)
+{
+    const u32 *h = (const u32 *)TS_DATA;
+    if (R32(TS_DATA) != 0x57535458u) {       /* no theme blob installed */
+        if (last_cur_t != 0xFFFFFFFFu) {
+            last_cur_t = 0xFFFFFFFFu;
+            t_core = C_CORE; t_midc = C_MIDC; t_outer = C_OUTER;
+        }
+        return;
+    }
+    u32 ns = h[2], nt = h[3], cur = ((const u8 *)h)[32];
+    u32 s_off = h[4], d_off = h[6];
+    if (!ns || ns > 4096 || !nt || cur > nt) return;
+    if (s_off + 2 * ns > TS_END - TS_DATA) return;
+    if (d_off + 2 * nt * ns > TS_END - TS_DATA) return;
+    if (cur == last_cur_t) return;
+    last_cur_t = cur;
+    if (!cur) {
+        t_core = C_CORE; t_midc = C_MIDC; t_outer = C_OUTER;
+        return;
+    }
+    const u16 *S = (const u16 *)(TS_DATA + s_off);
+    const u16 *D = (const u16 *)(TS_DATA + d_off + (cur - 1) * 2 * ns);
+    t_core = tmap(C_CORE, S, D, ns);
+    t_midc = tmap(C_MIDC, S, D, ns);
+    t_outer = tmap(C_OUTER, S, D, ns);
+}
+
 static u32 be32(const u8 *p) { return (u32)p[0] << 24 | p[1] << 16 | p[2] << 8 | p[3]; }
 
 /* copy the loaded track's PWV7 section into SLOT7 (tag word last) */
@@ -112,9 +166,24 @@ static u32 col(u32 idx8, u32 step, u32 white, u32 rmax, u32 pal)
         snap7();
     }
     u32 mode = R8(MODE_ADDR), first = idx8 >> 3;
+    theme_sync();
     if (mode == 1 && R32(SLOT5) == TAG_PWV5) {
         const u8 *s = (const u8 *)SLOT5;
-        u32 n = (u32)s[18] << 8 | s[19];
+        /* entry count is the BE u32 @+16. Until 2026-10-27 only the low 16
+         * bits were read, so any track past 65535 entries (65535/150 =
+         * 7 min 17 s) wrapped the count and the centre fell back to stock
+         * blue a while into the track (back to RGB after a CUE jump to the
+         * covered range). The file's own rate byte (@+21, 150 on every
+         * export seen) scales our 150/s painter index: a denser export
+         * would otherwise draw the colours at the wrong position (the
+         * off-axis-grid report). */
+        u32 n = ((u32)s[16] << 24) | ((u32)s[17] << 16) | ((u32)s[18] << 8) | s[19];
+        u32 rate = s[21] ? s[21] : 150;
+        if (rate != 150) {
+            first = first * rate / 150;
+            step = step * rate / 150;
+            if (!step) step = 1;
+        }
         if (first < n) {
             u32 end = first + step;
             if (end > n) end = n;
@@ -151,7 +220,7 @@ static u32 col(u32 idx8, u32 step, u32 white, u32 rmax, u32 pal)
             if (hc > rmax) hc = rmax;
             if (!hc) hc = 1;
             for (u32 k = 0; k < ROWS; k++)
-                cw_tbl[k] = k < ha ? C_CORE : k < hb ? C_MIDC : C_OUTER;
+                cw_tbl[k] = k < ha ? t_core : k < hb ? t_midc : t_outer;
             return hc;
         }
     }

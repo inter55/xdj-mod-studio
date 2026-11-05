@@ -45,7 +45,7 @@ def main():
     arg = sys.argv[1] if len(sys.argv) > 1 else ""
     img, s = build()
     base = s["hc_table"]
-    end = s["hc_count"] + 4
+    end = s.get("end", s["hc_count"] + 4)
     ok_file = os.path.expanduser(f"~/.xdj700_hc_survey_ok.{base:08x}")  # never in the app
     import hid
     import perform_pads as PP

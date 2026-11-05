@@ -255,16 +255,34 @@ builds, publish as inter55 (only on the user's go).
 News: a tester flashed our permanent UPD (v1.16) on a real player; RGB
 overview, beat jump, key shift, stems, extended hot cues all worked.
 
-## 1.0 ("crazy update", user-agreed 2026-10-26)
+## 1.0 ("crazy update", user-agreed 2026-10-26) — PREPARED 2026-10-27
+Shipped in the 1.0 prep (see CLAUDE.md 144): the four 0.99 Reddit reports
+fixed (centre RGB 16-bit count -> blue-revert on >7:17 tracks + rate
+scaling for grid alignment; hot-cue paging hardened + A-H export tag in
+Track Builder + re-export guidance; stems list sees XST4 files + "bottom
+category FOLDER" guidance; key shift MT note in the release notes), light
+mode un-held (app Appearance + deck LIGHT theme + 5l step), APP_VERSION
+1.0, release notes + Reddit reply drafts (docs/REPLIES_2026-10-27.md).
+Still open for 1.0 proper (need the dev's deck): master phase row,
+stem mute inside the deck's buffer delay, E-H settable on deck, USB-stick mods
+file, TOUCH FX, OneLibrary in-app, track filter, Windows out of beta.
+- PERFORM feature pick: the deck now hides the KEY SHIFT / STEMS tabs
+  when those mods aren't installed (same FEATB byte in the cable install
+  and the permanent UPD); Live Stems has its own tick box in the app.
 - Light mode on the deck + in the app.
-- Near-instant stem mute (well under 0.5 s): rewrite the DSP's cached
-  decoded blocks at the tap, not at the next read burst (~5 s today).
+- Stem mute, measured on hardware 2026-11-03: ~10 s on a partly filled
+  buffer, ~30 s on a full one. Our rewrite of the read stream is already
+  immediate (4 blocks in one pass), but the deck has streamed that audio into
+  the chip, so the change waits for the buffer to drain. Instant mute needs a
+  gain change inside the chip DSP (where the TOUCH FX engine runs); the read
+  path cannot beat the buffer.
 - 8 hot cues settable on the deck (own storage on the stick).
 - Phase meter master row (second linked deck).
 - USB-stick install mode: usbloader flashed once via the UPD + a "mods
   pack" builder. One-time flash approved "if u can guarantee it works":
   exhaustive emulator proof, recovery path written down first, careful
-  first deck flash with a boot test.
+  first deck flash with a boot test. Design + space math now in
+  docs/USBLOADER.md.
 - The new 3-mode app (cable / USB stick / firmware UPD).
 - Bug list proven on the deck: FLAC load freeze, key shift right-channel
   noise on AIFF, BJ 32/64, lit-button theme stripes (+ light mode, 8 hot
@@ -285,14 +303,59 @@ overview, beat jump, key shift, stems, extended hot cues all worked.
   NO built-in FX: every effect is new C6x DSP code in the key-shift style
   (ks.c hook, hot install). Order easy -> hard; prove each in the
   real-DSP emulator (dsp_pitch_probe-style A/B) before any deck test.
+  STATUS 2026-11-01: BUILT, EMULATOR-PROVEN, not yet on a deck. Filter,
+  Crush, Gate run on the deck's real DSP program in the emulator (A/B on
+  the audio output; tempo/position untouched), and a finger on the pad
+  changes the sound end to end (tools/touchfx_e2e.py). Full-screen layout
+  per the user (2026-11-01): the whole PERFORM area, player strip and the
+  PERFORM button line stay live. Needs MASTER TEMPO ON. Shares the audio
+  chip's hook with Live Key Shift: one or the other until a bigger DSP
+  home is proven. Install: deck_session --touchfx / Studio "Touch FX
+  (beta)". Echo / Pitch / Flanger / Roll / Reverb buttons are drawn but
+  inert ("COMING SOON"). CLAUDE.md sec. 148.
 - Waveform colours that follow the theme (deck side).
 - Windows out of beta (after a successful Windows install by a person).
 - OneLibrary converter (exportLibrary.db -> export.pdb).
-- MAYBE: track filter (only if a research pass says doable; lead: the deck
-  reads PIONEER/rekordbox/RBFLTR.DAT), custom home screen (if possible).
+- MAYBE: track filter (lead DISPROVEN 2026-11-04, see the research note
+  under "1.1 and later"), custom home screen (if possible).
 - Refreshed site + README.
 
 ## 1.1 and later (ideas)
+Priority (2026-11-04, from the user): **track filter first** -- the most-
+requested item -- then the rest of Touch FX in the roadmap's own order:
+Echo, Pitch, Flanger, Roll, Reverb.
+- **Track filter research, 2026-11-04: the RBFLTR.DAT lead is dead.** The
+  decoded stock image (18,601,864 bytes) contains zero occurrences of
+  `FILTER`, `FLTR` or `RBFLTR`, so the deck never had a filter reader to
+  hook. What it does carry is the family-wide DeviceSQL table layer
+  (`djdbBPMRange`, `djdbSortMenu`, `djdbTrackSort`) and its RAM hash caches
+  (`INDEX:SHashSortMenu`, `INDEX:SHashBPMRange`) -- the schema every
+  CDJ/XDJ shares, not a 700 filter UI. The two "RANGE" strings in the image
+  are TEMPO RANGE, not a browse filter. So an on-deck filter has to be
+  built into the browse menu.
+  **Follow-up, same day, against the XDJ-1000MK2 image
+  (`XDJ-1000/MAIN1000.img`, 29,275,684 B, base 0x08000000): the 1000 has the
+  filter and the 700 does not, and the two decks are close enough to port
+  between.** `FILTER` 68 hits vs 0, `BPM RANGE` 1 vs 0, `MY TAG` 2 vs 0, and
+  the browse log tags `@Ui_Browse> DISPCMD FILTER CHANGE APPLY`,
+  `FILTER CATEGORY STATE CHANGE`, `FILTER PARAMETER EDIT START`,
+  `FILTER INPUT CHAR CHANGE` -- all 0 in the 700. The browse module itself
+  is the same lineage (`@Ui_Browse` 59 vs 104, `DISPCMD SELECT_MENU` in
+  both) and the shared plumbing is referenced identically in both images
+  (`INDEX:SHashBPMRange` 1 P2 literal each, `djdbBPMRange` 2 each), so the
+  700 already carries the BPM-range data layer and only lacks the filter
+  commands and their screens. So this is a port, not a from-scratch build --
+  with the pm.c precedent for HOW: read the 1000's path, write our own on
+  the 700's plumbing; we do not transplant Pioneer bytes (copyright, and
+  their code is bound to their own screen tables and absolute addresses).
+  First step: xref the `DISPCMD FILTER` tags in MAIN1000.img (code pointers
+  use the 0x08 window, data the 0xA8 window) to find the three routines --
+  category state, parameter edit, apply -- then mirror them.
+  Fastest route to the same user outcome (no deck work at all): write
+  filtered playlists
+  (BPM band, key, colour, rating, my-tag) into `export.pdb` -- the writer in
+  `tools/onelibrary_to_pdb.py` already carries playlists, BPM, key, colour,
+  rating and my-tag ids, and the deck shows them natively under PLAYLIST.
 - Track filter (if it missed 1.0).
 - Waveform preview next to track names in BROWSE (Reddit request; data is
   on the stick). Audio preview in the browser: unlikely (one playback path).
@@ -300,3 +363,14 @@ overview, beat jump, key shift, stems, extended hot cues all worked.
 
 ## Not planned
 - StreamingDirectPlay (partner logins/DRM). Other decks: XDJ-700 only.
+
+## Community asks (2026-10-31, from the public thread)
+- Track filter/browse system (XDJ-1000 MK2 / CDJ-2000 NXS2 style): 1.1
+  candidate, big browse-engine RE; the community's most-wanted item after
+  the mod set itself.
+- Hide KEY SHIFT / STEMS tabs even when installed (more room for HOT CUE +
+  BEAT JUMP): cheap candidate; a hide flag in the same FEATB/utility table
+  the installer writes.
+- TOUCH FX: already v1 scope (see APPROVED TOUCH FX section).
+- 8 hot cue report ("many set, don't work"): verify on deck 2026-10-31;
+  failure with an exported analysis = bug, capture the stick.

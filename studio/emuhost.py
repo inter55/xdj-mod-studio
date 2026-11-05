@@ -56,7 +56,15 @@ class EmuHost:
                 from emu import ui as emu_ui          # needs pygame
                 from emu import deck
                 self.deck_size = (deck.DECK_W, deck.DECK_H)
-                self.app = emu_ui.EmuApp(headless=True)
+                # The QEMU engine (docs/EMU_REBUILD_PLAN.md) when it is
+                # installed: real time, real DSP. XDJ_EMU_ENGINE=old keeps
+                # our own emulator (tests, machines without the build).
+                from emu import qemu_app
+                if (os.environ.get("XDJ_EMU_ENGINE") != "old"
+                        and qemu_app.available()):
+                    self.app = qemu_app.QemuApp(headless=True)
+                else:
+                    self.app = emu_ui.EmuApp(headless=True)
             except Exception as e:                    # missing pygame etc.
                 self.error = f"{type(e).__name__}: {e}"
                 return
@@ -105,7 +113,7 @@ class EmuHost:
                 try:
                     if self.app is not None and self.app.info().get(
                             "state") == "running":
-                        time.sleep(3)      # let adoption finish
+                        time.sleep(0.5)    # adoption runs in _start (sync)
                         self._prefer_remembered()
                         return
                 except Exception:
@@ -129,9 +137,31 @@ class EmuHost:
 
     # ------------------------------------------------------------ firmware
     def firmware_list(self):
+        """Two choices for people (user, 2026-11-01: "why can't there just
+        be two"): the deck WITH our mods, and the ORIGINAL firmware. Both
+        restore the real-audio snapshot (or the plain one when it is
+        missing); "mods" then installs the mod set in emulated RAM, exactly
+        what the cable install does to a deck. XDJ_ALL_FIRMWARES=1 brings
+        back the developer list (boot from reset, built .UPDs...)."""
         from emu.choices import firmware_choices
+        if getattr(self.app, "engine", None) == "qemu":
+            return [{"id": "mods", "label": "With mods", "kind": "qemu-mods",
+                     "path": None, "boot_label": "Stock v1.15 + mods"},
+                    {"id": "original", "label": "Original firmware",
+                     "kind": "qemu", "path": None,
+                     "boot_label": "Stock v1.15"}]
         out = []
-        for label, kind, path in firmware_choices():
+        ch = firmware_choices()
+        if os.environ.get("XDJ_ALL_FIRMWARES") != "1":
+            snap = next((c for c in ch if c[1] == "ckpt-dsp"), None) or \
+                next((c for c in ch if c[1] == "ckpt"), None)
+            if snap is not None:
+                return [{"id": "mods", "label": "With mods", "kind": snap[1],
+                         "path": snap[2], "boot_label": snap[0]},
+                        {"id": "original", "label": "Original firmware",
+                         "kind": snap[1], "path": snap[2],
+                         "boot_label": snap[0]}]
+        for label, kind, path in ch:
             fid = ("snapshot" if kind == "ckpt" else
                    "snapshot-dsp" if kind == "ckpt-dsp" else
                    "reset" if path is None else "upd:" + os.path.basename(path))
@@ -150,9 +180,14 @@ class EmuHost:
         with self.lock:
             self.fw_id = fid
             self.app.release_all()
-            self.app._boot(c["label"], c["kind"], c["path"])
+            if fid == "mods" and getattr(self.app, "engine", None) == "qemu":
+                self._seed_qemu(self._mods or {"wave": "rgb"})
+            self.app._boot(c.get("boot_label", c["label"]), c["kind"], c["path"])
         # the new machine has nothing applied yet: re-apply what was asked
-        if self._mods:
+        # ("With mods" always gets the mod set; "Original" never does)
+        if fid == "mods":
+            self.apply_mods(self._mods or {"wave": "rgb"}, keep_fw=True)
+        elif self._mods and fid != "original":
             self.apply_mods(self._mods)
         if self.stick_wanted:
             self._insert_when_ready(self.stick_wanted)
@@ -165,12 +200,14 @@ class EmuHost:
         self.boot(self.fw_id or self.firmware_list()[0]["id"])
 
     # ---------------------------------------------------------------- mods
-    def apply_mods(self, mods):
+    def apply_mods(self, mods, keep_fw=False):
         """mods: {"theme": {"name", "spec"} | None, "wave": "blue|rgb|3band
         |custom" | None}. Applied to the stock firmware
         as soon as it is running; re-applied after every firmware switch.
         Custom is preview-only (no deck cave): the emulator keeps stock."""
         self.start()
+        if self.fw_id == "original" and not keep_fw:
+            self.fw_id = "mods"         # mods asked for: now it IS the modded deck
         self._mods = dict(mods)
         self._mods_gen += 1
         gen = self._mods_gen
@@ -188,9 +225,24 @@ class EmuHost:
             elif m.get("theme_stock"):
                 app.apply_theme_spec("stock", None)
             self._wait_status_clear(gen)
+            if m.get("fx") and hasattr(app, "set_audio_fx"):
+                app.set_audio_fx(m["fx"])
             if m.get("wave") in ("blue", "rgb", "3band"):
                 app.apply_wave(m["wave"])
         threading.Thread(target=work, daemon=True, name="emu-mods").start()
+
+    def _seed_qemu(self, m):
+        """QEMU bakes the mods into the image it boots: set them BEFORE the
+        boot, so the With-mods boot is already the right image (no second
+        reboot when apply_mods runs after it)."""
+        app = self.app
+        if m.get("wave") in ("blue", "rgb", "3band"):
+            app.wave_mode = m["wave"]
+        th = m.get("theme")
+        app.theme = (th.get("name") or "custom") if th else "stock"
+        app.theme_spec = th.get("spec") if th else None
+        if m.get("fx") in ("keyshift", "touchfx"):
+            app.audio_fx = m["fx"]
 
     def _wait_running(self, gen, timeout):
         t0 = time.time()
@@ -223,7 +275,10 @@ class EmuHost:
         def work():
             t0 = time.time()
             while time.time() - t0 < 120 and self.stick_wanted == path:
-                if self.app.machine is not None:
+                # QEMU engine: no Python machine -- ready when running
+                if (self.app.machine is not None
+                        or (getattr(self.app, "engine", None) == "qemu"
+                            and self.app.info().get("state") == "running")):
                     self.app.insert_usb(path)
                     return
                 time.sleep(0.25)
@@ -276,11 +331,23 @@ class EmuHost:
         except Exception as e:
             out["firmware_error"] = str(e)
         if self.app is not None:
-            out.update(self.app.info())
+            try:
+                out.update(self.app.info())
+            except Exception as e:      # never 500 the whole state poll
+                out["info_error"] = f"{type(e).__name__}: {e}"
+                out["error"] = out["error"] or str(e)
+                out.setdefault("state", "error")
         else:
             out["state"] = "error" if self.error else "idle"
         s = getattr(self.app, "_sound", None) if self.app is not None else None
-        out["sound"] = s.describe() if s is not None else {"on": False}
+        if s is not None:
+            out["sound"] = s.describe()
+        elif getattr(self.app, "engine", None) == "qemu":
+            # QEMU owns the audio: report it live so Mute is usable
+            out["sound"] = {"on": True, "playing": True, "track": None,
+                            "muted": bool(getattr(self.app, "_muted", False))}
+        else:
+            out["sound"] = {"on": False}
         for c in out["firmwares"]:
             c.pop("path", None)
         return out
@@ -304,6 +371,12 @@ class EmuHost:
 
     def set_mute(self, muted):
         self._mute_req = bool(muted)
+        if getattr(self.app, "engine", None) == "qemu":
+            # QEMU plays the deck's sound itself: it has to restart with the
+            # audio backend off, and that is the only mute it has.
+            m = getattr(self.app, "set_mute", None)
+            if callable(m):
+                return bool(m(bool(muted)))
         if self.app is not None:
             self.app._mute_req = bool(muted)  # _sound_tick honors it
         s = self.app and getattr(self.app, "_sound", None)

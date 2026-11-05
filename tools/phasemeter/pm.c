@@ -1,8 +1,10 @@
 /* pm.c -- Type 1 phase meter for the XDJ-700 (XDJ-1000MK2 style), deck C.
  *
  * Replaces the stock 4-box meter rows above the centre waveform with two
- * scrolling beat rulers: orange = master (needs link data: dim line for
- * now), blue = this deck. Grey ticks = beats, red = downbeats, +-4 beats
+ * scrolling beat rulers: orange = master (the LINKED deck, from the
+ * link-state bar bytes tapped every frame -- 2026-10-31 deck probes:
+ * 0x0A8D042E / 0x0A8BE662 cycle 1..4 in lockstep while this deck is
+ * paused), blue = this deck. Grey ticks = beats, red = downbeats, +-4 beats
  * around a fixed white "now" line at the waveform playhead (x 366).
  *
  * Called from pmhook.S on every 2DG flush (FUN_08E7D278(r4 dev, r5 req)).
@@ -90,6 +92,79 @@ static u32 pm_ms[MAXBEATS];
 static u8 pm_bar[MAXBEATS];      /* beat-in-bar 1..4 */
 u32 pm_draws;                    /* frames drawn (test/diagnostic) */
 u32 pm_layer;                    /* layer drawn last (test: buffers alternate) */
+
+/* ---- master (linked deck) tap ----
+ * The link-state RAM carries the master's beat-in-bar in two byte
+ * mirrors (2026-10-31, docs/DECK_SESSION_2026-10-31.md: link_beat_search
+ * with THIS deck paused found both cycling 1..4; they agreed every
+ * snapshot). tap_master runs from pm_draw each frame: it timestamps bar
+ * changes with the firmware's 1 ms system clock (SYS_MS), keeps an EMA
+ * of the inter-beat period, and pm_draw scrolls the orange row's ticks
+ * from it. Paused master (no changes for > 1 period): the ruler freezes
+ * at the last known beat instead of extrapolating into the void. */
+#define MST_BAR    0x0A8D042Eu
+#define MST_BAR2   0x0A8BE662u
+#define MST_MAXP   3000u              /* ms: slower than ~20 BPM = noise */
+/* The master is timed on the firmware's 1 ms SYSTEM clock, NOT on POSL:
+ * POSL is THIS deck's track position and stands still while this deck is
+ * paused -- exactly when you sync to a playing master (first build used
+ * POSL: every interval measured 0 ms, the period never set, the orange
+ * row stayed empty). 0x0B704A80 is incremented by the TMU underflow ISR
+ * at 0x08D632C0 (clears TCR.UNF @0xFFD9001C, then [0x0B704A80] += 1);
+ * emulator: 1.000 per ms vs the 3 ms heartbeat / 10 ms / 100 ms
+ * counters (2026-11-01, independent of play state). */
+#define SYS_MS     0x0B704A80u
+
+static void vline(u16 *lay, int stride, int x, int y0, int y1, u16 c);
+
+static u32 m_prev;               /* last raw bar (0 = not seen yet) */
+static u32 m_bar;                /* bar at the last accepted change (1..4) */
+static u32 m_pos;                /* monotonic beat count (per change) */
+static u32 m_t;                  /* SYS_MS of the last accepted change */
+static u32 m_p;                  /* smoothed period (ms); 0 = unknown */
+u32 pm_mtap;                     /* accepted changes (test/diagnostic) */
+
+static void tap_master(u32 ms)
+{
+    u32 a = R8(UNCACHED(MST_BAR)), b = R8(UNCACHED(MST_BAR2));
+    if (a != b || a < 1 || a > 4) return;        /* mid-write / not live */
+    if (!m_prev) {                               /* first sighting */
+        m_prev = m_bar = a;
+        m_t = ms;
+        return;
+    }
+    if (a == m_prev) return;
+    m_prev = m_bar = a;                          /* exactly one beat happened */
+    u32 d = ms - m_t;
+    m_t = ms;
+    m_pos++;
+    pm_mtap++;
+    if (d > 150 && d < MST_MAXP)                 /* one plausible period */
+        m_p = m_p ? (m_p * 3 + d) / 4 : d;       /* EMA, ~4 beats to settle */
+}
+
+static void draw_master(u16 *lay, int stride, int ms, u16 tick)
+{
+    if (!m_p) return;
+    /* frozen when the master stopped (byte quiet > 1 period): read "now"
+     * as last-change + 1 period so the ruler holds its position */
+    int now = ms;
+    int lim = (int)(m_t + m_p + m_p / 2);
+    if (now > lim) now = lim;
+    for (int k = -4; k <= 4; k++) {
+        int t = (int)(m_t + (u32)(k * (int)m_p));
+        int x = CX + (t - now) * (int)(X1 - X0) / (8 * (int)m_p);
+        int bi = (int)(m_bar - 1) + k;
+        bi %= 4;
+        if (bi < 0) bi += 4;
+        if (bi == 0) {                           /* downbeat: red, crosses */
+            vline(lay, stride, x - 1, OY - 7, OY + 7, C_RED);
+            vline(lay, stride, x, OY - 7, OY + 7, C_RED);
+        } else {
+            vline(lay, stride, x, OY - 7, OY - 2, tick);
+        }
+    }
+}
 
 #include "pm_label.h"            /* LABEL_W, LABEL_H, label_alpha[] (0..32) */
 
@@ -220,6 +295,8 @@ void pm_draw(u16 *lay, int stride)
     u16 tick = L ? flip(C_TICK) : C_TICK;
     u16 now = L ? flip(C_WH) : C_WH;
     if (pm_n) i = beat_at(ms, &frac);
+    u32 sms = R32(SYS_MS);                      /* free-running 1 ms */
+    tap_master(sms);
     for (int y = TOPY; y <= BOTY; y++)
         for (int x = X0 - 2; x <= X1 + 2; x++) put(lay, stride, x, y, bg);
     for (int x = X0; x <= X1; x++) {
@@ -241,6 +318,7 @@ void pm_draw(u16 *lay, int stride)
             }
         }
     }
+    draw_master(lay, stride, (int)sms, tick);
     for (int y = TOPY - 1; y <= BOTY + 1; y++)       /* now */
         for (int x = CX - 1; x <= CX + 1; x++) put(lay, stride, x, y, now);
     /* clear the label area first: the stock "MASTER PLAYER" label + icon
@@ -264,6 +342,15 @@ void pm_draw(u16 *lay, int stride)
  * = 0xFB80 made an x-254 reference step aside). Visible = the background
  * right of the meter (x 476, both rows) equals that reference; the MENU
  * popup covers x 430+, BROWSE / UTILITY are other screen modes. */
+/* the PERFORM button is drawn (main and PERFORM screens both have it at
+ * x 652..783, y 20..63); the boot logo shows with MODEW already 1 and a
+ * plain black meter area, so visible() alone drew the meter over it */
+static int screen_up(const u16 *lay, int stride)
+{
+    u16 a = lay[40 * stride + 700], b = lay[40 * stride + 760];
+    return a && b && a != 0xF81Fu && b != 0xF81Fu;
+}
+
 static int visible(const u16 *lay, int stride)
 {
     u16 bl = lay[BY * stride + 200];
@@ -453,7 +540,7 @@ void pm_hook(u32 dev, u32 req)
         /* only lists aimed at an 800-px-wide (UI-sized) layer: other
          * layers use their own coordinates (waveform strips etc.) */
         if (R32(req + 32) == 1600u && (t & 0x1FFFFFFFu) - 0x08000000u < 0x08000000u &&
-            visible((u16 *)UNCACHED(t), 800))
+            screen_up((u16 *)UNCACHED(t), 800) && visible((u16 *)UNCACHED(t), 800))
             strip_stock(req);
         else if (pm_nothl < 16)
             scan_other(req);
@@ -470,7 +557,7 @@ void pm_hook(u32 dev, u32 req)
      * sentinel" test failed and the stock "Bars" meter came back; and the
      * MENU popup covers only the right side (x 430+), so a left-only test
      * drew over it. BROWSE (mode 2) / UTILITY (6) are excluded by MODEW. */
-    if (!visible(lay, stride)) {
+    if (!screen_up(lay, stride) || !visible(lay, stride)) {
         pm_visfail++;
         pm_vispx = (u32)lay[OY * stride + 476] << 16 | lay[BY * stride + 200];
         return;

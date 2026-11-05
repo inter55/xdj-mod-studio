@@ -6,7 +6,7 @@ on the flush hook, theme switching @0x09770000 + relinked pointers), a track
 loaded, then PLAY -- and look for a hang: where the CPU spends its time,
 whether the screen keeps updating, and whether the centre waveform draws.
 
-  .venv/bin/python tools/repro_freeze.py [--only core|pads|hc|themes ...]
+  .venv/bin/python tools/repro_freeze.py [--only core|pads|hc|themes|touchfx ...]
   WMODE=3band ...   waveforms in 3-band (a PWV7 section is added to the
                     loaded track's section index so the centre draws it)
 """
@@ -72,7 +72,7 @@ def install(m, parts):
             a, _, n = ln.split()
             syms[n.lstrip("_")] = int(a, 16)
         img = open("build/hotcue8/hc.bin", "rb").read()
-        for a in range(syms["hc_table"], syms["hc_count"] + 4, 4):
+        for a in range(syms["hc_table"], syms.get("end", syms["hc_count"] + 4), 4):
             mem.w32(a, 0)
         for i, b in enumerate(img):
             mem.w8(syms["hc_table"] + i, b)
@@ -96,6 +96,8 @@ def install(m, parts):
         mem.w32(0x08D5FFA8, syms["sm_fread"])
         if mem.r32(0x08DDFFD4) == 0x08C61A6C:   # deck installer routes it too
             mem.w32(0x08DDFFD4, syms["sm_fread"])
+        if "sm_poll_entry" in syms and mem.r32(0x08C1D56C) == 0x08BF2BCC:
+            mem.w32(0x08C1D56C, syms["sm_poll_entry"])   # fast mute trigger (as the deck)
         mem.w8(PP.PMASK, 0b0101)            # some stems muted while playing
     if "flac" in parts:
         import shbuild
@@ -103,6 +105,9 @@ def install(m, parts):
                       ["build/xflac/vfile.bin", "build/xflac/vfile.syms"])
         import vfile_emu_test as VE
         VE.install(mem, VE.syms())
+    if "touchfx" in parts:                 # TOUCH FX screen (flush + touch chain)
+        import touchfx as TF
+        TF.install(mem, engine=False)
     if "themes" in parts:
         (cb, code), (db, data) = TS.plan(TS.default_names())
         for a in range(cb, db, 4):
@@ -117,7 +122,7 @@ def install(m, parts):
 
 def main():
     parts = set(" ".join(sys.argv[sys.argv.index("--only") + 1:]).split()) if "--only" in sys.argv \
-        else {"core", "pads", "hc", "themes", "stems", "flac"}
+        else {"core", "pads", "hc", "themes", "stems", "flac", "touchfx"}
     m = Machine.load(os.environ.get("CKPT", "cache/emu_track_loaded.pkl"))
     install(m, parts)
     dev = m.mem.dev

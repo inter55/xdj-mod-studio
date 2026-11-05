@@ -1,0 +1,84 @@
+diff --git a/hw/cdj/common/cdj_pnl_link.c b/hw/cdj/common/cdj_pnl_link.c
+index 0c046ad..0172814 100644
+--- a/hw/cdj/common/cdj_pnl_link.c
++++ b/hw/cdj/common/cdj_pnl_link.c
+@@ -154,6 +154,20 @@ static void cdj_pnl_link_key(CdjPnlLinkState *s, const char *msg, int64_t now)
+         warn_report("panel: bad live key '%s'", msg);
+         return;
+     }
++    if (!strcmp(op, "m16add")) {
++        /* A 16-bit counter in MAIN's RAM, bumped by val: the XDJ-700's
++         * browse knob is no report byte -- the firmware's KY 0x42/0x43
++         * (RotaryPositionFwd/Rev) add +-1 to the u16 at 0x0B6C7B48, which
++         * the browser polls. off = physical address. */
++        uint16_t v16;
++        uint32_t pa = off & 0x1FFFFFFFu;
++
++        physical_memory_read(pa, &v16, 2);
++        v16 = (uint16_t)(le16_to_cpu(v16) + val);
++        v16 = cpu_to_le16(v16);
++        physical_memory_write(pa, &v16, 2);
++        return;
++    }
+     if (off >= s->payload_len) {
+         warn_report("panel: live key offset 0x%x is outside the report", off);
+         return;
+@@ -173,6 +187,20 @@ static void cdj_pnl_link_key(CdjPnlLinkState *s, const char *msg, int64_t now)
+                     val, off, s->rot_val);
+         return;
+     }
++    if (!strcmp(op, "lvl16") && off + 1 < s->payload_len) {
++        /* A big-endian 16-bit analogue field set in one go (the XDJ-700's
++         * jog counter at report[8..9] and pulse period at [10..11]): two
++         * single-byte "lvl"s let a frame go out half-updated, which the
++         * firmware reads as a jump of 256 counts. */
++        unsigned k;
++
++        s->lvl_val[off] = (uint8_t)((unsigned)val >> 8);
++        s->lvl_val[off + 1] = (uint8_t)val;
++        for (k = 0; k < 2; k++) {
++            s->lvl_live[off + k] = true;
++        }
++        return;
++    }
+     if (!strcmp(op, "lvl")) {
+         /* Analogue field: an absolute byte value held until changed. */
+         s->lvl_val[off] = (uint8_t)val;
+diff --git a/hw/cdj/common/usb_r8a66597.c b/hw/cdj/common/usb_r8a66597.c
+index 6ffcb04..73da5ab 100644
+--- a/hw/cdj/common/usb_r8a66597.c
++++ b/hw/cdj/common/usb_r8a66597.c
+@@ -56,6 +56,7 @@ struct CdjUsbState {
+     /* Which pipe each FIFO window is currently wired to. */
+     unsigned port_pipe[CDJ_USB_NR_FIFO_PORTS];
+     bool armed_before;             /* the driver armed BCHG once since power-on */
++    bool bchg_on;                  /* BCHG interrupt currently enabled (hot plug) */
+ 
+     /* PIPESEL is a window: PIPECFG/PIPEBUF/PIPEMAXP/PIPEPERI refer to the pipe
+      * it names, so they are stored per pipe. */
+@@ -728,6 +729,7 @@ static void cdj_usb_write(void *opaque, hwaddr off, uint64_t val, unsigned size)
+         break;
+ 
+     case CDJ_USB_INTENB1:
++        s->bchg_on = (val & CDJ_USB_BCHG) != 0;
+         /* A device already in the port produces no edge, so fire BCHG shortly
+          * after the driver arms it, like plugging the stick in. On a
+          * usb_attach_at_boot board the controller saw a stick present at
+@@ -766,7 +768,16 @@ static const MemoryRegionOps cdj_usb_ops = {
+ static void cdj_usb_port_attach(USBPort *port)
+ {
+     /* Reported by the attach timer instead: usb-storage attaches during
+-     * machine init, before the driver has armed BCHGE. */
++     * machine init, before the driver has armed BCHGE. A device plugged in
++     * LATER (monitor device_add: the app inserting the user's library)
++     * finds the driver armed already and no further INTENB1 write coming,
++     * so raise the bus change here, the way a real plug-in does. */
++    CdjUsbState *s = port->opaque;
++
++    if (s->bchg_on && !s->attached && s->attach_timer &&
++        !timer_pending(s->attach_timer)) {
++        timer_mod(s->attach_timer, qemu_clock_get_ms(QEMU_CLOCK_VIRTUAL) + 500);
++    }
+ }
+ 
+ static void cdj_usb_port_detach(USBPort *port)

@@ -97,12 +97,17 @@ typedef struct { u32 lo; u64 hi; uint8_t *buf; } Region;
 
 #define SPBUF 1024
 #define SPLC 1024
+#define SPRES 32
 typedef struct {
     int kind, ii, wcreg, wcneg, loading, fetch_prog, lc, lbc, dynlen, drain,
         post_delay, pc_after, since, initial_term, prog_stall, refill;
     int resume, int_drain; u32 addr;
     int nbuf;
-    int bl[SPBUF], bi[SPBUF], bu[SPBUF];
+    /* buffer entries chained by stage residue lc % ii (index + 1, 0 =
+     * none), so a cycle visits only its own stage's entries, in buffer
+     * order; reset with the head above (ii > SPRES: plain scan) */
+    int rhead[SPRES], rtail[SPRES];
+    int bl[SPBUF], bi[SPBUF], bu[SPBUF], rnext[SPBUF];
     uint8_t valid[SPLC];
     int pv[64], npv;
     uint8_t hist[4]; int nhist;
@@ -148,6 +153,25 @@ typedef struct {
     u64 py_calls;
     int splx_irq; u32 splx_after;
     u32 idle_head, idle_lo, idle_hi; int idle_armed, idle_dirty; u32 idle_r[64];
+    /* busy-wait heads (step()): idle_head plus extra ones, all loops of the
+     * idle task (same stack); the state seen at the last head visit */
+    u32 idle_heads[4]; int nidle, idle_last;
+    u32 idle_c[C_NCTRL]; uint8_t *idle_stk; u32 idle_stkn;
+    u64 idle_cyc;               /* cycle of the last head visit */
+    u64 run_end;                /* c6x_run: the cycle this call stops at (0 = none) */
+    u64 idle_jump;              /* step() -> c6x_run: cycles just jumped */
+    u64 idle_jumped, idle_jumps;   /* statistics */
+    /* the reference pass's read set (every RAM load: address, size, value),
+     * so a pass can be trusted across c6x_run calls (see step()) */
+    #define RSMAX 512
+    u32 rs_a[RSMAX]; uint8_t rs_n[RSMAX]; u64 rs_v[RSMAX];
+    int rs_cnt, rs_on, rs_over;
+    u32 sw_a[RSMAX]; uint8_t sw_n[RSMAX]; int sw_cnt;   /* the pass's own stack writes */
+    int idle_fresh;
+    /* the reference pass: entry state, read/write set, length */
+    int ref_ok, ref_hk, ref_cnt; u64 ref_p, idle_refhits;
+    u32 ref_r[64], ref_c[C_NCTRL]; uint8_t *ref_stk;
+    u32 ref_a[RSMAX]; uint8_t ref_n[RSMAX]; u64 ref_v[RSMAX];
     u32 wlo, whi; int wn; u32 wpc[256], wad[256], wv[256]; u64 wcy[256];
     /* delay-loop fast-forward (see dff_* below) */
     int dff_on, dff_nt, dff_learn;
@@ -157,6 +181,14 @@ typedef struct {
     /* frozen call in progress (interrupts off): entry state for settle() */
     int dff_frozen, dff_fk, dff_replay;
     u64 dff_end;
+#ifdef C6X_PROF
+    /* measurement build only (-DC6X_PROF): instruction-start histogram,
+     * exposed by c6x_hist(). Never present in the shipped core. */
+    u32 *hist;
+    u64 cyc_sp, cyc_norm;             /* cycles inside / outside a SPLOOP */
+    u64 prof_stall, prof_run;
+    int spn; u32 spa[8]; u64 spc[8];  /* SPLOOP cycles by loop address */
+#endif
     struct { u32 r[64], word; u64 cyc, ep, ins; int hint, prevep, lastf, idle_dirty; SPLoop sp; } dff_in;
 } Core;
 
@@ -186,10 +218,21 @@ Core *c6x_new(int hbits)
     memset(c->hkey, 0xFF, sizeof(u32) << hbits);
     c->c[C_CSR] = 0x14000100;
     c->hint = c->prevep = c->lastf = -1;
+#ifdef C6X_PROF
+    c->hist = calloc(65536, sizeof(u32));
+#endif
     return c;
 }
 
-void c6x_free(Core *c) { free(c->ins); free(c->epi); free(c->epc); free(c->hkey); free(c->hval); free(c); }
+void c6x_free(Core *c)
+{
+    free(c->idle_stk); free(c->ref_stk);
+    free(c->ins); free(c->epi); free(c->epc); free(c->hkey); free(c->hval);
+#ifdef C6X_PROF
+    free(c->hist);
+#endif
+    free(c);
+}
 int c6x_sizeof_ins(void) { return sizeof(Ins); }
 int c6x_sizeof_core(void) { return sizeof(Core); }
 u32 *c6x_regs(Core *c) { return c->r; }
@@ -214,6 +257,7 @@ static void rehash(Core *c)
 
 int c6x_add_code(Core *c, const Ins *v, int n)
 {
+    c->idle_armed = 0; c->ref_ok = 0;      /* code changed: re-learn idle passes */
     for (int i = 0; i < n; i++) {
         u32 h = hslot(c, v[i].addr);
         if (c->hkey[h] == v[i].addr) { c->ins[c->hval[h]] = v[i]; continue; }
@@ -234,6 +278,7 @@ int c6x_add_code(Core *c, const Ins *v, int n)
 void c6x_settle(Core *c);
 void c6x_drop_code(Core *c, u32 lo, u32 hi)
 {
+    c->idle_armed = 0; c->ref_ok = 0;
     if (lo < DFF_PC + 0x58u && hi > DFF_PC) { c6x_settle(c); c->dff_nt = 0; c->dff_learn = 0; }
     int w = 0;
     for (int i = 0; i < c->nins; i++)
@@ -244,7 +289,7 @@ void c6x_drop_code(Core *c, u32 lo, u32 hi)
     ep_flush(c);
 }
 
-void c6x_clear_code(Core *c) { c->dff_nt = 0; c->dff_learn = 0; c->dff_frozen = 0; c->nins = 0; rehash(c); ep_flush(c); }
+void c6x_clear_code(Core *c) { c->idle_armed = 0; c->ref_ok = 0; c->dff_nt = 0; c->dff_learn = 0; c->dff_frozen = 0; c->nins = 0; rehash(c); ep_flush(c); }
 
 /* ================================================== memory ============ */
 void c6x_set_cb(Core *c, mmio_rd_t r, mmio_wr_t w, pyop_t p, pyld_t l)
@@ -269,20 +314,88 @@ static inline uint8_t *ram(Core *c, u32 a, int n)
     return 0;
 }
 
+/* L2 is also seen at 0x00800000 */
+static inline u32 gaddr(u32 a) { return (a >= 0x00800000u && a < 0x00840000u) ? a + 0x11000000u : a; }
+/* recording an idle pass: is [a, a+n) on the stack and written by the pass
+ * itself before this read? (then its value is the pass's own, not input) */
+static int rs_own(Core *c, u32 a, int n)
+{
+    u32 g = gaddr(a);
+    if (g < c->idle_lo || g >= c->idle_hi) return 0;
+    for (int i = 0; i < c->sw_cnt; i++) {
+        u32 w = c->sw_a[i];
+        if (g >= w && g + n <= w + c->sw_n[i]) return 1;
+    }
+    return 0;
+}
+
 static u64 mread(Core *c, u32 a, int n)
 {
     uint8_t *p = ram(c, a, n);
-    if (p) { u64 v = 0; memcpy(&v, p, n); return v; }
+    if (p) {     /* constant-size copies: no libc memmove call per access */
+        u64 v;
+        switch (n) {
+        case 4: { u32 x; memcpy(&x, p, 4); v = x; break; }
+        case 8: memcpy(&v, p, 8); break;
+        case 2: { uint16_t x; memcpy(&x, p, 2); v = x; break; }
+        case 1: v = *p; break;
+        default: v = 0; memcpy(&v, p, n); break;
+        }
+        if (c->rs_on && !rs_own(c, a, n)) {   /* recording an idle pass's reads */
+            if (c->rs_cnt < RSMAX) {
+                c->rs_a[c->rs_cnt] = a; c->rs_n[c->rs_cnt] = (uint8_t)n; c->rs_v[c->rs_cnt] = v;
+                c->rs_cnt++;
+            } else c->rs_over = 1;
+        }
+        return v;
+    }
     c->idle_dirty = 1;
     if (n == 8) return (u64)c->mrd(a, 4) | (u64)c->mrd(a + 4, 4) << 32;
     return c->mrd(a, n);
+}
+
+/* does every load of the recorded idle pass still find the value it read? */
+static int rs_still(Core *c)
+{
+    for (int i = 0; i < c->ref_cnt; i++) {
+        uint8_t *p = ram(c, c->ref_a[i], c->ref_n[i]);
+        u64 v = 0;
+        if (!p) return 0;
+        memcpy(&v, p, c->ref_n[i]);
+        if (v != c->ref_v[i]) return 0;
+    }
+    return 1;
 }
 
 static void mwrite(Core *c, u32 a, int n, u64 v)
 {
     uint8_t *p = ram(c, a, n);
     if (p) {
-        u32 g = (a >= 0x00800000u && a < 0x00840000u) ? a + 0x11000000u : a;   /* L2 alias */
+        u32 g = gaddr(a);   /* L2 alias */
+        if (c->rs_on) {     /* recording an idle pass: its stack and outside writes */
+            if (g >= c->idle_lo && g < c->idle_hi) {
+                if (c->sw_cnt < RSMAX) {
+                    c->sw_a[c->sw_cnt] = g; c->sw_n[c->sw_cnt] = (uint8_t)n; c->sw_cnt++;
+                } else c->rs_over = 1;
+            } else if (c->rs_cnt < RSMAX) {
+                c->rs_a[c->rs_cnt] = a; c->rs_n[c->rs_cnt] = (uint8_t)n; c->rs_v[c->rs_cnt] = v;
+                c->rs_cnt++;
+            } else c->rs_over = 1;
+        }
+        switch (n) {     /* constant sizes (little-endian host, as before) */
+        case 4: { u32 o, x = (u32)v; memcpy(&o, p, 4);
+            if (!c->idle_dirty && (g < c->idle_lo || g >= c->idle_hi) && o != x) c->idle_dirty = 1;
+            memcpy(p, &x, 4); return; }
+        case 8: { u64 o; memcpy(&o, p, 8);
+            if (!c->idle_dirty && (g < c->idle_lo || g >= c->idle_hi) && o != v) c->idle_dirty = 1;
+            memcpy(p, &v, 8); return; }
+        case 2: { uint16_t o, x = (uint16_t)v; memcpy(&o, p, 2);
+            if (!c->idle_dirty && (g < c->idle_lo || g >= c->idle_hi) && o != x) c->idle_dirty = 1;
+            memcpy(p, &x, 2); return; }
+        case 1: { uint8_t x = (uint8_t)v;
+            if (!c->idle_dirty && (g < c->idle_lo || g >= c->idle_hi) && *p != x) c->idle_dirty = 1;
+            *p = x; return; }
+        }
         if (!c->idle_dirty && (g < c->idle_lo || g >= c->idle_hi) && memcmp(p, &v, n))
             c->idle_dirty = 1;               /* a real change outside the stack */
         memcpy(p, &v, n);
@@ -482,6 +595,9 @@ static void sp_start(Core *c, const Ins *i);
 /* one instruction; returns nop cycles (0 = none). Predicate included. */
 static inline ALWAYS int exec1(Core *c, const Ins *i, u64 cyc)
 {
+#ifdef C6X_PROF
+    if (c->hist) c->hist[(i->addr >> 2) & 0xFFFF]++;
+#endif
     if (i->op == O_py) {
         c->py_calls++;
         c->idle_dirty = 1;
@@ -874,6 +990,15 @@ static inline ALWAYS int fetch_ep(Core *c, u32 pc, Ins **ep, u32 *nxt)
 static int sp_cycle(Core *c, u64 cyc)
 {
     SPLoop *s = &c->sp;
+#ifdef C6X_PROF
+    c->cyc_sp++;
+    {
+        int k = 0;
+        while (k < c->spn && c->spa[k] != s->addr) k++;
+        if (k == c->spn && c->spn < 8) { c->spa[k] = s->addr; c->spc[k] = 0; c->spn++; }
+        if (k < 8) c->spc[k]++;
+    }
+#endif
     Ins *ep[16]; int nep = 0; u32 nxt = 0, mask = 0;
     if (s->fetch_prog && s->prog_stall == 0) {
         nep = fetch_ep(c, c->pc, ep, &nxt);
@@ -887,6 +1012,13 @@ static int sp_cycle(Core *c, u64 cyc)
     if (s->drain >= 0 && s->drain < SPLC) s->valid[s->drain] = 0;
     static int bx[SPBUF];
     int nbx = 0;
+    if (s->ii > 0 && s->ii <= SPRES) {
+        for (int k = s->rhead[s->lbc] - 1; k >= 0; k = s->rnext[k] - 1) {
+            if (s->valid[s->bl[k]] &&
+                (s->resume || !(s->bu[k] < 8 && (mask >> s->bu[k] & 1))))
+                bx[nbx++] = s->bi[k];
+        }
+    } else
     for (int k = 0; k < s->nbuf; k++) {
         int lc = s->bl[k];
         if (s->valid[lc] && lc % s->ii == s->lbc &&
@@ -916,7 +1048,15 @@ static int sp_cycle(Core *c, u64 cyc)
                 c->err = 7; c->status = ST_ERR; return -1;
             }
             s->bl[s->nbuf] = s->lc; s->bi[s->nbuf] = (int)(i - c->ins);
-            s->bu[s->nbuf++] = i->unit;
+            s->bu[s->nbuf] = i->unit;
+            if (s->ii > 0 && s->ii <= SPRES) {
+                int r = s->lc % s->ii;
+                s->rnext[s->nbuf] = 0;
+                if (s->rtail[r]) s->rnext[s->rtail[r] - 1] = s->nbuf + 1;
+                else s->rhead[r] = s->nbuf + 1;
+                s->rtail[r] = s->nbuf + 1;
+            }
+            s->nbuf++;
             s->pv[s->npv++] = s->lc;
         }
     }
@@ -960,6 +1100,10 @@ static int take_interrupt(Core *c)
 static int step(Core *c)
 {
     u64 cyc = c->cycle;
+#ifdef C6X_PROF
+    if (!c->sp_on) c->cyc_norm++;
+    if (c->stall) c->prof_stall++; else c->prof_run++;
+#endif
     if (c->splx_irq) {             /* §7.13.4: writes complete, then the interrupt */
         if (!c->evcount && !c->npend) {
             c->splx_irq = 0;
@@ -976,20 +1120,103 @@ static int step(Core *c)
     if (c->stall) c->stall--;
     else if (c->sp_on) { if (sp_cycle(c, cyc) < 0) return -1; }
     else {
-        if (c->idle_head && c->pc == c->idle_head) {
-            /* busy-wait skip (as cdj-nxs2-qemu): a whole pass of the idle
-             * loop that touched no hardware, changed no memory outside its
-             * stack and left the registers as they were is a fixed point:
-             * nothing changes until an interrupt. */
+        int hk = -1;
+        for (int k = 0; k < c->nidle; k++)
+            if (c->pc == c->idle_heads[k]) { hk = k; break; }
+        if (hk >= 0) {
+            /* busy-wait skip, cycle-exact: a whole pass of an idle loop,
+             * head to the same head, that touched no hardware, took no
+             * interrupt, made no Python op, changed no memory outside the
+             * idle stack, and ends with the registers, the control
+             * registers and the idle stack byte-identical to the pass
+             * before, is a fixed point: the DSP's whole state repeats
+             * every P cycles (P = this pass) until something outside the
+             * core changes it -- an interrupt or a host write, both only
+             * between c6x_run calls. So whole passes are jumped (the clock
+             * moves k*P, the state is already what it would be) and the
+             * rest of the slice runs normally: the state at the end of the
+             * call, and the point where the next interrupt lands, are
+             * exactly those of running every cycle.
+             * Across c6x_run calls the host may have written memory in
+             * between: the first head visit of a call trusts the last
+             * pass only if every RAM load that pass made (its read set)
+             * still finds the value it read then -- the pass's path and
+             * result depend on nothing else, so it repeats exactly.
+             * The playing deck's loop (0xC0048C2E) passes every 2237 cycles
+             * through ten channel polls that toggle CSR.GIE and store the
+             * values already there (~75 % of the DSP's cycles while a
+             * track plays); the stopped deck's is 0xC004C8CC. */
             int quiet = !c->evcount && !c->npend && !c->splx_irq &&
                         !(c->c[C_IFR] & c->c[C_IER] & 0xFFF0);
-            if (c->idle_armed && !c->idle_dirty && quiet &&
-                !memcmp(c->idle_r, c->r, sizeof c->r)) {
-                c->status = ST_IDLE;
-                return -1;
+            uint8_t *stk = c->idle_stk ? ram(c, c->idle_lo, (int)c->idle_stkn) : 0;
+            /* the live stack: from SP up (below it only the pass's own
+             * frames, whose reads-before-write are in the read set) */
+            u32 sp = gaddr(c->r[47]);              /* B15 */
+            u32 live = (sp >= c->idle_lo && sp < c->idle_hi) ? sp - c->idle_lo : 0;
+            /* (a) a whole pass inside this call, back at the state it
+             * started from, with nothing changed outside the stack */
+            int eq_last = !c->idle_fresh && c->idle_armed && c->idle_last == hk &&
+                          !c->idle_dirty && quiet && stk &&
+                          !memcmp(c->idle_r, c->r, sizeof c->r) &&
+                          !memcmp(c->idle_c, c->c, sizeof c->c) &&
+                          !memcmp(c->idle_stk, stk, c->idle_stkn);
+            u64 p = 0;
+            int same = 0;
+            if (eq_last) {
+                same = 1;
+                p = cyc - c->idle_cyc;
+                if (c->rs_on && !c->rs_over && c->ref_stk) {   /* keep it as the reference */
+                    memcpy(c->ref_r, c->r, sizeof c->r);
+                    memcpy(c->ref_c, c->c, sizeof c->c);
+                    memcpy(c->ref_stk, stk, c->idle_stkn);
+                    memcpy(c->ref_a, c->rs_a, sizeof(u32) * c->rs_cnt);
+                    memcpy(c->ref_n, c->rs_n, c->rs_cnt);
+                    memcpy(c->ref_v, c->rs_v, sizeof(u64) * c->rs_cnt);
+                    c->ref_cnt = c->rs_cnt; c->ref_p = p; c->ref_hk = hk; c->ref_ok = 1;
+                }
+            } else if (c->ref_ok && c->ref_hk == hk && quiet && stk &&
+                       !memcmp(c->ref_r, c->r, sizeof c->r) &&
+                       !memcmp(c->ref_c, c->c, sizeof c->c) &&
+                       !memcmp(c->ref_stk + live, stk + live, c->idle_stkn - live) &&
+                       rs_still(c)) {
+                /* (b) the reference pass's entry state again (e.g. after an
+                 * interrupt's work: registers, control registers and the
+                 * live stack equal), and every address it read (stack
+                 * bytes below SP only where it read before writing them)
+                 * or wrote outside the stack still holds what it held
+                 * then: its path and result depend on nothing else, so it
+                 * repeats -- and its writes are silent again */
+                same = 1;
+                p = c->ref_p;
+                c->idle_refhits++;
             }
-            memcpy(c->idle_r, c->r, sizeof c->r);
-            c->idle_armed = quiet;
+            c->idle_fresh = 0;
+            c->rs_on = 0;
+            if (same) {
+                /* leave this cycle (executed below) inside the call */
+                if (p && c->run_end > cyc + 1 && c->run_end - cyc - 1 >= p) {
+                    u64 j = (c->run_end - cyc - 1) / p * p;
+                    c->cycle = cyc = cyc + j;
+                    c->idle_jump += j;
+                    c->idle_jumped += j;
+                    c->idle_jumps++;
+                }
+                if (!eq_last) {                  /* the next visit compares with this one */
+                    memcpy(c->idle_r, c->r, sizeof c->r);
+                    memcpy(c->idle_c, c->c, sizeof c->c);
+                    memcpy(c->idle_stk, stk, c->idle_stkn);
+                    c->idle_armed = 1;
+                    c->idle_last = hk;
+                }
+            } else {
+                memcpy(c->idle_r, c->r, sizeof c->r);
+                memcpy(c->idle_c, c->c, sizeof c->c);
+                if (stk) memcpy(c->idle_stk, stk, c->idle_stkn);
+                c->idle_armed = quiet && stk;
+                c->idle_last = hk;
+                c->rs_cnt = 0; c->sw_cnt = 0; c->rs_over = 0; c->rs_on = c->idle_armed;   /* record this pass */
+            }
+            c->idle_cyc = cyc;
             c->idle_dirty = 0;
         }
         Ins *ep[16]; u32 nxt; int n;
@@ -1234,17 +1461,29 @@ s64 c6x_run(Core *c, s64 n)
 {
     c->status = ST_OK;
     s64 k = 0;
+    /* the host may have written DSP memory or raised events since the last
+     * call: the first idle-head visit re-checks the pass's read set */
+    c->idle_fresh = 1;
+    c->run_end = c->cycle + (u64)n;
     while (k < n) {
         /* multi-cycle NOP / load-delay stall with nothing in flight that
          * lands meanwhile: those cycles only count down (no interrupt is
          * taken while stalled, no event commits, no branch lands) -- jump */
-        if (c->stall > 1 && !c->evcount && !c->sp_on && !c->splx_irq) {
+        if (c->stall > 1 && !c->sp_on && !c->splx_irq) {
             s64 j = c->stall - 1;               /* leave the last one to step() */
             if (j > n - k) j = n - k;
             for (int q = 0; q < c->npend; q++) {
                 s64 d = (s64)(c->pend_cyc[q] - c->cycle);
                 if (d < j) j = d;               /* a branch lands at cycle+d */
             }
+            /* events in flight (a load landing during the NOP): the
+             * cycles before the first non-empty bucket commit nothing,
+             * so they jump too (every event sits < RING cycles ahead) */
+            if (c->evcount)
+                for (s64 d = 0; d < j && d < RING; d++) {
+                    Bucket *b = &c->ring[(c->cycle + (u64)d) % RING];
+                    if (b->n || b->rn) { j = d; break; }
+                }
             if (j > 0) {
                 c->stall -= (int)j;
                 c->cycle += (u64)j;
@@ -1294,12 +1533,16 @@ s64 c6x_run(Core *c, s64 n)
                 if (c->dff_frozen) continue;
             }
         }
-        if (step(c) < 0) {
+        int st = step(c);
+        k += (s64)c->idle_jump;                 /* whole idle passes jumped */
+        c->idle_jump = 0;
+        if (st < 0) {
             if (c->status == ST_STOP) k++;      /* that cycle completed */
             break;
         }
         k++;
     }
+    c->run_end = 0;
     return k;
 }
 
@@ -1317,8 +1560,34 @@ int c6x_npend(Core *c) { return c->npend; }
 int c6x_sp_on(Core *c) { return c->sp_on; }
 u32 c6x_idle(Core *c) { return c->idle; }
 void c6x_set_idle(Core *c, u32 v) { c->idle = v; }
+/* 0 packets, 1 instructions, 2 interrupts, 3 Python ops, 4 idle cycles
+ * jumped, 5 idle jumps, 6 jumps from the reference pass */
 u64 c6x_counts(Core *c, int k)
-{ return k == 0 ? c->ep_count : k == 1 ? c->insn_count : k == 2 ? c->interrupts : c->py_calls; }
+{ return k == 0 ? c->ep_count : k == 1 ? c->insn_count : k == 2 ? c->interrupts :
+         k == 3 ? c->py_calls : k == 4 ? c->idle_jumped : k == 5 ? c->idle_jumps : c->idle_refhits; }
+
+u64 c6x_prof(Core *c, int k, u32 *addr)
+{
+#ifdef C6X_PROF
+    if (k == 100) return c->prof_stall;
+    if (k == 101) return c->prof_run;
+    if (k < 0) { if (addr) addr[0] = (u32)c->cyc_sp; return c->cyc_norm; }
+    if (k >= c->spn) { if (addr) addr[0] = 0; return 0; }
+    if (addr) addr[0] = c->spa[k];
+    return c->spc[k];
+#else
+    (void)c; (void)k; if (addr) addr[0] = 0; return 0;
+#endif
+}
+
+u32 c6x_hist(Core *c, int i)
+{
+#ifdef C6X_PROF
+    return c->hist ? c->hist[i & 0xFFFF] : 0;
+#else
+    (void)c; (void)i; return 0;
+#endif
+}
 
 void c6x_watch(Core *c, u32 lo, u32 hi) { c->wlo = lo; c->whi = hi; c->wn = 0; }
 int c6x_watch_get(Core *c, int k, u32 *out)
@@ -1337,5 +1606,106 @@ void c6x_skip(Core *c, u64 n)
 }
 int c6x_splx_pending(Core *c) { return c->splx_irq; }
 
+/* debug only: live SPLOOP state + buffer entries (addr, lc/lbc/unit word).
+ * out[0..7] = kind, ii, lc, lbc, addr, nbuf, nhist, ILC; then 2 per entry.
+ * Returns the number of words written (0 when no SPLOOP is active). */
+int c6x_sp_info(Core *c, u32 *out, int max)
+{
+    SPLoop *s = &c->sp;
+    if (!c->sp_on || max < 9) return 0;
+    int n = 0;
+    out[n++] = (u32)s->kind; out[n++] = (u32)s->ii; out[n++] = (u32)s->lc;
+    out[n++] = (u32)s->lbc; out[n++] = s->addr; out[n++] = (u32)s->nbuf;
+    out[n++] = (u32)s->nhist; out[n++] = (u32)c->c[C_ILC];
+    for (int k = 0; k < s->nbuf && n + 2 <= max; k++) {
+        out[n++] = c->ins[s->bi[k]].addr;
+        out[n++] = (u32)s->valid[s->bl[k]] | (u32)s->bl[k] << 8 | (u32)s->bu[k] << 16;
+    }
+    return n;
+}
+
 void c6x_set_idle_loop(Core *c, u32 head, u32 lo, u32 hi)
-{ c->idle_head = head; c->idle_lo = lo; c->idle_hi = hi; c->idle_armed = 0; }
+{
+    c->idle_head = head; c->idle_lo = lo; c->idle_hi = hi; c->idle_armed = 0;
+    c->nidle = head ? 1 : 0; c->idle_heads[0] = head; c->idle_last = -1;
+    free(c->idle_stk); c->idle_stk = 0; c->idle_stkn = 0;
+    free(c->ref_stk); c->ref_stk = 0; c->ref_ok = 0;
+    if (head && hi > lo && hi - lo <= 0x10000u) {
+        c->idle_stkn = hi - lo;
+        c->idle_stk = malloc(c->idle_stkn);
+        c->ref_stk = malloc(c->idle_stkn);
+        if (!c->idle_stk || !c->ref_stk) {
+            free(c->idle_stk); free(c->ref_stk);
+            c->idle_stk = c->ref_stk = 0; c->idle_stkn = 0;
+        }
+    }
+}
+/* one more loop of the idle task (same stack) for the busy-wait skip */
+int c6x_add_idle_head(Core *c, u32 head)
+{
+    if (!head || c->nidle >= 4) return 0;
+    for (int k = 0; k < c->nidle; k++) if (c->idle_heads[k] == head) return 1;
+    c->idle_heads[c->nidle++] = head; c->idle_armed = 0; c->idle_last = -1; c->ref_ok = 0;
+    return 1;
+}
+
+/* ================================================ McASP DMA burst ======
+ * The inner loop of periph.Edma3.burst (the common A-sync case: 4-byte
+ * arrays from DSP RAM to a McASP data port), word for word the Python
+ * loop: up to n words from buf (region base `lo`, valid offsets
+ * 0..blen) into out, PaRAM set `p` (32 bytes) updated as the Python
+ * _pw writes (src, abc, ccnt). Returns the words moved. */
+/* ABSYNC frame copy of periph.Edma3.transfer (Pioneer's MP3 audio path:
+ * 588 frames of 4 bytes per event, source stride 4, destination stride 8).
+ * One frame = read acnt bytes, then write them (never a partial overlap
+ * within the frame -- exactly what Python's _copy does word by word).
+ * Both ranges are checked against their RAM buffers; copying stops at the
+ * first frame that leaves one, and the count returns. */
+int c6x_dma_frames(const uint8_t *sb, s64 slen, u32 slo,
+                   uint8_t *db, s64 dlen, u32 dlo,
+                   u32 src, u32 dst, u32 acnt, u32 bcnt, int sbidx, int dbidx)
+{
+    s64 so = (s64)src - (s64)slo, dof = (s64)dst - (s64)dlo;
+    u32 k = 0;
+    for (; k < bcnt; k++, so += sbidx, dof += dbidx) {
+        if (so < 0 || so + acnt > slen) break;
+        if (dof < 0 || dof + acnt > dlen) break;
+        if (acnt == 4) {
+            u32 v; memcpy(&v, sb + so, 4); memcpy(db + dof, &v, 4);
+        } else {
+            uint8_t t[16];
+            if (acnt <= 16) {
+                memcpy(t, sb + so, acnt); memcpy(db + dof, t, acnt);
+            } else {
+                memmove(db + dof, sb + so, acnt);
+            }
+        }
+    }
+    return (int)k;
+}
+
+int c6x_dma_words(const uint8_t *buf, s64 blen, u32 lo, uint8_t *p, int n,
+                  u32 *out, int muted)
+{
+    u32 w[8];
+    memcpy(w, p, 32);
+    s64 src = w[1];
+    u32 acnt = w[2] & 0xFFFF, bcnt = w[2] >> 16, ccnt = w[7] & 0xFFFF;
+    s64 sbidx = (int16_t)(w[4] & 0xFFFF), scidx = (int16_t)(w[6] & 0xFFFF);
+    u32 bcntrld = w[5] >> 16;
+    int done = 0;
+    while (done < n && ccnt) {
+        s64 o = src - (s64)lo;
+        if (o < 0 || o > blen) break;
+        u32 v; memcpy(&v, buf + o, 4);
+        out[done++] = muted ? 0 : v;
+        if (bcnt > 1) { src += sbidx; bcnt--; }
+        else { src += scidx; bcnt = bcntrld; ccnt--; }
+    }
+    w[1] = (u32)src;
+    w[2] = (bcnt << 16) | acnt;
+    w[7] = ccnt;
+    memcpy(p + 4, &w[1], 8);
+    memcpy(p + 28, &w[7], 4);
+    return done;
+}

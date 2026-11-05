@@ -37,6 +37,9 @@ def parse_args():
                     help="0-1: push the slate UI toward full colour")
     ap.add_argument("--lift", type=float, default=0.0,
                     help="0-1: brighten dark fills (glow)")
+    ap.add_argument("--lit", default="",
+                    help="#rrggbb: lit touch buttons in this colour "
+                         "(mods/litbuttons.py; on-deck theme switching)")
     ap.add_argument("--version", default="",
                     help="MAINVer stamp for the .UPD (default: unchanged)")
     ap.add_argument("--export", action="store_true",
@@ -69,6 +72,10 @@ def main():
             sys.exit(f"bad --{k} (0-1)")
         if v:
             spec[k] = v
+    if a.lit:
+        if not re.fullmatch(r"#?[0-9a-fA-F]{6}", a.lit):
+            sys.exit("bad --lit (#rrggbb)")
+        spec["lit"] = "#" + a.lit.lstrip("#").lower()
     if a.name in T.THEMES and not a.force:
         sys.exit(f"'{a.name}' already in mods/themes.py (use --force to replace)")
     print(f"spec: {spec}")
@@ -79,7 +86,7 @@ def main():
     start = src.index("THEMES = {")
     end = src.index("\n}", start)
     body = src[start:end]
-    extra = "".join(f", {k}={spec[k]}" for k in ("vivid", "lift") if k in spec)
+    extra = "".join(f", {k}={spec[k]!r}" for k in ("vivid", "lift", "lit") if k in spec)
     line = f"    '{a.name}': dict(hue={a.hue}, sat={a.sat}, val={a.val}, spread={a.spread}{extra}),"
     if re.search(rf"^    '{re.escape(a.name)}':", body, re.M):
         body = re.sub(rf"^    '{re.escape(a.name)}':.*$",

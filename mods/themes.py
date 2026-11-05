@@ -44,15 +44,12 @@ THEMES = {
     'hot-pink':      dict(hue=328.0, sat=1.30, val=1.04, spread=0.45, vivid=0.5, lift=0.1),
     'neon-purple':   dict(hue=286.0, sat=1.45, val=1.08, spread=0.45, vivid=0.5, lift=0.1),
     'slate-gray':    dict(hue=215.0, sat=0.18, val=1.02, spread=0.30),
+    # 2026-10-26: light mode -- every colour's lightness flips (whites and
+    # greys with extra contrast so dim grey text stays readable on white),
+    # hues kept, the 0xF81F transparency key untouched. On the deck it also
+    # needs tools/lighttext (text, waveform window, screen clears).
+    'light':         dict(light=True),
 }
-
-# 2026-10-26: light mode -- every colour's lightness flips (whites and
-# greys with extra contrast so dim grey text stays readable on white),
-# hues kept, the 0xF81F transparency key untouched. On the deck it also
-# needs tools/lighttext (text, waveform window, screen clears).
-# Held back for 1.0 (user, 2026-10-27): only offered with XDJ_LIGHT=1.
-if os.environ.get("XDJ_LIGHT") == "1":
-    THEMES['light'] = dict(light=True)
 
 
 def _to_hsv(r, g, b):

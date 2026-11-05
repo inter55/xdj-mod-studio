@@ -13,14 +13,16 @@ import tempfile
 import time
 
 ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".."))
+# packaged app: tools run through the app binary's --run-tool
 PY = sys.executable
+PYCMD = [PY, "--run-tool"] if getattr(sys, "frozen", False) else [PY]
 
 
 def main():
     td = tempfile.mkdtemp(prefix="mockdeck")
     sock = os.path.join(td, "deck.sock")
     ckpt = os.environ.get("MOCK_CKPT", os.path.join(ROOT, "cache", "emu_mainscreen.pkl"))
-    srv = subprocess.Popen([PY, os.path.join(ROOT, "tools/mock/mockdeck_server.py"), ckpt, sock],
+    srv = subprocess.Popen(PYCMD + [os.path.join(ROOT, "tools/mock/mockdeck_server.py"), ckpt, sock],
                            stdout=subprocess.PIPE, text=True)
     srv.stdout.readline()
     env = dict(os.environ, PYTHONPATH=os.path.join(ROOT, "tools/mock"),
@@ -30,7 +32,7 @@ def main():
                XDJ_SURVEY_CACHE=os.environ.get("MOCK_SURVEY_CACHE",
                                                os.path.join(td, "surveys.json")))
     t0 = time.time()
-    rc = subprocess.call([PY, "tools/deck_session.py"] + sys.argv[1:], cwd=ROOT, env=env)
+    rc = subprocess.call(PYCMD + ["tools/deck_session.py"] + sys.argv[1:], cwd=ROOT, env=env)
     import socket
     s = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
     s.connect(sock)

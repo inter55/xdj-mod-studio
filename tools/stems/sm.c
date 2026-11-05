@@ -37,7 +37,7 @@ u32 n_pos(u32);
 #define FSEEK3 0x08C62E1Cu        /* fseek(fp, off, whence) -> 0 ok */
 #define POS(fp) R32((fp) + 0x2C)  /* handle: current position */
 #endif
-#define MAXB 16384
+#define MAXB 8192                 /* 8 KB chunks: room for the fast-trigger buffers below 0x09844000 (TOUCH FX) */
 
 typedef u32 (*fread_t)(void *, u32, u32, u32);
 typedef s32 (*fseek_t)(u32, s32, s32);
@@ -87,6 +87,11 @@ static u8 trailer[128];
 static u8 tmp[MAXB];
 static s32 acc[MAXB / 2];
 
+#ifndef SM_NATIVE
+static void clone_fp(u32 fp);
+#endif
+static u32 rfront;                 /* file offset the deck has asked for so far */
+
 static u32 rd(void *b, u32 n, u32 fp)
 {
     return ((fread_t)FREAD)(b, 1, n, fp);
@@ -112,11 +117,19 @@ static void probe(u32 fp)
     }
     sm_valid = valid;
     ((fseek_t)FSEEK3)(fp, (s32)pos, 0);
+#ifndef SM_NATIVE
+    clone_fp(fp);
+    /* tell the PERFORM STEMS row whether this track has stems (PMASK+3,
+     * tools/perform_pads.py STEMSOK) and make it redraw (PMASK+1 is the
+     * mask the row last drew: anything else forces a redraw) */
+    R8(PMASK + 3) = (u8)valid;
+    R8(PMASK + 1) = 0xFF;
+#endif
 }
 
 /* mix [pos, pos+n) of the sample data (inside d_off..d_off+d_len, n <= MAXB,
  * 4-aligned) into out; 0 = a plane read failed */
-static int mix(u8 *out, u32 pos, u32 n, u32 mask, u32 fp)
+static int mixb(u8 *out, u32 pos, u32 n, u32 mask, u32 fp, u8 *tmp, s32 *acc)
 {
     u32 ns = n >> 1;
     for (u32 i = 0; i < ns; i++) acc[i] = 0;
@@ -139,6 +152,11 @@ static int mix(u8 *out, u32 pos, u32 n, u32 mask, u32 fp)
         else     { o[0] = (u8)v; o[1] = (u8)(v >> 8); }
     }
     return 1;
+}
+
+static int mix(u8 *out, u32 pos, u32 n, u32 mask, u32 fp)
+{
+    return mixb(out, pos, n, mask, fp, tmp, acc);
 }
 
 /* extend the re-mix window over a data read (file [pos,pos+n) -> ram buf);
@@ -262,10 +280,54 @@ static void vre_remix(u32 vs, u32 rel, u32 fp)
 #define NSLOT     13846u               /* up to the end of DDR             */
 #define BLKF      588u                 /* frames per block                 */
 #define PLAYBLK   0x11837CCCu
-#define DR_BUDGET 24u                  /* blocks per read call: the deck reads in bursts (~100 calls / 5 s), one burst must cover the 25 s */
+#define DR_BUDGET 24u                   /* blocks per read call (slow path, before the poll runs) */
+#define DR_CATCH  128u                  /* blocks per poll while a backlog is cleared           */
+#define DR_KEEP   4u                    /* blocks per poll once caught up (28 polls x 4 > 75/s) */
+#define MAXAHEAD  2400u                 /* never aim more than 32 s past the playhead           */
+#define DR_GAP    8u                    /* missing blocks in a row = the decoded frontier        */
 u32 sm_drblk, sm_drscan, sm_drskip;    /* counters (shell diagnostics)     */
-static u32 dr_on, dr_mask, dr_next, dr_end, dr_ablk, dr_aslot = ~0u, dr_scan;
+/* 2026-11-03 deck: mute still ~30 s -> WHY the rewrite stops, per reason:
+ * busy = host-port DMA live at entry, noslot = block not found in the
+ * chip's cache, wfail = read/mix/DMA/header check failed mid-write,
+ * lastp = chip's play block, lastb = block we wanted, lasth = header word
+ * seen at the anchor slot (cache layout check) */
+u32 sm_drbusy, sm_drnoslot, sm_drwfail, sm_drlastp, sm_drlastb, sm_drlasth;
+static u32 dr_on, dr_mask, dr_next, dr_end, dr_ablk, dr_aslot = ~0u;
 static u8 dblk[BLKF * 4];
+static u8 dtmp[BLKF * 4];               /* the rewrite's own buffers: it may run */
+static s32 dacc[BLKF * 2];              /* in another task than mix-on-read     */
+
+/* ---- fast trigger (2026-11-03) -----------------------------------------
+ * The rewrite above only ran inside the deck's own reads, and the deck reads
+ * in bursts: the audio chip asks for more only when its buffer drops below
+ * ~25.5 s, then tops it up to ~30 s -- one burst every ~5 s (emulator,
+ * measured). A tap between bursts waited for the next one (deck: ~10 s).
+ * The player task polls the chip's buffer level ~340 times a second
+ * (fn 0x08C1D366 / 0x08C1D416, both calling the host-port read accessor
+ * 0x08BF2BCC through their own pool 0x08C1D56C). sm_poll sits in that pool:
+ * it calls the accessor, then rewrites a couple of blocks. The player task
+ * must not use the deck's own file handle (the media task reads with it,
+ * nested reads would move its position under it), so we read through a
+ * COPY of the handle taken when the file is first seen: a stdio FILE here is
+ * a self-contained 0x1250-byte record (volume pointer, cluster/position
+ * state, open flag at +0x1246; no pointers into itself), the file system
+ * serialises the two readers with its own lock. Once sm_poll has run, the
+ * rewrite is driven from there only. */
+#define CLONE_SZ  0x1250u
+#define POLL_ACC  0x08BF2BCCu
+#define POLL_BUDGET 1u               /* blocks per poll: ~4.5x play speed, keeps the player task light */
+typedef u32 (*acc_t)(u32, u32, u32, u32);
+u32 sm_polls, sm_parm;                 /* poll calls / rewrites started there */
+static u32 dfp[CLONE_SZ / 4], dfp_of;
+static u32 pmask_seen = ~0u;
+
+static void clone_fp(u32 fp)
+{
+    for (u32 i = 0; i < CLONE_SZ / 4; i++)
+        dfp[i] = R32(fp + 4 * i);
+    dfp_of = fp;
+    pmask_seen = R8(PMASK) & 15;        /* the reads from here on use it */
+}
 
 static u32 get_sr(void) { u32 v; __asm__ volatile("stc sr,%0" : "=r"(v)); return v; }
 static void set_sr(u32 v) { __asm__ volatile("ldc %0,sr" : : "r"(v) : "memory"); }
@@ -306,26 +368,38 @@ static u32 f32bits(int v)               /* s16 / 32768 as IEEE float bits */
     return s | ((e + 112u) << 23) | ((a & 0x7FFFu) << 8);
 }
 
-/* slot holding block b (its header already written), or ~0 */
+/* slot holding block b (its header already written), or ~0.
+ *
+ * 2026-11-03 deck: mute heard ~30 s late. The old version SEARCHED the
+ * chip's decoded store for any slot labelled b -- but the store keeps
+ * minutes of audio, so after the track ran a while, jumped, or was loaded
+ * again, an OLD copy of block b (one the chip will never play again) can
+ * carry the same label. The rewrite then went there and nothing changed
+ * until the slow path. Now the chip itself says where it plays: PSLOT is
+ * the slot of the block now playing (DSP word, follows PLAYBLK exactly in
+ * the emulator); block b is pslot + (b - p) -- the copy the chip will play
+ * next. Past the store's end it continues at slot 0 (checked by label). */
+#define PSLOT     0x1182E81Cu
 static u32 dr_slot(u32 b)
 {
-    if (dr_aslot != ~0u) {
-        u32 s = dr_aslot + (b - dr_ablk);
-        if (s < NSLOT && hrd1(RING + s * SLOT + 4704u) == b)
-            return s;
+    u32 p = hrd1(PLAYBLK), ps = hrd1(PSLOT);
+    if (ps >= NSLOT || b < p)
+        return ~0u;
+    u32 s = ps + (b - p);
+    if (s < NSLOT && hrd1(RING + s * SLOT + 4704u) == b) {
+        dr_ablk = b; dr_aslot = s;
+        return s;
     }
-    /* scan (bounded per call) for any block near b to re-anchor */
-    for (u32 k = 0; k < 2048u; k++) {
-        u32 s = dr_scan++ % NSLOT;
-        u32 n = hrd1(RING + s * SLOT + 4704u);
-        if (n <= b && b - n < NSLOT) {
-            u32 t = s + (b - n);
-            if (t < NSLOT && hrd1(RING + t * SLOT + 4704u) == b) {
-                dr_ablk = b; dr_aslot = t; sm_drscan++;
-                return t;
-            }
+    /* wrapped: the store restarted at slot 0 after ps */
+    u32 w0 = hrd1(RING + 4704u);                 /* block in slot 0 */
+    if (w0 <= b && b - w0 < ps) {
+        u32 t = b - w0;
+        if (hrd1(RING + t * SLOT + 4704u) == b) {
+            dr_ablk = b; dr_aslot = t; sm_drscan++;
+            return t;
         }
     }
+    sm_drlasth = s < NSLOT ? hrd1(RING + s * SLOT + 4704u) : 0xFFFFFFFFu;
     return ~0u;
 }
 
@@ -338,7 +412,7 @@ static int dr_write(u32 b, u32 s, u32 fp)
     if (dr_mask == 0) {                 /* everything on: the original mix */
         if (((fseek_t)FSEEK3)(fp, (s32)a, 0) != 0 || rd(dblk, BLKF * 4, fp) != BLKF * 4)
             return 0;
-    } else if (!mix(dblk, a, BLKF * 4, dr_mask, fp))
+    } else if (!mixb(dblk, a, BLKF * 4, dr_mask, fp, dtmp, dacc))
         return 0;
     if (hpi_dma_busy())
         return 0;
@@ -365,22 +439,72 @@ static int dr_write(u32 b, u32 s, u32 fp)
     return 1;
 }
 
-static void dr_step(u32 fp)
+static void dr_run(u32 fp, u32 budget)
 {
-    if (!dr_on || hpi_dma_busy())
+    if (!dr_on)
         return;
+    if (hpi_dma_busy()) { sm_drbusy++; return; }
     u32 save = POS(fp);
     u32 p = hrd1(PLAYBLK);
+    sm_drlastp = p;
+    /* start at the playhead, not where the last pass stopped: the bytes the
+     * chip plays NEXT are the ones that must change for the tap to be heard,
+     * and the rest of the buffer is fixed up behind playback */
     if (dr_next < p + 3) dr_next = p + 3;
-    for (u32 k = 0; k < DR_BUDGET; k++) {
+    /* a jump back leaves rfront far in the future: never chase blocks the
+     * chip has not decoded (the old code stalled there and mutes went to
+     * stale copies -- the deck's ~30 s) */
+    if (dr_end > p + MAXAHEAD) dr_end = p + MAXAHEAD;
+    u32 done = 0, miss = 0;
+    while (done < budget && miss < DR_GAP) {
         if (dr_next >= dr_end) { dr_on = 0; break; }
+        sm_drlastb = dr_next;
         u32 s = dr_slot(dr_next);
-        if (s == ~0u) { sm_drskip++; break; }   /* not decoded yet: later */
-        if (!dr_write(dr_next, s, fp)) { sm_drskip++; break; }
-        dr_next++;
+        if (s == ~0u) { sm_drnoslot++; dr_next++; miss++; continue; }
+        /* only blocks the decoder has finished: its NEXT block must already
+         * carry a label, else this slot may still be filling (writing into a
+         * half-decoded slot is what makes the deck stutter) */
+        if (dr_slot(dr_next + 1) == ~0u) { sm_drnoslot++; break; }
+        if (!dr_write(dr_next, s, fp)) { sm_drwfail++; dr_next++; miss++; continue; }
+        dr_next++; done++; miss = 0;
         sm_drblk++;
     }
+    if (done < budget)
+        sm_drskip++;
     ((fseek_t)FSEEK3)(fp, (s32)save, 0);
+}
+
+static void dr_step(u32 fp)
+{
+    dr_run(fp, DR_BUDGET);
+}
+
+static void poll_step(void)
+{
+    if (!valid || dfp_of != cur_fp)
+        return;
+    u32 mask = R8(PMASK) & 15;
+    if (mask != pmask_seen) {
+        pmask_seen = mask;
+        dr_on = 1;
+        dr_mask = mask;
+        dr_next = 0;
+        dr_end = (rfront > d_off ? (rfront - d_off) / (BLKF * 4) : 0) + 1;
+        sm_parm++;
+    }
+    if (dr_on)
+        dr_run((u32)(uptr)dfp, dr_next + 8u < dr_end ? DR_CATCH : DR_KEEP);
+}
+
+u32 sm_stack[8192 / 4] __attribute__((aligned(8)));   /* smhook.S */
+u32 sm_stack_busy;
+
+u32 sm_poll(u32 a, u32 b, u32 c, u32 d)
+{
+    u32 r = ((acc_t)POLL_ACC)(a, b, c, d);
+    sm_polls++;
+    poll_step();
+    return r;
 }
 #endif
 
@@ -398,6 +522,8 @@ u32 sm_fread(void *buf, u32 size, u32 count, u32 fp)
     if (!sm_buflo || sm_lastbuf < sm_buflo) sm_buflo = sm_lastbuf;
     { u32 e = sm_lastbuf + n; if (e > sm_bufhi) sm_bufhi = e; }
     u32 lo = d_off, hi = d_off + d_len;
+    if (valid && n != 0 && size != 0 && pos + n > d_off)
+        rfront = pos + n;               /* before the read: in flight counts */
     if (valid && n != 0 && size != 0) {
         /* track the buffered window even when passing through (mask == 0):
          * a later mute needs it */
@@ -409,13 +535,17 @@ u32 sm_fread(void *buf, u32 size, u32 count, u32 fp)
             last_mask = mask;
 #ifndef SM_NATIVE
             /* the decoded copy in the audio chip: from the playhead up to
-             * what was read before this change (later reads get mixed) */
-            dr_on = 1; dr_mask = mask; dr_next = 0;
-            dr_end = (pos > d_off ? (pos - d_off) / (BLKF * 4) : 0) + 1;
+             * what was read before this change (later reads get mixed).
+             * Driven from sm_poll once that runs (fast trigger above). */
+            if (!sm_polls) {
+                dr_on = 1; dr_mask = mask; dr_next = 0;
+                dr_end = (pos > d_off ? (pos - d_off) / (BLKF * 4) : 0) + 1;
+            }
 #endif
         }
 #ifndef SM_NATIVE
-        dr_step(fp);                /* restores fp to pos */
+        if (!sm_polls)
+            dr_step(fp);            /* restores fp to pos */
 #endif
     }
     if (!valid || !mask || n == 0 || pos + n <= lo || pos >= hi || size == 0) {

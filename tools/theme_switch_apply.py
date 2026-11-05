@@ -37,7 +37,12 @@ def main():
                          "whole area (code + work area + tables) first anyway")
     a = ap.parse_args()
     names = a.themes or TS.default_names()
-    (cbase, code), (dbase, data) = TS.plan(names)
+    try:
+        (cbase, code), (dbase, data) = TS.plan(names)
+    except RuntimeError as e:
+        print(f"REFUSED: {e}")
+        print("RESULT: FAIL")
+        return 1
     end = dbase + len(data)
     ok_file = os.path.expanduser(f"~/.xdj700_ts_survey_ok.{cbase:08x}.{end:08x}")  # never in the app
     import hid

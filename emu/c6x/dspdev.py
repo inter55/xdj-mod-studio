@@ -31,6 +31,9 @@ UHPI = 0x01E10000
 GPIO = 0x01E26000
 SPI1 = 0x01E12000
 DSP_PER_SH = float(os.environ.get("XDJ_DSP_RATIO", "0.6"))   # 300 / 500 MHz
+# XDJ_DSP_RATIO=3 puts ~5x more audio in the emulator's buffer, but it
+# doubled the stem mute (38 -> 82 ms, and 98 slot writes lost; measured
+# 2026-11-04 on scratchpad/audible_ab.py), so 0.6 stays the default.
 # The SH core runs in slices of up to millions of cycles between ticks, so a
 # host handshake (set a command code on the GPIO pins, poll the DSP's busy
 # pin, clear the code) can finish inside one slice before the DSP has run
@@ -75,6 +78,7 @@ class Uhpi:
                 if v & 4:
                     self.dev.hpic |= 4             # DSP raises HINT to the host
                 self.dev.hpic = (self.dev.hpic & 0x6) | (v & ~0x6 & 0xFFFF)
+            self.dev._hint_push()                  # the SH polls HINT as a pin
             return
         self.dev.uhpi_regs[off] = v
 
@@ -199,6 +203,7 @@ class DspDevice:
         self.cpu.code_hook = self._ensure_code
         self._arm_idle()
         self.hpic = 0
+        self._hint_push()
         self.hpia = 0
         self.uhpi_regs = {}
         self.running = False          # core executing
@@ -310,6 +315,7 @@ class DspDevice:
                     self.hpic &= ~4                 # host clears HINT
                 keep = 0x6
                 self.hpic = (self.hpic & keep) | (low & ~keep & 0xFFFF)
+            self._hint_push()                      # pin mirror (play mode)
             return
         if 0x40000 <= off < 0x40004:
             sh = 8 * (off - 0x40000)
@@ -337,10 +343,18 @@ class DspDevice:
             self._store(self.hpia, int.from_bytes(data[k:k + 4], "little"))
             self._hpia_set(self.hpia + 4)
 
+    def _hint_push(self):
+        """HPIC.HINT changed: push the pin state the SH polls (0x0405016C
+        bit0) into the fast core's mirror, so its PORT read stays in C."""
+        m = self.__dict__.get("_cs6_mirror")
+        if m is not None:
+            m.hint_bit = 1 if (self.hpic & 4) else 0
+
     def _store(self, a, v):
         self.bus.write(a, 4, v)
         pg = a >> 16
         if pg in self.decoded:        # code in this page changed: re-decode
+            self.__dict__["_hpid_code_hit"] = True   # fastcpu turns hpid_wr off
             # never under a running core (play mode)
             with self.run_lock:
                 self.decoded.discard(pg)
@@ -402,6 +416,7 @@ class DspDevice:
         self._arm_idle()
         self.bus.devices[GPIO][1].out45 = 0
         self.hpic = 0
+        self._hint_push()
         if getattr(self, "full_reset", True):  # a chip reset clears peripherals too
             from . import periph
             self.intc = periph.Intc(self)
@@ -420,7 +435,11 @@ class DspDevice:
     def _arm_idle(self):
         if os.environ.get("XDJ_DSP_IDLE", "1") != "0":
             from .cfast import set_idle_loop
-            set_idle_loop(self.cpu, 0xC004C8CC, 0x11804AE0, 0x11805C00)
+            # 0xC004C8CC: the stopped deck's idle loop; 0xC0048C2E: the
+            # playing deck's (ten channel polls per 2237-cycle pass, ~75 %
+            # of the DSP's cycles while a track plays, 2026-11-04)
+            more = () if os.environ.get("XDJ_DSP_IDLE_PLAY", "1") == "0" else (0xC0048C2E,)
+            set_idle_loop(self.cpu, 0xC004C8CC, 0x11804AE0, 0x11805C00, more)
 
     def _ensure_code(self, pc):
         pg = pc >> 16
@@ -436,6 +455,7 @@ class DspDevice:
         if self.in_reset and rl:
             self.in_reset = False
             self.hpic = 4             # HPI comes out of reset clean; boot ROM: "ready" (HINT)
+            self._hint_push()
             self.ev("reset-release")
         elif not self.in_reset and not rl:
             self.ev("reset-assert")
@@ -504,7 +524,7 @@ class DspDevice:
             while self._owed > self.max_lag and self._thr.is_alive() and not self.error:
                 self._cv.wait(0.05)        # back-pressure: the SH waits for the DSP
 
-    CHUNK = 60_000
+    CHUNK = int(os.environ.get("XDJ_DSP_CHUNK", "500000"))   # 60k -> 500k: +5% (2026-11-01)
 
     def _worker(self):
         while True:

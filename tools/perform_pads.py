@@ -51,22 +51,33 @@ import vredirect as VR
 import aafont
 
 PC0 = RO.CAVE + 0x3600              # 0x081DBF00 (image zero run -> 0x081E03EB)
-PDRAW = PC0 + 0x5C8  # 0x540 -> 0x5C0: swipe code (2026-10-12); -> 0x5E0 stale-latch fix (2026-10-19); -> 0x5C8: light-ink guards in fillrect/drawaa (2026-10-26) eat the hook gap
+PDRAW = PC0 + 0x600                   # 2026-11-03: was 0x5F0; +0x10
+                                     # so the touch hook can gate stem
+                                     # taps on STEMSOK. DRAW_SRC still
+                                     # ends <= KSSTEP (8 B spare).
+ # 0x540 -> ... -> 0x5E0 -> 0x5C8 -> 0x5F0: the FEATB
+                     # guards in the touch hook pushed HOOK_SRC past 0x5C8;
+                     # DRAW_SRC starts here (its end must stay <= KSSTEP)
 # 2026-10-17: incremental BJ paint (+~180 B) -> all units from KSSTEP on
 # shifted +0xB0 (cave zero run reaches PC0+0x44EB, still clear).
-KSDRAW = PC0 + 0x11F0                   # KEY SHIFT panel (own unit, calls DRAW)
-PDATA = PC0 + 0x1820
-PMASK = PC0 + 0x1A10                # u8 stem mute mask (bit V/D/B/O) + drawn
-PST = PC0 + 0x1A18                  # +0 latch +1 page +2 mode +4 drawn state
+# 2026-10-31: the FEATB guards also need room, so every unit after DRAW
+# moved +0x30; the tail gap after FONTK still ends well before PEND.
+# 2026-10-31b: the two FEATB-guard pool loads pushed the DRAW unit past
+# KSSTEP (2476 > 0x9A0); every address from KSSTEP up shifted +0x20 once
+# more (same pattern as above).
+KSDRAW = PC0 + 0x1240                   # KEY SHIFT panel (own unit, calls DRAW)
+PDATA = PC0 + 0x1870
+PMASK = PC0 + 0x1A80                # u8 stem mute mask (bit V/D/B/O) + drawn
+PST = PC0 + 0x1A88                  # +0 latch +1 page +2 mode +4 drawn state
 GATELATCH = PST + 3                 # u8 stock hot-cue pad held (gate arm)
 PSURF, PSTR, PCLIP, PCOL = PST + 8, PST + 12, PST + 16, PST + 20
 PTMP, PFONT, PTMPW = PST + 24, PST + 40, PST + 44
 PSW = PST + 48                      # swipe: u16 down-x, +2 pending code,
                                     # +3 swiped, +4 release frames left
-PADART = PC0 + 0x1A58               # stock hot-cue pad: 63 rows x 22 u16
-FONTP = PC0 + 0x2558                # pad font (14-px caps, digits < > + -)
-FONTT = PC0 + 0x2C98                # tab font (condensed 9-px caps, << >>)
-FONTK = PC0 + 0x37A8                # key-name font (condensed bold 13-px)
+PADART = PC0 + 0x1AC8               # stock hot-cue pad: 63 rows x 22 u16
+FONTP = PC0 + 0x25C8                # pad font (14-px caps, digits < > + -)
+FONTT = PC0 + 0x2D08                # tab font (condensed 9-px caps, << >>)
+FONTK = PC0 + 0x3818                # key-name font (condensed bold 13-px)
 # room for Windows fonts too: there Arial stands in for Helvetica Neue and
 # the tab/key tables come out ~310 B bigger each (2802 / 3325 B vs 2433 /
 # 2920 on a Mac) -- 2026-10-20 a Windows install hit FONTT's old limit
@@ -75,10 +86,13 @@ PDKW = PST + 56                    # u32: &lt_pdk (light add-on's ink flip,
                                     # r2 -> r2, r4-r7 preserved). Default =
                                     # PDKSTUB (bare rts: no flip); the
                                     # LIGHT installer re-arms it
-PDKSTUB = PC0 + 0x11EC             # rts;nop in the 4-byte gap kq..KSDRAW
+PDKSTUB = PC0 + 0x123C             # rts;nop in the 4-byte gap kq..KSDRAW
 ZERO_END = 0x081E03EB               # the image zero run holding the cave
 assert PEND <= ZERO_END, hex(PEND)
 HCPAGE = PMASK + 2                  # u8 hot cue page (tools/hotcue8 writes)
+STEMSOK = PMASK + 3                 # u8 1 = loaded file is a STEMS file
+                                    # (tools/stems/sm.c writes it; 0 = the
+                                    # STEMS row says NO STEMS IN THIS TRACK)
 HC_BASE = int(os.environ.get("HC_BASE", "0x09790000"), 0)
 HC_NEXTP = HC_BASE + 4              # hotcue8 entry table: +4 = hc_next
 # 2026-10-12: hot cue pages have no proven-free home yet -> the HOT CUE
@@ -109,6 +123,48 @@ MTLAST = PST + 62                       # u8 MT state as of the last flush
 # NOTE: offset 54, NOT 62 (§109's draft): byte loads/stores @r14 accept
 # disp 0..15 only, and PST+53..59 are free; 62 would be unelectable.
 BJNEXT = PST + 54                       # u8 next BJ paint stage
+# FEATB sits at PST+53, NOT PST+5 (the first draft): the drawn-state u32
+# lives at PST+4..7 and pdraw stores it with mov.l on EVERY flush, so a
+# PST+5 byte is overwritten back to 0 within one redraw (first emu run:
+# both "hidden" phases saw 0 because of exactly this). PST+53 is free
+# (PSW+4 release-frames end at +52); the guards read it through a
+# pc-pool address, so the @r14 disp-0..15 limit doesn't apply.
+# 2026-11-01: and NOT PST+53 either -- that is PSW+5, rtkeep's stale-latch
+# AGE byte (written 0 on every flush with a finger down): the hide bits
+# were wiped on the first touch and the hidden tabs came back (permanent
+# UPD boot test caught it once emu_check read the right byte). PST+55 is
+# referenced by no unit and no tool.
+FEATB = PST + 55                        # u8 hidden-feature bits (installer
+                                        # writes; 0 = full set, the historical
+                                        # layout): bit0 = KEY SHIFT tab hidden
+                                        # (live key shift not installed),
+                                        # bit1 = STEMS tab hidden (no stems).
+                                        # Hidden tabs are not drawn and their
+                                        # hit-test zone returns "none".
+FB_KEYSHIFT, FB_STEMS = 1, 2
+
+
+def pbo_lit():
+    """Address of the literal the pads' normal exit (pbo) jumps through --
+    stock blit 0x08E7D278. TOUCH FX chains in HERE (behind the pads) so it
+    draws after them: its tab sits in the pads' tab column. The
+    re-entrant exit keeps its own literal (stock only)."""
+    import struct as _st
+    for a, b, *_ in blobs():
+        for i in range(2, len(b) - 4, 2):
+            w, w2, pv = (_st.unpack_from("<H", b, i)[0], _st.unpack_from("<H", b, i + 2)[0],
+                         _st.unpack_from("<H", b, i - 2)[0])
+            if w >> 8 == 0xD0 and w2 == 0x402B and pv == 0x2100:   # mov.b r0,@r1 /
+                t = ((a + i + 4) & ~3) + (w & 0xFF) * 4             # mov.l @(d,pc),r0
+                if _st.unpack_from("<I", b, t - a)[0] == ORIG_BLIT:  # / jmp @r0
+                    return t
+    raise SystemExit("pads: normal-exit literal not found")
+
+
+def featbits(hide_keyshift=False, hide_stems=False):
+    """The FEATB byte for an install: 0 keeps every tab (old behaviour)."""
+    return ((FB_KEYSHIFT if hide_keyshift else 0) |
+            (FB_STEMS if hide_stems else 0))
 # 2026-10-18: the incremental (2 pads per flush) paint was built on the
 # "draw-call burst" theory; the real freeze was an illegal delay slot
 # (bsr pdswhint + PC-relative load). With that fixed, paint the whole BEAT
@@ -117,22 +173,30 @@ BJNEXT = PST + 54                       # u8 next BJ paint stage
 ONEFLUSH = not os.environ.get("PP_INCREMENTAL")
 BJ_AFTER_START = "pdbj" if ONEFLUSH else "pdend"
 BJ_AFTER_STAGE = "pdbj" if ONEFLUSH else "pdmkb"
-KSSTEP = PC0 + 0xF60                    # KEY SHIFT step logic (own unit)
+KSSTEP = PC0 + 0xFB0                    # KEY SHIFT step logic (own unit)
                                         # 2026-10-14: moved 0xE60->0xE90 for the
                                         # swipe-hint glyphs (draw unit 2256 B)
+                                        # 2026-10-31: +0x30 (FEATB guards)
 KSSTEP_ENTRY = KSSTEP
-HCSW = PC0 + 0x1050                      # HOT CUE tab swipe (own unit, 3 entries)
+HCSW = PC0 + 0x10A0                      # HOT CUE tab swipe (own unit, 3 entries)
 # 2026-10-18: the loaded track's key for the KEY SHIFT panel (own unit in
 # the gap after PDATA). The player keeps the key as a UTF-16 string
 # ("F#m", "Bm", or Camelot "11A") at TRK_KEYSTR (emulator: follows every
 # load; same static data area on the deck).
-TRKKEY = PC0 + 0x1954
+TRKKEY = PC0 + 0x19C8                   # 2026-11-03: was 0x19A4; the
+                                        # "NO STEMS IN THIS TRACK" text
+                                        # grew PDATA's block past it (324 B
+                                        # vs 308) and blobs() refused to
+                                        # build. The key panel unit fills
+                                        # KSDRAW..PDATA with no slack, so
+                                        # the 36 free bytes before PMASK
+                                        # are the only room there is.
 TRK_KEYSTR = 0x09D30430
 HC_PREVP = HC_BASE + 8 if HC_NEXTP != SAFE_ZERO else SAFE_ZERO
-RTKEEP = PC0 + 0x10E0                   # per-flush key re-assert (own unit)
+RTKEEP = PC0 + 0x1130                   # per-flush key re-assert (own unit)
                                         # 2026-10-21: +MT watch -> the units
                                         # below moved +0x20/+0x30
-KQTAB = PC0 + 0x11B8                    # 13 tagged Q20 words, -6..+6
+KQTAB = PC0 + 0x1208                    # 13 tagged Q20 words, -6..+6
                                         # (2026-10-25: +0x20 for rtkeep's
                                         # stale-jump-bit cleanup)
 PAYDOWN = 0x0B6C7A45                    # PAY+21 bit0: finger on the screen
@@ -162,6 +226,24 @@ for _g in range(3):
     _x += 2 * PADW + PAIRGAP + 19
 CONN = (116 + 2 * PADW + PAIRGAP + 4, 116 + 2 * (2 * PADW + PAIRGAP + 19) - 15)
 STEMS5 = [(115 + 126 * i, 112) for i in range(4)]  # VOCALS DRUMS BASS OTHER
+NOST_CX = (STEMS5[0][0] + STEMS5[-1][0] + STEMS5[-1][1]) // 2   # NO STEMS line centre
+
+
+def _aawidth(font, text):
+    """the width aawidth (on the deck) gives `text` in an aafont blob"""
+    w = 0
+    for ch in text:
+        c = ord(ch)
+        if c >= 97:
+            c -= 32
+        c -= 32
+        gi = font[4 + c] if 0 <= c < 64 else 0xFF
+        w += font[1] if gi == 0xFF else font[68 + 4 * gi + 1]
+    return w
+
+
+NOST_TEXT = "NO STEMS IN THIS TRACK"
+NOST_X = NOST_CX - _aawidth(aafont.blob("tab"), NOST_TEXT) // 2
 # (MIX pad removed 2026-10-18 at user request: tap a muted pad to un-mute)
 STLBL = ("voc", "drm", "bas", "oth")
 PAGES = 3                           # sizes 1<<(2p) .. 1<<(2p+2)
@@ -198,7 +280,7 @@ NUMS = ["1", "2", "4", "8", "16", "32", "64"]
 STRINGS = {"key": "STEMS", "mix": "MIX", "mi": "-", "pl": "+",
            "hc": "[ HOT CUE ]", "bj": "[ BEAT JUMP ]", "ks": "KEY SHIFT",
            "st": "STEMS", "voc": "VOCALS", "drm": "DRUMS", "bas": "BASS",
-           "oth": "OTHER", "mute": "MUTE",
+           "oth": "OTHER", "mute": "MUTE", "nost": "NO STEMS IN THIS TRACK",  # = NOST_TEXT
            "ib": "[", "if": "]", "lt": "<", "gt": ">", "reset": "RESET",
            "mtoff": "MT OFF",
            "swl": "[", "swr": "]"}
@@ -529,14 +611,30 @@ pht1:
   nop
   rts
   mov #41,r0
-pht2:
-  mov #{3 * (TAB_H + 1)},r3
-  cmp/hs r3,r2
-  bt pht3
+pht2:                       ; 2026-11-02: row first, THEN its FEATB bit
+  mov #{3 * (TAB_H + 1)},r3  ; (the KEY SHIFT bit was tested first, so with
+  cmp/hs r3,r2               ; KEY SHIFT hidden -- always with TOUCH FX --
+  bt pht3                    ; the STEMS tab below it was dead too; deck)
   nop
+  mov.l @({FEATB:#x},pc),r1  ; KEY SHIFT row
+  mov.b @r1,r0
+  tst #1,r0
+  bt pht2a                   ; bit clear (installed) -> tap live (tst T=1)
+  nop
+  rts
+  mov #0,r0
+pht2a:
   rts
   mov #42,r0
 pht3:
+  mov.l @({FEATB:#x},pc),r1
+  mov.b @r1,r0
+  tst #2,r0
+  bt pht3a                   ; bit clear (installed) -> tap live (tst T=1)
+  nop
+  rts
+  mov #0,r0
+pht3a:
   rts
   mov #43,r0
 phrow:                      ; BEAT JUMP mode: the whole hot-cue row is ours
@@ -829,7 +927,14 @@ paret:
   nop
 pastm:                      ; 30..33 toggle a stem mute bit, 34 MIX resets
   mov.l @({PMASK:#x},pc),r1
-  mov r0,r2
+  mov r0,r2                 ; keep the zone code: the STEMSOK test needs
+                            ; r0 (a byte load can only land in r0)
+  mov.b @(3,r1),r0          ; STEMSOK. With no stems the row is a message,
+  tst r0,r0                 ; not pads, so a tap there must not arm a mute
+  bt pstmnone               ; that would hit the NEXT STEMS file
+  nop                       ; (2026-11-03, user: "nothing happens")
+  mov r2,r0                 ; zone code back
+  add #-34,r2
   add #-34,r2
   tst r2,r2
   bt pstmreset
@@ -846,6 +951,9 @@ pstmreset:
   mov #0,r0
   rts
   mov.b r0,@r1
+pstmnone:                   ; no stems loaded: the row is not a control
+  rts
+  nop
 pblit:                      ; = FUN_08E7D278(r4 dev, r5 req, ..)
   mov.l @({PBUSY:#x},pc),r1 ; PP_GUARD: re-entrancy latch. Our painter
   mov.b @r1,r0              ; runs from THIS hook, and our own draws
@@ -1102,19 +1210,29 @@ pdjfresh:
   bsr drawtab
   movt r7
   mov #{TAB_X},r4
+  mov.l @({FEATB:#x},pc),r0      ; FEATB: KEY SHIFT hidden? (pool: PST+55
+  mov.b @r0,r0                   ; is beyond the @r14 disp-0..15 range)
+  tst #1,r0
+  bf pdsttab
   mov.l @({TAB_Y[2]:#x},pc),r5
   mov.l @({A["ks"]:#x},pc),r6
   mov r12,r0
   cmp/eq #2,r0
   bsr drawtab
   movt r7
+pdsttab:
   mov #{TAB_X},r4
+  mov.l @({FEATB:#x},pc),r0      ; FEATB: STEMS hidden? (pool, see above)
+  mov.b @r0,r0
+  tst #2,r0
+  bf pdmkc
   mov.l @({TAB_Y[3]:#x},pc),r5
   mov.l @({A["st"]:#x},pc),r6
   mov r12,r0
   cmp/eq #3,r0
   bsr drawtab
   movt r7
+pdmkc:
   mov #{MKC[0]},r4          ; tab-stack witness (see MKC)
   mov.l @({MKC[1]:#x},pc),r5
   bsr pxaddr
@@ -1148,6 +1266,22 @@ pdkeys2:                    ; KEY SHIFT mode
 pdstems:                    ; STEMS mode: VOCALS DRUMS BASS OTHER MIX pads
   bsr rowclear
   nop
+  mov.l @({STEMSOK:#x},pc),r1  ; set by the stems module: the loaded file
+  mov.b @r1,r0              ; is a STEMS file (2026-11-03: people loaded a
+  tst r0,r0                 ; plain track and "nothing happened")
+  bf pststart
+  mov.l @({PFONT:#x},pc),r1  ; no stems: one dim line across the row
+  mov.l @({FONTT:#x},pc),r0
+  mov.l r0,@r1
+  mov.l @({NOST_X:#x},pc),r4  ; x worked out at build time (fixed text)
+  mov.l @({HC_Y + NUM_DY:#x},pc),r5
+  mov.l @({A["nost"]:#x},pc),r6
+  mov.l @({DIM:#x},pc),r7    ; NOT in a delay slot (PC-relative load)
+  bsr drawaa
+  nop
+  bra pdmkb
+  nop
+pststart:
   mov.l @({PMASK:#x},pc),r1
   mov.b @r1,r10
   extu.b r10,r10
@@ -1160,37 +1294,13 @@ pstpad:
   mov.w @r1,r8              ; x
   mov.w @(2,r1),r0
   mov r0,r9                 ; w
-  mov.b @r14,r2             ; pressed rim: latch == 30+i?
-  extu.b r2,r2
-  mov r12,r0
-  add #30,r0
-  cmp/eq r2,r0
-  bf pstnp
-  mov.l @({PCOL:#x},pc),r1
-  mov.l @({ORANGE:#x},pc),r0
-  mov.l r0,@r1
-  mov r8,r4
-  add #-1,r4
-  mov.l @({HC_Y:#x},pc),r5
-  add #-1,r5
-  mov r9,r6
-  add #2,r6
-  bsr fillrect
-  mov #65,r7
-pstnp:
+                            ; (no pressed rim since 2026-11-03: the pad's
+                            ; own lit/muted look changes at once, and the
+                            ; room went to NO STEMS IN THIS TRACK)
   mov r8,r4
   mov.l @({HC_Y:#x},pc),r5
   bsr padart
   mov r9,r6
-  mov r12,r0                ; MIX (i=4)?
-  cmp/eq #4,r0
-  bf pstmbit
-  tst r10,r10               ; MIX: lit iff mask==0
-  bt pstmon
-  nop
-  bra pstmmute
-  nop
-pstmbit:
   mov r10,r2
   mov r12,r3
   neg r3,r3
@@ -2670,7 +2780,7 @@ tkbad:
   mov #0,r0
 """
 
-def blobs():
+def blobs(bits=0):
     h, d, k = assemble(HOOK_SRC), assemble(DRAW_SRC), assemble(KS_SRC)
     st = assemble(KSSTEP_SRC)
     rk = assemble(RTKEEP_SRC)
@@ -2935,6 +3045,8 @@ def blobs():
     assert FONTK + len(fk) <= PEND, len(fk)
     init = struct.pack("<II", 0, 0) + struct.pack("<IIII", 0, 0, 800, 0)
     init += b"\0" * (64 - len(init))    # through PST+63: PBUSY starts clear
+    fo = FEATB - PST
+    init = init[:fo] + bytes([bits & 0xFF]) + init[fo + 1:]   # FEATB
     init = init[:56] + struct.pack("<I", PDKSTUB) + init[60:]
     assert PDATA + len(_DATA) <= TRKKEY and TRKKEY + len(tk) <= PMASK, len(tk)
     return [(PC0, h), (PDRAW, d), (KSSTEP, st), (HCSW, hs), (RTKEEP, rk), (KQTAB, kq), (KSDRAW, k),
@@ -2962,8 +3074,8 @@ def hooks():
     return [(HOOK_TOUCH, ORIG_TOUCH, t), (HOOK_BLIT, ORIG_BLIT, b)]
 
 
-def install(mem):
-    for a, b in blobs():
+def install(mem, bits=0):
+    for a, b in blobs(bits):
         for i, x in enumerate(b):
             mem.w8(a + i, x)
     for a, old, new in patches():
@@ -3143,7 +3255,11 @@ def emu():
     mem.w16(RT_NOPSITE, site)
     mem.w32(VR.VTBL + 8, ncount)
     mem.w8(VKEY, 0)
-    # STEMS mode: VOCALS/DRUMS/BASS/OTHER mute pads
+    # STEMS mode: VOCALS/DRUMS/BASS/OTHER mute pads. STEMSOK=1 stands in for
+    # the stems module's write on a real STEMS file: with 0 the row is a
+    # message and the pads are inert by design (2026-11-03), so without this
+    # the mask walk below taps nothing.
+    mem.w8(STEMSOK, 1)
     STTAB = (TAB_X + TAB_W // 2, TAB_Y[3] + TAB_H // 2)
     tap(STTAB, "tab_stems")
     ok &= chk("tab_stems mode", mem.r8(PST + 2) == 3)
@@ -3167,6 +3283,32 @@ def emu():
     fb_png(m, "screenshots/perform_stems_voc_bas.png")
     tap(STM[0], "st_voc3")
     ok &= chk("stem toggle back on", mem.r8(PMASK) == 4)
+    # NO STEMS row (2026-11-03): the stems module writes PMASK+3 (STEMSOK)
+    # = 1 for a STEMS file and 0 for anything else, and PMASK+1 = 0xFF to
+    # force the row to repaint. A plain track must say so instead of
+    # drawing four pads that do nothing (user: "nothing happens").
+    import numpy as _np
+
+    def _rowband():
+        b = fb_png(m, "screenshots/perform_stems_row.png")
+        a = _np.frombuffer(b, dtype="<u2").reshape(480, 800)
+        return a[HC_Y:HC_Y + HC_H + 1, 112:620].copy()
+
+    def _stemsok(v):                 # what the module does on a track load
+        mem.w8(STEMSOK, v)
+        mem.w8(PMASK + 1, 0xFF)
+        run(6_000_000, panl.build_frame(keys=("TimeAcue",)))
+        run(3_000_000)
+
+    _stemsok(1)
+    have = _rowband()
+    _stemsok(0)
+    none = _rowband()
+    moved = int((have != none).sum())
+    print(f"[STEMSOK row] pixels changed by the no-stems line: {moved}")
+    ok &= chk("plain track -> NO STEMS line", moved > 400)
+    _stemsok(1)
+    ok &= chk("STEMS file -> pads come back", bool((_rowband() == have).all()))
     tap((STEMS5[0][0] + STEMS5[0][1] + 8, HC_Y + 30), "st_gap")
     ok &= chk("stem gap swallow", mem.r32(ZSTATE) == 0x1E)
     tap(BJTAB, "tab_bj_again")
@@ -3187,6 +3329,32 @@ def emu():
     mem.w8(VR.VSEL, 0)
     tap(HCTAB, "tab_hc")
     ok &= chk("tab_hc mode", mem.r8(PST + 2) == 0)
+    # Feature pick (installer's FEATB): a tab whose mod wasn't installed is
+    # neither drawn nor touchable; clearing the bits brings it back.
+    mem.w8(FEATB, FB_KEYSHIFT | FB_STEMS)
+    run(6_000_000)
+    tap(KSTAB, "tab_ks_hidden")
+    ok &= chk("hidden KEY SHIFT tab dead", mem.r8(PST + 2) == 0)
+    tap(STTAB, "tab_st_hidden")
+    ok &= chk("hidden STEMS tab dead", mem.r8(PST + 2) == 0)
+    ok &= chk("hide bits survive touches (rtkeep age byte is PSW+5)",
+              mem.r8(FEATB) == FB_KEYSHIFT | FB_STEMS)
+    # KEY SHIFT hidden, STEMS shown (every TOUCH FX + stems install): the
+    # STEMS tab must stay live (deck 2026-11-02: it was dead)
+    mem.w8(FEATB, FB_KEYSHIFT)
+    run(6_000_000)
+    tap(STTAB, "tab_st_only")
+    ok &= chk("STEMS tab live with KEY SHIFT hidden", mem.r8(PST + 2) == 3)
+    tap(KSTAB, "tab_ks_hidden2")
+    ok &= chk("KEY SHIFT tab still dead", mem.r8(PST + 2) == 3)
+    tap(HCTAB, "tab_hc3")
+    mem.w8(FEATB, 0)
+    run(6_000_000)
+    tap(KSTAB, "tab_ks_back")
+    ok &= chk("KEY SHIFT tab back", mem.r8(PST + 2) == 2)
+    tap(STTAB, "tab_st_back")
+    ok &= chk("STEMS tab back", mem.r8(PST + 2) == 3)
+    tap(HCTAB, "tab_hc2")
     # MODS OFF (MY SETTINGS): tabs dead, nothing drawn
     mem.w8(MSOFF, 1)
     tap(BJTAB, "mods_off_tab")

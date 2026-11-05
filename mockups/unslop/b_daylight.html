@@ -1,0 +1,133 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>XDJ Mod Studio — Daylight</title>
+<style>
+:root{
+  --bg:#f1efe8; --card:#fbfaf6; --ink:#1d1c18; --sec:#5c5a52; --mute:#8d8b81;
+  --line:#1d1c1816; --line2:#1d1c1826;
+  --accent:#28567e; --chip-deck:#15161a;
+  --sans:-apple-system,BlinkMacSystemFont,"SF Pro Text","Helvetica Neue",sans-serif;
+  --disp:"Iowan Old Style","Palatino",Georgia,serif;
+  --mono:ui-monospace,"SF Mono",Menlo,monospace;
+  --ease:cubic-bezier(.2,.7,.3,1);
+}
+*{box-sizing:border-box;margin:0}
+html,body{height:100%}
+body{background:var(--bg);color:var(--ink);font:15px/1.5 var(--sans);overflow-x:hidden;-webkit-font-smoothing:antialiased}
+
+.fx{opacity:0;transform:translateY(10px);animation:in .5s var(--ease) forwards}
+@keyframes in{to{opacity:1;transform:none}}
+.fx:nth-child(1){animation-delay:.05s}.fx:nth-child(2){animation-delay:.13s}.fx:nth-child(3){animation-delay:.21s}
+@media (prefers-reduced-motion:reduce){.fx{animation:none;opacity:1;transform:none}}
+
+/* bar */
+.top{display:flex;align-items:center;gap:26px;padding:0 36px;height:64px;border-bottom:1px solid var(--line)}
+.brand{font-family:var(--disp);font-size:16px}
+.top nav{display:flex;gap:20px;color:var(--sec);font-size:13px}
+.top nav a{color:inherit;text-decoration:none}
+.top nav a:hover{color:var(--ink)}
+.st{margin-left:auto;color:var(--mute);font:12px/1 var(--mono);display:flex;align-items:center;gap:8px}
+.led{width:7px;height:7px;border-radius:50%;background:#b9b6aa}
+
+/* hero split */
+.hero{display:grid;grid-template-columns:1.05fr .95fr;gap:64px;align-items:center;max-width:1200px;margin:0 auto;padding:72px 36px 60px}
+h1{font:600 46px/1.1 var(--disp);letter-spacing:-.015em}
+.sub{color:var(--sec);margin:18px 0 30px;max-width:42ch;font-size:15.5px}
+.sub b{color:var(--ink);font-weight:500}
+.acts{display:flex;gap:12px;align-items:center}
+.btn{font:inherit;font-size:14px;font-weight:500;border-radius:8px;padding:11px 20px;cursor:pointer;transition:background-color .18s var(--ease),border-color .18s var(--ease)}
+.btn.pri{background:var(--ink);color:var(--bg);border:1px solid var(--ink)}
+.btn.pri:hover{background:#33322c}
+.btn.sec{background:none;border:1px solid var(--line2);color:var(--ink)}
+.btn.sec:hover{background:var(--card)}
+.fine{margin-top:24px;color:var(--mute);font:12px/1.8 var(--mono)}
+
+/* bright moment: the deck's screen, floating on paper */
+.deck{background:var(--chip-deck);border-radius:18px;padding:28px 28px 22px;color:#ecece8;box-shadow:0 24px 60px #1d1c1826, 0 2px 0 #1d1c180d inset}
+.dhead{display:flex;justify-content:space-between;align-items:baseline;margin-bottom:10px}
+.track{font-weight:600;font-size:14.5px;letter-spacing:-.01em}
+.dimr{color:#8f9098;font:11px/1 var(--mono)}
+.dsub{color:#8f9098;font:12px/1 var(--mono);margin-bottom:16px}
+.dsub b{color:var(--accent-l,#7ab0d8);font-weight:500}
+.wave{display:flex;align-items:flex-end;gap:2px;height:84px;margin-bottom:14px}
+.wave i{flex:1;border-radius:1px;background:#3d4148;transform-origin:bottom;animation:wb 3.4s var(--ease) infinite alternate}
+.wave i:nth-child(3n){background:#c9553f}
+.wave i:nth-child(3n+1){background:#4a8fca}
+.wave i:nth-child(3n+2){background:#7fae55}
+@keyframes wb{from{height:10%}to{height:100%}}
+.wave i:nth-child(2n){animation-duration:2.8s}
+.wave i:nth-child(11n){animation-duration:4.1s}
+@media (prefers-reduced-motion:reduce){.wave i{animation:none;height:62%}}
+.dfoot{display:flex;gap:18px;color:#8f9098;font:11px/1 var(--mono);border-top:1px solid #ffffff14;padding-top:10px}
+.dfoot b{color:#ecece8;font-weight:500}
+
+/* methods: three cards, quiet, one accent only on the active */
+.methods{max-width:1200px;margin:0 auto;padding:0 36px 72px}
+.mhead{display:flex;align-items:baseline;justify-content:space-between;border-bottom:1px solid var(--line);padding-bottom:12px;margin-bottom:8px}
+.mhead h2{font:600 22px/1.2 var(--disp);letter-spacing:-.01em}
+.mhead span{color:var(--mute);font:12px/1 var(--mono)}
+.grid{display:grid;grid-template-columns:repeat(3,1fr);gap:14px}
+.card{background:var(--card);border:1px solid var(--line);border-radius:14px;padding:26px 24px 22px;display:flex;flex-direction:column;min-height:250px;text-decoration:none;color:var(--ink);transition:transform .18s var(--ease),box-shadow .18s var(--ease)}
+@media (hover:hover){.card:hover{transform:translateY(-3px);box-shadow:0 14px 34px #1d1c181a}}
+.card .n{font:12px/1 var(--mono);color:var(--mute);margin-bottom:18px;display:flex;justify-content:space-between}
+.card .n em{font-style:normal;color:var(--accent)}
+.t{color:var(--ink);font-size:17px;font-weight:600;letter-spacing:-.01em;margin-bottom:9px}
+.d{color:var(--sec);font-size:13.5px;text-decoration:none}
+.d b{color:var(--ink);font-weight:500}
+.go{margin-top:auto;padding-top:18px;color:var(--ink);font-size:13.5px;font-weight:500;display:flex;align-items:center;gap:7px;text-decoration:none}
+.go em{font-style:normal;display:inline-block;transition:transform .18s var(--ease)}
+@media (hover:hover){.card:hover .go em{transform:translateX(3px)}}
+</style>
+</head>
+<body>
+<header class="top fx">
+  <div class="brand">XDJ Mod Studio</div>
+  <nav><a href="#">Home</a><a href="#">Mod</a><a href="#">Theme Builder</a><a href="#">Track Builder</a><a href="#">Emulator</a></nav>
+  <div class="st"><span class="led"></span><span>No deck</span></div>
+</header>
+
+<section class="hero">
+  <div>
+    <h1 class="fx">How do you want to flash?</h1>
+    <p class="sub fx">The deck takes mods three ways: straight into its memory over the cable, as a file on your stick, or baked into firmware. <b>The modded screen scrolls the beat</b> either way.</p>
+    <div class="acts fx">
+      <button class="btn pri">Connect the deck</button>
+      <button class="btn sec">Try the emulator</button>
+    </div>
+    <div class="fine fx">XDJ-700 · stock 1.15 found → our build 1.16<br>first install 15–30 min, every write verified</div>
+  </div>
+  <div class="deck fx" aria-label="A modded XDJ-700 screen">
+    <div class="dhead"><span class="track">Get Lucky (STEMS).wav</span><span class="dimr">4:11</span></div>
+    <div class="dsub">STEMS <b>VOCALS −12</b> · KEY SHIFT <b>+2</b> · <b>RGB</b> waveform</div>
+    <div class="wave" aria-hidden="true"><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i></div>
+    <div class="dfoot"><span>BEAT <b>123.8</b></span><span>BLUE not on</span><span>THEME <b>Booth</b></span><span>MODS <b>ON</b></span></div>
+  </div>
+</section>
+
+<section class="methods">
+  <div class="mhead fx"><h2>Pick a method</h2><span>3 ways, same mods</span></div>
+  <div class="grid">
+    <a class="card fx" href="#">
+      <span class="n">01 <em>Safest</em></span>
+      <span class="t">RAM from the computer</span>
+      <span class="d">Quick install over the USB-B cable. <b>Nothing is flashed</b> — the mods live in the deck's memory until you switch it off.</span>
+      <span class="go">Choose mods <em>→</em></span>
+    </a>
+    <a class="card fx" href="#">
+      <span class="n">02 <em>In the works</em></span>
+      <span class="t">File on your USB stick</span>
+      <span class="d">Flash a small loader once, then <b>your rekordbox stick carries the mods</b>. No laptop at the gig, update by copying a file.</span>
+      <span class="go">Loader in the works</span>
+    </a>
+    <a class="card fx" href="#">
+      <span class="n">03 <em>Advanced</em></span>
+      <span class="t">UPD flash, permanent</span>
+      <span class="d">Bakes the mods into an update file, flashed like a normal firmware update. <b>Stays after power-off</b>.</span>
+      <span class="go">Build the file <em>→</em></span>
+    </a>
+  </div>
+</section>
+</body>
+</html>

@@ -1,0 +1,9 @@
+098006f0 D _ks_dsp
+09800d30 D _ks_dsp_end
+098006b0 D _ksh_dbg
+09800000 T _ksh_entry
+098006a4 D _ksh_flag
+09800040 T _ksh_hook
+098006a0 D _ksh_prev
+098006a8 D _ksh_status
+098006ac D _ksh_tries

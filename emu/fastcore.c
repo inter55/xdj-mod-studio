@@ -135,6 +135,35 @@ typedef struct {
     uint32_t tdg_lc_dirty, tdg_pad3;
     void (*irq_cb)(uint32_t which);
     void (*tdg_cont)(uint32_t pc, uint32_t ops);
+    /* --- appended: play-mode C event loop (2026-10-27, XDJ_EV_C).
+     * While ev_on this core OWNS the device-side timers -- TMU (both
+     * units), the LCDC frame counter and their interrupt latches -- plus
+     * the INTC priority/mask mirror, the PORT (0x0405xxxx) register
+     * mirror, the SCIF status reads and (hpid_wr) HPID word stores into
+     * the DSP's RAM. Python keeps the authoritative device clock dev.cyc
+     * and pushes it in after every mem.tick via core_ev_tick; slices are
+     * bounded by core_ev_next so timer IRQs stay within one pass. NOT
+     * cycle-exact by design (play mode only); exact mode never arms it. */
+    uint32_t ev_on, ev_pad0;
+    uint32_t tmu[2][3][4];       /* [unit][ch]{tcor, tcnt, tcr, acc} */
+    uint32_t tstr[2];
+    uint32_t cmt_str, cmt_csr, cmt_cnt, cmt_cor, cmt_acc; /* unused: the
+                                   firmware never starts the CMT (cmstr
+                                   writes land in the generic stub on both
+                                   cores); kept for a future port */
+    uint32_t lcdc_acc, lcdc_ldintr;   /* lo byte = LDINTR flags, hi = enables */
+    uint32_t lcdc_frame_cyc, lcdc_frames;
+    uint8_t  intc_ipr[0x28];     /* IPR bytes, 0x04080000+i */
+    uint8_t  intc_imr[13];
+    uint8_t  ev_lat;             /* latched IRQ bits (EV_*) awaiting delivery */
+    uint8_t  ev_pad1[7];
+    uint64_t ev_cyc;             /* device cycles ticked here */
+    uint32_t port_on;            /* PORT 0x04050000-0x0405FFFF mirror owned */
+    uint32_t scif_on;            /* SCFSR/SCFDR reads served from scif_rx[] */
+    uint32_t scif_rx[3];         /* rx byte counts, 0..16 (Python keeps live) */
+    uint32_t hpid_wr;            /* HPID word stores served into DSP RAM */
+    uint32_t hint_bit;           /* HPIC.HINT (1 = asserted, pin reads 0) */
+    uint8_t  *port;              /* 64 KB PORT mirror */
 } Core;
 
 /* ------------------------------------------------------------------ */
@@ -411,6 +440,254 @@ static int dmac_wr(Core *c, uint32_t p, int n, uint32_t v)
     return 1;
 }
 
+/* ------------- play-mode event loop: TMU / LCDC / INTC / PORT ------------ */
+/* Exact ports of sh7724.py's _tmu_tick, _lcdc_tick, cycles_to_next_event
+ * (TMU + LCDC terms) and take_interrupt (these sources only), driven by
+ * the Python-owned device clock. See the Core field comment. */
+enum { EV_T00 = 0, EV_T01, EV_T02, EV_T10, EV_T11, EV_T12, EV_LCDC, EV_N };
+static const struct { uint16_t code; uint8_t ipr, shift, imr, bit; }
+    EV_SRC[EV_N] = {                    /* SOURCES in sh7724.py */
+    {0x400, 0x00, 12, 4, 4}, {0x420, 0x00, 8, 4, 5}, {0x440, 0x00, 4, 4, 6},
+    {0x920, 0x08, 12, 0, 4}, {0x940, 0x08, 8, 0, 5}, {0x960, 0x08, 4, 0, 6},
+    {0xF40, 0x04, 8, 4, 0},
+};
+static const uint32_t tmu_div[8] = {4, 16, 64, 256, 1024, 4, 4, 4};
+
+static void ev_tick(Core *c, uint64_t upto)
+{
+    if (upto <= c->ev_cyc) return;
+    uint64_t d = upto - c->ev_cyc;
+    c->ev_cyc = upto;
+    uint64_t pcl = d / 10u;                 /* PCLK 50 MHz / CPU 500 MHz */
+    for (int u = 0; u < 2; u++) {
+        uint32_t tstr = c->tstr[u];
+        for (int ch = 0; ch < 3; ch++) {
+            if (!(tstr & (1u << ch))) continue;
+            uint32_t *st = c->tmu[u][ch];   /* tcor, tcnt, tcr, acc */
+            uint32_t div = tmu_div[st[2] & 7];
+            uint64_t acc = st[3] + pcl;
+            uint64_t n = acc / div;
+            if (!n) { st[3] = (uint32_t)acc; continue; }
+            st[3] = (uint32_t)(acc - n * div);
+            uint64_t t = st[1];
+            if (n <= t) { st[1] = (uint32_t)(t - n); continue; }
+            uint64_t period = (uint64_t)st[0] + 1u;    /* 2^32 when all-ones */
+            uint64_t rem = (n - t - 1) % period;
+            st[1] = (uint32_t)(st[0] - rem);
+            st[2] |= 0x100u;
+            if (st[2] & 0x20u) c->ev_lat |= (uint8_t)(1u << (u * 3 + ch));
+        }
+    }
+    c->lcdc_acc += (uint32_t)d;
+    while (c->lcdc_acc >= c->lcdc_frame_cyc) {
+        c->lcdc_acc -= c->lcdc_frame_cyc;
+        c->lcdc_frames++;
+        uint32_t en = (c->lcdc_ldintr >> 8) & 0x7Fu;
+        if (en) {
+            c->lcdc_ldintr |= en;
+            c->ev_lat |= (uint8_t)(1u << EV_LCDC);
+        }
+    }
+}
+
+/* device cycles from ev_cyc until the next C-side event (timer underflow
+ * or LCDC frame). ev_lat bits that could be delivered NOW force 0 so the
+ * Python pass ends and delivery happens. */
+uint64_t core_ev_next(Core *c)
+{
+    if (!c->ev_on) return 0xFFFFFFFF00000000ull;
+    uint32_t imask = (c->sr >> 4) & 0xF;
+    if (!(c->sr & BL)) {
+        for (int i = 0; i < EV_N; i++) {
+            if (!(c->ev_lat & (1u << i))) continue;
+            uint32_t w = c->intc_ipr[EV_SRC[i].ipr] |
+                         ((uint32_t)c->intc_ipr[EV_SRC[i].ipr + 1] << 8);
+            if ((c->intc_imr[EV_SRC[i].imr] & (1u << EV_SRC[i].bit)) ||
+                !((w >> EV_SRC[i].shift) & 0xF) ||
+                (((w >> EV_SRC[i].shift) & 0xF) <= imask))
+                continue;
+            return 0;                       /* deliverable right now */
+        }
+    }
+    uint64_t best = ~(uint64_t)0;
+    for (int u = 0; u < 2; u++) {
+        uint32_t tstr = c->tstr[u];
+        for (int ch = 0; ch < 3; ch++) {
+            if (!(tstr & (1u << ch))) continue;
+            uint32_t *st = c->tmu[u][ch];
+            if (!(st[2] & 0x20u)) continue;
+            uint64_t pcl = ((uint64_t)st[1] + 1u) * tmu_div[st[2] & 7] - st[3];
+            if (!pcl) pcl = 1;
+            uint64_t cy = pcl * 10u;
+            if (cy < best) best = cy;
+        }
+    }
+    if ((c->lcdc_ldintr >> 8) & 0x7Fu) {
+        uint64_t cy = c->lcdc_frame_cyc - c->lcdc_acc;
+        if (cy < best) best = cy;
+    }
+    return best == ~(uint64_t)0 ? 100000u : best;
+}
+
+void core_ev_tick(Core *c, uint64_t upto_dev_cyc) { ev_tick(c, upto_dev_cyc); }
+
+void core_ev_deliver(Core *c)
+{
+    if (!c->ev_on) return;
+    while (c->ev_lat) {
+        uint32_t imask = (c->sr >> 4) & 0xF;
+        if (c->sr & BL) return;
+        int took = 0;
+        for (int i = 0; i < EV_N; i++) {
+            if (!(c->ev_lat & (1u << i))) continue;
+            if (c->intc_imr[EV_SRC[i].imr] & (1u << EV_SRC[i].bit)) continue;
+            uint32_t w = c->intc_ipr[EV_SRC[i].ipr] |
+                         ((uint32_t)c->intc_ipr[EV_SRC[i].ipr + 1] << 8);
+            uint32_t lvl = (w >> EV_SRC[i].shift) & 0xF;
+            if (!lvl || lvl <= imask) continue;
+            c->ev_lat &= (uint8_t)~(1u << i);
+            core_enter_interrupt(c, lvl, EV_SRC[i].code);
+            took = 1;
+            break;                          /* imask may have moved up */
+        }
+        if (!took) return;
+    }
+}
+
+/* --- register serving (all addresses PHYSICAL, P2 already stripped) --- */
+static int tmu_off(uint32_t p, int *unit, uint32_t *off)
+{
+    if (p - 0xFFD80000u < 0x30u) { *unit = 0; *off = p - 0xFFD80000u; return 1; }
+    if (p - 0xFFD90000u < 0x30u) { *unit = 1; *off = p - 0xFFD90000u; return 1; }
+    return 0;
+}
+/* n bytes at a TMU offset; 0 = not handled (cross). TOCR (+0) is not
+ * modeled by the Python device either -- it crosses to the stub. */
+static int ev_rd(Core *c, uint32_t p, int n, uint32_t *v)
+{
+    uint32_t m = 0xFFFFFFFFu >> (32u - 8u * (uint32_t)n);
+    int u; uint32_t off;
+    if (c->ev_on && tmu_off(p, &u, &off)) {
+        if (off == 4u && n == 1) { *v = c->tstr[u] & 0xFFu; return 1; }
+        if (off < 8u) return 0;
+        uint32_t ch = (off - 8u) / 12u, kind = (off - 8u) % 12u;
+        if (ch > 2u || kind + (uint32_t)n > 10u || (off & (uint32_t)(n - 1)))
+            return 0;
+        uint32_t *st = c->tmu[u][ch];
+        uint32_t w = kind < 4u ? st[0] : kind < 8u ? st[1] : st[2];
+        uint32_t sh = 8u * (kind & 3u);
+        if (kind >= 8u && n == 1 && (off & 1u)) { w >>= 8; sh = 0; }
+        *v = (w >> sh) & m;
+        return 1;
+    }
+    if (c->ev_on && p - 0x04080000u < 0x28u && n == 1) {   /* IPR bytes */
+        *v = c->intc_ipr[p - 0x04080000u]; return 1;
+    }
+    if (c->ev_on && p - 0x04080080u < 0x34u && n == 1) {   /* IMR bytes */
+        *v = c->intc_imr[(p - 0x04080080u) >> 2]; return 1;
+    }
+    if (c->ev_on && p - 0xFE940468u < 2u) {               /* LDINTR */
+        uint32_t sh = 8u * (p & 1u);
+        *v = (c->lcdc_ldintr >> sh) & m; return 1;
+    }
+    if (c->port_on && p - 0x04050000u < 0x10000u && n == 1) {
+        uint32_t b = c->port[p - 0x04050000u];
+        if (p == 0x0405012Eu) b |= 0x12u;                  /* PIN_HIGH pull-up */
+        if (p == 0x0405016Cu) b = (b & ~1u) | (c->hint_bit ? 0u : 1u);
+        *v = b; return 1;
+    }
+    if (c->scif_on &&
+        (p - 0xFFE00000u < 0x28u || p - 0xFFE10000u < 0x28u ||
+         p - 0xFFE20000u < 0x28u) &&
+        ((p & 0x1Fu) == 0x10u || (p & 0x1Fu) == 0x1Cu)) {
+        int ch = (int)((p - 0xFFE00000u) >> 16);
+        uint32_t r = (p & 0x1Eu) == 0x10u
+            ? (c->scif_rx[ch] ? 0x63u : 0x60u)             /* SCFSR */
+            : ((c->scif_rx[ch] < 16u ? c->scif_rx[ch] : 16u) << 8);
+        /* SCFDR lo byte = 0; serve byte/word slices of the 16-bit reg */
+        if (n == 1) *v = (p & 1u) ? ((r >> 8) & 0xFFu) : (r & 0xFFu);
+        else *v = r & m;
+        return 1;
+    }
+    return 0;
+}
+
+static int ev_wr(Core *c, uint32_t p, int n, uint32_t v)
+{
+    int u; uint32_t off;
+    if (c->ev_on && tmu_off(p, &u, &off)) {
+        if (off == 4u) { c->tstr[u] = v & 0xFFu;
+            for (int ch = 0; ch < 3; ch++)                /* start = reload */
+                if (v & (1u << ch)) c->tmu[u][ch][1] = c->tmu[u][ch][0];
+            return 1; }
+        if (off < 8u) return 0;
+        uint32_t ch = (off - 8u) / 12u, kind = (off - 8u) % 12u;
+        if (ch > 2u || kind + (uint32_t)n > 10u || (off & (uint32_t)(n - 1)))
+            return 0;
+        uint32_t *st = c->tmu[u][ch];
+        uint32_t sh = 8u * (kind & 3u);
+        uint32_t m = (0xFFFFFFFFu >> (32u - 8u * (uint32_t)n)) << sh;
+        if (kind < 8u) {
+            st[kind < 4u ? 0 : 1] = (st[kind < 4u ? 0 : 1] & ~m) | ((v << sh) & m);
+            return 1;
+        }
+        if (n == 2) {                     /* UNF is R/(W0): 1 writes ignore */
+            st[2] = ((v & ~0x0100u) | (st[2] & 0x0100u & v)) & 0xFFFFu;
+        } else {                          /* byte: RMW the addressed half */
+            uint32_t cur = st[2];
+            if (off & 1u) cur = (cur & 0x00FFu) | ((v & 0xFFu) << 8);
+            else          cur = (cur & 0xFF00u) | (v & 0xFFu);
+            st[2] = cur & 0xFFFFu;
+        }
+        return 1;
+    }
+    if (c->ev_on && p - 0x04080000u < 0x28u && n == 1) {
+        c->intc_ipr[p - 0x04080000u] = (uint8_t)v; return 1;
+    }
+    if (c->ev_on && p - 0x04080080u < 0x34u && n == 1) {
+        c->intc_imr[(p - 0x04080080u) >> 2] = (uint8_t)v; return 1;
+    }
+    if (c->ev_on && p - 0x040800C0u < 0x34u && n == 1) {   /* IMCR: W1C */
+        c->intc_imr[(p - 0x040800C0u) >> 2] &= (uint8_t)~v; return 1;
+    }
+    if (c->ev_on && p - 0xFE940468u < 2u && (p & 1u) + (uint32_t)n <= 2u) {
+        for (int i = 0; i < n; i++) {
+            uint32_t sh = 8u * ((p & 1u) + (uint32_t)i);
+            c->lcdc_ldintr = (c->lcdc_ldintr & ~(0xFFu << sh)) |
+                             (((v >> (8 * i)) & 0xFFu) << sh);
+        }
+        c->lcdc_ldintr &= 0xFFFFu;
+        return 1;
+    }
+    if (c->port_on && p - 0x04050000u < 0x10000u &&
+        p - 0x04050000u + (uint32_t)n <= 0x10000u) {
+        if (p <= 0x04050128u && 0x04050128u < p + (uint32_t)n)
+            return 0;                     /* DSP cmd pins: Python sync */
+        for (int i = 0; i < n; i++)
+            c->port[p - 0x04050000u + (uint32_t)i] = (uint8_t)(v >> (8 * i));
+        return 1;
+    }
+    return 0;
+}
+
+/* HPID word store at the latched HPIA, straight into the DSP's RAM (the
+ * same bytearrays the C6x core runs over). hpid_wr is armed by fastcpu.py
+ * only while the DSP runs on its own thread and no code page has ever
+ * been written through here (dspdev._store would have re-decoded). */
+static int ev_hpid_wr(Core *c, uint32_t p, int n, uint32_t v)
+{
+    if (!c->hpid_wr || n != 4 || (p & 3u) || p - 0x180C0000u >= 4u)
+        return 0;
+    uint32_t a = c->cs6_addr & ~3u;
+    for (uint32_t i = 0; i < c->dsp_region_n && i < 8u; i++) {
+        if (a - c->dsp_region[i].base < c->dsp_region[i].len) {
+            memcpy(c->dsp_region[i].ptr + (a - c->dsp_region[i].base), &v, 4);
+            return 1;
+        }
+    }
+    return 0;                              /* peripheral: Python decides */
+}
+
 static uint32_t rd8p(Core *c, uint32_t a)
 {
     int fb, ro;
@@ -422,6 +699,7 @@ static uint32_t rd8p(Core *c, uint32_t a)
     if (h) return *h;
     if (a - CS6BASE < CS6SPAN) return cs6_rd8(c, a);
     if (a - TDG_BASE < 0x100u && c->tdg_on) return tdg_r8(c, a);
+    { uint32_t dv; if (ev_rd(c, a, 1, &dv)) return dv; }
     { uint32_t dv; if (dmac_rd(c, a, 1, &dv)) return dv; }
     return c->io_rd(a) & 0xFF;
 }
@@ -447,6 +725,7 @@ static void wr8p(Core *c, uint32_t a, uint32_t v)
     }
     if (a - CS6BASE < CS6SPAN) { cs6_wr8(c, a, v); return; }
     if (a - TDG_BASE < 0x100u && c->tdg_on) { tdg_wr8(c, a, v); return; }
+    if (ev_wr(c, a, 1, v & 0xFFu)) return;
     if (dmac_wr(c, a, 1, v & 0xFFu)) return;
     c->io_wr(a, v & 0xFF);   /* the callback sets io_break if it matters */
 }
@@ -513,6 +792,7 @@ static inline uint32_t prd(Core *c, uint32_t p, int n)
                 }
             }
             { uint32_t dv; if (dmac_rd(c, p, n, &dv)) return dv; }
+            { uint32_t dv; if (ev_rd(c, p, n, &dv)) return dv; }
             if (tp < 0x100u && c->tdg_on) {     /* 2DG register file */
                 uint32_t w = (tp >> 2) == 1u ? c->tdg_ssr : c->tdg_reg[tp >> 2];
                 return (w >> (8u * (tp & 3u))) &
@@ -553,6 +833,8 @@ static inline void pwr(Core *c, uint32_t p, int n, uint32_t v)
                 return;
             }
             if (dmac_wr(c, p, n, v)) return;
+            if (ev_hpid_wr(c, p, n, v)) return;
+            if (ev_wr(c, p, n, v)) return;
             if (tp < 0x100u && c->tdg_on && ((tp >> 2) != 0u || c->tdg_cfast)) {
                 /* same as n byte stores in order; SCLR (word 0) crosses */
                 for (int i = 0; i < n; i++)

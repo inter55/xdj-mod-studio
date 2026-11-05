@@ -173,9 +173,19 @@ def main():
     print(f"loaded: red={red_text(m, 'loaded')} pos={mem.r32(SH_POS)} "
           f"dsp err={d.error} [{time.time()-t0:.0f}s]", flush=True)
     n0 = len(d.asp1.out)
-    if not os.environ.get("NOPLAY"):           # tracks that auto-play: skip
+    # 0x11837BF8 is the DSP's own state: 1 loading, 2 playing, 3 paused
+    # (CLAUDE.md §121). In this line a LOAD AUTO-PLAYS (SH mode 3, DSP 2) and
+    # PlayPause then PAUSES it (mode 5, DSP 3) -- so pressing it blindly made
+    # every "play" run measure a paused deck (frozen counter, no reads, a
+    # 13-block output loop). Only press when the DSP is not already playing.
+    st0 = d.bus.read(0x11837BF8, 4)
+    pressed = False
+    if not os.environ.get("NOPLAY") and st0 != 2:
         dev.panel_frame = panl.build_frame(keys=("PlayPause",), tempo=250)
         run(3e6)
+        pressed = True
+    print(f"play: dsp state before={st0} pressed={pressed} "
+          f"state after={d.bus.read(0x11837BF8, 4)}", flush=True)
     dev.panel_frame = panl.build_frame(tempo=250)
     done = 0
     while done < PLAY_STEPS:
@@ -187,6 +197,8 @@ def main():
             m.save(os.environ["SAVE_EARLY"])   # feed still running here
             print("saved", os.environ["SAVE_EARLY"], flush=True)
         print(f"  play +{done/1e6:.0f}M pos={mem.r32(SH_POS)} mode={mem.r8(0x0B6C4264)} "
+              f"dsp state={d.bus.read(0x11837BF8, 4)} ctr={d.bus.read(0x11837CCC, 4)} "
+              f"fpos={d.bus.read(0x118381B0, 4):#x} "
               f"dac words {len(d.asp1.out) - n0} nonzero {nz} dsp err={d.error} "
               f"[{time.time()-t0:.0f}s]", flush=True)
         if d.error:

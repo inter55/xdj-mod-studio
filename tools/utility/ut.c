@@ -23,12 +23,13 @@ typedef unsigned int u32;
 
 #if !defined(MSOFF) || !defined(MSSAVE) || !defined(MODEB) || !defined(VSELB) \
     || !defined(BRAKE_LIT) || !defined(MSBRAKE) || !defined(MSGATE) \
-    || !defined(TS_BASE) || !defined(TS_DATA) || !defined(BRAKE_STOCK)
+    || !defined(TS_BASE) || !defined(TS_DATA) || !defined(BRAKE_STOCK) \
+    || !defined(PM_MODE) || !defined(PM_PREV)
 #error address defines missing (tools/utility/build.sh)
 #endif
 
 #define NSTOCK 16
-#define NOURS  5
+#define NOURS  6
 #define CB_NOP   0x08DD0C6Au
 #define CB_DRAW  0x08DD0C6Eu       /* PLAY MODE draw: label + values[idx] */
 #define CB_BEGIN 0x08DD198Cu
@@ -36,10 +37,11 @@ typedef unsigned int u32;
 #define CB_Q0    0x08DD20A0u
 #define CB_END   0x08DD20E2u
 
-enum { K_MODS, K_WAVE, K_BRAKE, K_GATE, K_THEME };
+enum { K_MODS, K_WAVE, K_PHASE, K_BRAKE, K_GATE, K_THEME };
 
 static const u16 L_MODS[] = u"MODS";
 static const u16 L_WAVE[] = u"WAVEFORM COLOR";
+static const u16 L_PHASE[] = u"PHASE METER";
 static const u16 L_BRAKE[] = u"VINYL BRAKE LENGTH";
 static const u16 L_GATE[] = u"HOT CUE GATE";
 static const u16 L_THEME[] = u"THEME";
@@ -54,6 +56,11 @@ static const u16 *const V_MODS[] = {S_ON, S_OFF};
 static const u16 *const V_WAVE[] = {S_BLUE, S_RGB, S_3B};
 static const u16 *const V_BRAKE[] = {S_B1, S_B2, S_B4, S_B8, S_B15, S_B05};
 static const u16 *const V_GATE[] = {S_OFF, S_GATE};
+/* like the XDJ-1000MK2: TYPE 1 = scrolling beat ruler (tools/phasemeter),
+ * TYPE 2 = the deck's own meter. pm_mode 1 / 0. */
+static const u16 S_T1[] = u"TYPE 1", S_T2[] = u"TYPE 2";
+static const u16 *const V_PHASE[] = {S_T1, S_T2};
+#define PM_IN (R32(PM_PREV) != 0)              /* installer sets pm_prev */
 static const u16 *const V_TNONE[] = {S_NONE};
 /* the brake K literal per index (MY SETTINGS uses the same list) */
 static const u32 BK[6] = {BRAKE_STOCK, BRAKE_STOCK * 2, BRAKE_STOCK * 4,
@@ -73,6 +80,7 @@ int ut_commit(u32 *r);
 u32 ut_tab[NSTOCK + NOURS][13] = {
     [NSTOCK + K_MODS]  = REC(L_MODS, V_MODS, 2),
     [NSTOCK + K_WAVE]  = REC(L_WAVE, V_WAVE, 3),
+    [NSTOCK + K_PHASE] = REC(L_PHASE, V_PHASE, 2),
     [NSTOCK + K_BRAKE] = REC(L_BRAKE, V_BRAKE, 6),
     [NSTOCK + K_GATE]  = REC(L_GATE, V_GATE, 2),
     [NSTOCK + K_THEME] = REC(L_THEME, V_TNONE, 1),
@@ -105,6 +113,10 @@ static u32 current(int k, u32 *r)
     case K_WAVE:  { u32 v = R8(MODEB); return v < 3 ? v : 0; }
     case K_BRAKE: { u32 v = R8(MSBRAKE); return v < 6 ? v : 0; }
     case K_GATE:  return R8(MSGATE) ? 1 : 0;
+    case K_PHASE:
+        if (!PM_IN) { r[1] = (u32)V_TNONE; r[2] = 1; return 0; }
+        r[1] = (u32)V_PHASE; r[2] = 2;
+        return R32(PM_MODE) == 1 ? 0 : 1;
     default: {
         struct ts_hdr *h = themes();
         if (!h) {
@@ -119,6 +131,15 @@ static u32 current(int k, u32 *r)
                 tnames[i][j] = s[j] == '-' ? ' ' : s[j];
             tnames[i][j] = 0;
             tvals[i + 1] = tnames[i];
+        }
+        /* 2026-11-03 deck: LIGHT without the light add-on (tools/lighttext)
+         * = flipped pictures + WHITE text on a light screen (unreadable).
+         * Offer LIGHT only once the add-on has armed itself for it
+         * (lt_idx == LIGHT's number, written last by its installer). */
+        if (nt && R32(LT_IDX) != nt) {
+            const u8 *s = (const u8 *)h + h->name_off + 16 * (nt - 1);
+            if (s[0] == 'L' && s[1] == 'I' && s[2] == 'G' && s[3] == 'H' && s[4] == 'T')
+                nt--;
         }
         r[1] = (u32)tvals; r[2] = nt + 1;
         return h->cur <= nt ? h->cur : 0;
@@ -176,6 +197,11 @@ int ut_commit(u32 *r)
     case K_WAVE:  R8(MODEB) = (u8)v; break;
     case K_BRAKE: R8(MSBRAKE) = (u8)v; R32(BRAKE_LIT) = BK[v]; break;
     case K_GATE:  R8(MSGATE) = (u8)v; break;
+    case K_PHASE:
+        if (!PM_IN)
+            return 0;
+        R32(PM_MODE) = v == 0 ? 1u : 0u;
+        break;
     default: {
         struct ts_hdr *h = themes();
         if (!h || h->busy)

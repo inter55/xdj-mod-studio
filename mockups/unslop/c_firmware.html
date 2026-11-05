@@ -1,0 +1,137 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>XDJ Mod Studio — Firmware</title>
+<style>
+:root{
+  --bg:#121311; --panel:#171916; --ink:#e6e4db; --sec:#a3a298; --mute:#6f6e65;
+  --line:#ffffff12; --line2:#ffffff22;
+  --amber:#e8a33d; --ok:#8fae7e;
+  --sans:-apple-system,BlinkMacSystemFont,"SF Pro Text","Helvetica Neue",sans-serif;
+  --mono:ui-monospace,"SF Mono",Menlo,monospace;
+  --ease:cubic-bezier(.2,.7,.3,1);
+}
+*{box-sizing:border-box;margin:0}
+html,body{height:100%}
+body{background:var(--bg);color:var(--ink);font:15px/1.5 var(--sans);overflow-x:hidden;-webkit-font-smoothing:antialiased}
+
+.fx{opacity:0;transform:translateY(10px);animation:in .5s var(--ease) forwards}
+@keyframes in{to{opacity:1;transform:none}}
+.l1{animation-delay:.05s}.l2{animation-delay:.14s}.l3{animation-delay:.23s}.l4{animation-delay:.32s}
+@media (prefers-reduced-motion:reduce){.fx{animation:none;opacity:1;transform:none}}
+
+/* type-first, no window dressing */
+.wrap{max-width:1080px;margin:0 auto;padding:44px 36px 72px}
+.top{display:flex;align-items:center;gap:26px;padding:22px 0 0}
+.brand{font:600 13px/1 var(--mono);letter-spacing:.08em;color:var(--ink)}
+.top nav{display:flex;gap:18px;color:var(--mute);font-size:12.5px}
+.top nav a{color:inherit;text-decoration:none}
+.top nav a:hover{color:var(--ink)}
+.st{margin-left:auto;font:11px/1 var(--mono);color:var(--mute);display:flex;gap:8px;align-items:center}
+.led{width:7px;height:7px;border-radius:50%;background:#4a4a44}
+
+/* hero: giant mono headline, hairline underline moment */
+h1{font:500 clamp(40px,6vw,64px)/1.04 var(--mono);letter-spacing:-.03em;margin:64px 0 0}
+h1 .amber{color:var(--amber)}
+.rule{height:1px;background:var(--line2);margin:34px 0 26px;position:relative;overflow:visible}
+.rule i{position:absolute;left:0;top:0;height:1px;width:34%;background:var(--amber);animation:draw 1.1s var(--ease) .4s forwards;transform-origin:left}
+@keyframes draw{from{transform:scaleX(0)}to{transform:scaleX(1)}}
+@media (prefers-reduced-motion:reduce){.rule i{animation:none}}
+.lede{color:var(--sec);max-width:56ch;font-size:15.5px}
+.lede b{color:var(--ink);font-weight:500}
+.acts{display:flex;gap:12px;margin-top:30px}
+.btn{font:13px/1 var(--mono);border-radius:6px;padding:11px 18px;cursor:pointer;border:1px solid var(--line2);background:none;color:var(--ink);transition:background-color .16s var(--ease),border-color .16s var(--ease)}
+.btn:hover{background:var(--panel)}
+.btn.pri{background:#e6e4db;color:#171814;border-color:#e6e4db}
+.btn.pri:hover{background:#fff}
+.stats{display:flex;gap:34px;margin-top:36px;color:var(--mute);font:12px/1 var(--mono)}
+.stats span b{display:block;color:var(--ink);font-weight:500;font-size:15px;margin-bottom:5px}
+
+/* methods: a numbered ledger, mono numerals, generous steps */
+.methods{margin-top:84px}
+.mrow{display:grid;grid-template-columns:64px minmax(0,1fr) auto;gap:30px;align-items:baseline;padding:30px 0;border-top:1px solid var(--line);transition:background-color .16s var(--ease)}
+.mrow:hover{background:var(--panel)}
+.mrow .num{font:15px/1 var(--mono);color:var(--mute)}
+.mrow h3{font-size:19px;font-weight:500;letter-spacing:-.01em;margin-bottom:7px}
+.mrow h3 small{font:11px/1 var(--mono);color:var(--mute);letter-spacing:.05em;margin-left:12px}
+.mrow p{color:var(--sec);font-size:13.5px;max-width:58ch}
+.mrow p b{color:var(--ink);font-weight:500}
+.go{font:12.5px/1 var(--mono);color:var(--sec);white-space:nowrap;text-decoration:none;display:inline-flex;gap:8px;align-items:center}
+.mrow:hover .go{color:var(--amber)}
+.go em{font-style:normal;display:inline-block;transition:transform .16s var(--ease)}
+.mrow:hover .go em{transform:translateX(3px)}
+
+/* signature: a real updater trace, runs once */
+.trace{margin-top:64px;background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:20px 22px;font:12.5px/1.9 var(--mono);color:var(--sec);position:relative;overflow:hidden}
+.trace .t{color:var(--mute);margin-right:14px}
+.trace .lamp{color:var(--amber)}
+.trace .done{color:var(--ok)}
+.pb{height:4px;border-radius:2px;background:#24262233;margin-top:12px;position:relative;overflow:hidden}
+.pb i{position:absolute;inset:0;width:0;border-radius:2px;background:var(--amber);animation:fill 2.6s var(--ease) .6s forwards}
+@keyframes fill{to{width:92%}}
+@media (prefers-reduced-motion:reduce){.pb i{animation:none;width:92%}}
+.trace h4{font:600 12px/1 var(--mono);letter-spacing:.06em;color:var(--mute);margin-bottom:10px}
+kbd{font:11px var(--mono);background:#21231f;border:1px solid var(--line2);border-bottom-width:2px;border-radius:5px;padding:2px 7px;color:var(--ink)}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header class="top fx l1">
+    <div class="brand">XDJ MOD STUDIO</div>
+    <nav><a href="#">Home</a><a href="#">Mod</a><a href="#">Builders</a><a href="#">Emulator</a></nav>
+    <div class="st"><span class="led"></span>NO DECK</div>
+  </header>
+
+  <h1 class="fx l2">How do you want<br>to <span class="amber">flash</span>?</h1>
+  <div class="rule" aria-hidden="true"><i></i></div>
+  <p class="lede fx l3">Same mods, three ways onto the deck. The cable way puts them in the deck's memory — <b>power-cycle and the deck is stock again, nothing ever flashed</b>. The stick way is for gigs. The firmware way is for keeps, and it warns you like a real update.
+  </p>
+  <div class="acts fx l3">
+    <button class="btn pri">Connect the deck</button>
+    <button class="btn">Build a UPD</button>
+  </div>
+  <div class="stats fx l4">
+    <span><b>1.15</b>stock on deck</span>
+    <span><b>1.16</b>our build</span>
+    <span><b>15–30 min</b>first install</span>
+    <span><b>0</b>decks bricked</span>
+  </div>
+
+  <section class="methods fx l4">
+    <div class="mrow">
+      <span class="num">01</span>
+      <div>
+        <h3>RAM from the computer <small>SAFEST</small></h3>
+        <p>Quick install over the USB-B cable. <b>Nothing is flashed</b>: the mods live in the deck's memory until you switch it off, and every write is verified before it lands.</p>
+      </div>
+      <a class="go" href="#">choose mods <em>→</em></a>
+    </div>
+    <div class="mrow">
+      <span class="num">02</span>
+      <div>
+        <h3>File on your USB stick <small>COMING</small></h3>
+        <p>A small loader is flashed once, and after that <b>your rekordbox stick carries the mods</b>. Stick in, modded — no laptop at the gig, update by copying one file.</p>
+      </div>
+      <a class="go" href="#">in the works</a>
+    </div>
+    <div class="mrow">
+      <span class="num">03</span>
+      <div>
+        <h3>UPD flash, permanent <small>ADVANCED</small></h3>
+        <p>The mods baked into an update file, flashed like a normal firmware update. <b>Stays after power-off</b>. Flashing can brick a deck, so it reads the warnings first.</p>
+      </div>
+      <a class="go" href="#">build the file <em>→</em></a>
+    </div>
+  </section>
+
+  <section class="trace fx" aria-label="A real update run">
+    <h4>DECK-SIDE RUN</h4>
+    <div><span class="t">12:01:02</span>hold <kbd>IN</kbd> + <kbd>RELOOP/EXIT</kbd> · power on</div>
+    <div><span class="t">12:01:09</span>connect top USB — stick found, <span class="lamp">XDJ700.UPD</span></div>
+    <div><span class="t">12:01:16</span>progress <span class="pb"><i></i></span></div>
+    <div><span class="t">12:04:40</span><span class="done">firmware update is completed — power off / on</span></div>
+  </section>
+</div>
+</body>
+</html>

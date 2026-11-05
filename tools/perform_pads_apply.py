@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
-"""perform_pads_apply.py [--revert] -- PERFORM-screen BEAT JUMP pads + KEY
-area on the DECK (tools/perform_pads.py, emulator PASS). RAM only, reboot =
-stock. NOT YET RUN ON HARDWARE.
+"""perform_pads_apply.py [--revert] [--hide-ks] [--hide-stems] --
+PERFORM-screen BEAT JUMP pads + KEY area on the DECK
+(tools/perform_pads.py, emulator PASS). RAM only, reboot = stock.
 
 Both hook pools are read CONSTANTLY (touch: every panel frame; draw: every
 screen flush), so they must change in ONE 32-bit store: this tool writes them
@@ -11,7 +11,11 @@ Final run: LW self-test on a scratch word inside our own cave (write, read
 back, restore) -- only if that is exact are the hooks armed, each verified.
 Gate: not on the PERFORM screen while installing (mode word != 7).
 --revert: hooks back to stock FIRST (LW, verified), REV zone byte restored.
+--hide-ks / --hide-stems: install only the chosen tabs (the KEY SHIFT /
+STEMS tab is neither drawn nor touchable); the byte is updated on every
+run, including an already-armed install.
 """
+import argparse
 import struct
 import sys
 
@@ -36,16 +40,23 @@ def lw(h, addr, val):
     drain(h, 0.5)
 
 
-def image():
+def image(bits=0):
     img = bytearray(PP.PEND - PP.PC0)
-    for a, b in PP.blobs():
+    for a, b in PP.blobs(bits):
         img[a - PP.PC0:a - PP.PC0 + len(b)] = b
     return bytes(img)
 
 
 def main():
-    revert = sys.argv[1:] == ["--revert"]
-    img = image()
+    ap = argparse.ArgumentParser()
+    ap.add_argument("--revert", action="store_true")
+    ap.add_argument("--hide-ks", action="store_true",
+                    help="hide the KEY SHIFT tab (live key shift not installed)")
+    ap.add_argument("--hide-stems", action="store_true",
+                    help="hide the STEMS tab (live stems not installed)")
+    opts = ap.parse_args()
+    bits = PP.featbits(opts.hide_ks, opts.hide_stems)
+    img = image(bits)
     cands = [d for d in hid.enumerate()
              if d["vendor_id"] == PIONEER_VID and d["usage"] == 0x01]
     if len(cands) != 1:
@@ -60,7 +71,7 @@ def main():
         for (pool, old, new), v in zip(PP.hooks(), live_hooks):
             if v not in (old, new):
                 sys.exit(f"FAIL: hook {pool:#x} = {v:#x}, not stock/ours")
-        if revert:
+        if opts.revert:
             for pool, old, new in PP.hooks()[::-1]:
                 lw(h, pool, old)
                 if rd32(h, pool) != old:
@@ -93,8 +104,19 @@ def main():
             if fastload.arm_later():
                 print("code complete - run again to arm (fresh short session)")
                 return 0
+        # Which tabs are drawn / touchable. The byte is runtime state, so
+        # update it even when the code is already armed (reinstall with a
+        # different feature pick must not need a power-cycle).
+        if br(h, PP.FEATB, 1)[0] != bits:
+            bw(h, PP.FEATB, bits)
+            if br(h, PP.FEATB, 1)[0] != bits:
+                sys.exit("FAIL: feature byte verify - tabs unchanged; REBOOT")
+        tabs = [n for k, n in enumerate(("HOT CUE", "BEAT JUMP", "KEY SHIFT",
+                                         "STEMS"))
+                if k < 2 or not bits & (PP.FB_KEYSHIFT if k == 2
+                                        else PP.FB_STEMS)]
         if armed:
-            print("RESULT: PASS (already installed)")
+            print(f"RESULT: PASS (already installed; tabs: {' / '.join(tabs)})")
             return 0
         # LW self-test on our own scratch word (never used by the hooks)
         for val in (0x12345678, 0):
@@ -117,7 +139,7 @@ def main():
                 lw(h, pool, old)
                 sys.exit(f"FAIL: hook {pool:#x} verify - restored stock; "
                          f"REBOOT before using PERFORM")
-        print("RESULT: PASS - open PERFORM: HOT CUE / BEAT JUMP / KEY SHIFT / STEMS tabs.")
+        print(f"RESULT: PASS - open PERFORM: {' / '.join(tabs)} tabs.")
         return 0
     finally:
         h.close()

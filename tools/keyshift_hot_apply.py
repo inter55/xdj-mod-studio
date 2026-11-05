@@ -18,6 +18,11 @@ Steps (one at a time, each its own short USB session, stick OUT / no track):
   keyshift_hot_apply.py --semis 2   with a track PLAYING and MASTER TEMPO ON
   keyshift_hot_apply.py --semis 0   no shift
   keyshift_hot_apply.py --revert    stock jump back + stock store
+
+TOUCH FX engine (2026-11-01): --engine fx installs the TOUCH FX DSP code
+(tools/fx_dsp/fx.c, cave build/fx/ksh.bin -- same installer, other payload)
+instead of key shift. They share the DSP hook and home: only one at a time;
+--revert the installed one first (the install refuses otherwise, status 7).
 """
 import argparse
 import struct
@@ -60,6 +65,8 @@ def main():
     ap.add_argument("--probe", action="store_true")
     ap.add_argument("--semis", type=float)
     ap.add_argument("--revert", action="store_true")
+    ap.add_argument("--engine", choices=("keyshift", "fx"), default="keyshift",
+                    help="which DSP code: real-time key shift (default) or TOUCH FX")
     ap.add_argument("--replace", action="store_true",
                     help="overwrite an OLDER build of this cave (only while it "
                          "is idle: the screen hook is not pointing at it)")
@@ -67,6 +74,13 @@ def main():
     if a.semis is not None and not -6 <= a.semis <= 6:
         sys.exit("semis range is -6..+6")
     what = "probe" if a.probe else "revert" if a.revert else "install"
+    global OUT
+    if a.engine == "fx":
+        OUT = "build/fx"
+        if a.semis is not None:
+            sys.exit("--semis is for key shift; TOUCH FX is driven from the PERFORM screen")
+        MEANING[7] = (MEANING[7] + " -- or key shift is installed: run with "
+                      "--revert (no --engine) first")
     s = syms()
     base = s["ksh_entry"]
     img = open(f"{OUT}/ksh.bin", "rb").read()
@@ -196,9 +210,12 @@ def main():
                 sys.exit("FAIL: store restore - power-cycle the deck")
         print({"probe": "RESULT: PASS - probe OK, nothing changed. Next: run "
                         "without --probe to install.",
-               "install": "RESULT: PASS - key shift installed (no reset, sound "
-                          "never stopped). Insert the stick, play a track with "
-                          "MASTER TEMPO ON, then --semis 2",
+               "install": ("RESULT: PASS - TOUCH FX engine installed (no reset, sound "
+                           "never stopped). MASTER TEMPO ON, then PERFORM > TOUCH FX"
+                           if a.engine == "fx" else
+                           "RESULT: PASS - key shift installed (no reset, sound "
+                           "never stopped). Insert the stick, play a track with "
+                           "MASTER TEMPO ON, then --semis 2"),
                "revert": "RESULT: PASS - stock jump + stock store back"}[what])
         return 0
     finally:

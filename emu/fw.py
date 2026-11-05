@@ -66,7 +66,31 @@ def load_flash(explicit=None):
         return None, {"error": "no firmware found (pass --upd XDJ700.UPD)"}
     if p.endswith(".img"):
         return open(p, "rb").read(), {"source": p}
+    # Parsing a .UPD (tools/fwtool.py compiles a regex per record) took ~5 s
+    # of every snapshot load / app start (2026-11-01). The parsed MAIN image
+    # is cached next to the repo's other caches, keyed by the .UPD's path,
+    # size and mtime; any mismatch or a broken cache file re-parses.
+    import hashlib
+    import pickle
+    st = os.stat(p)
+    key = hashlib.sha1(f"{os.path.abspath(p)}|{st.st_size}|{st.st_mtime_ns}"
+                       .encode()).hexdigest()[:16]
+    cpath = os.path.join(ROOT, "cache", f"flash_{key}.pkl")
+    try:
+        with open(cpath, "rb") as f:
+            img, blocks, panl_img = pickle.load(f)
+        return img, {"source": p, "blocks": blocks, "panl": panl_img}
+    except Exception:
+        pass
     raw, main, panl = load_upd(p)
     blocks = main.blocks()
-    return bytes(main.img), {"source": p, "blocks": blocks,
-                             "panl": bytes(panl.img) if panl else None}
+    img, panl_img = bytes(main.img), (bytes(panl.img) if panl else None)
+    try:
+        os.makedirs(os.path.dirname(cpath), exist_ok=True)
+        tmp = cpath + ".tmp"
+        with open(tmp, "wb") as f:
+            pickle.dump((img, blocks, panl_img), f, protocol=pickle.HIGHEST_PROTOCOL)
+        os.replace(tmp, cpath)
+    except OSError:
+        pass                              # read-only install: just slower
+    return img, {"source": p, "blocks": blocks, "panl": panl_img}

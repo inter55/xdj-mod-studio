@@ -8,6 +8,7 @@ light add-on must switch itself off (it follows the switcher's theme).
 Screens: screenshots/light_emu_{main,perform,back}.png"""
 import os
 import sys
+import time
 sys.path[:0] = [".", "tools", "mods"]
 from emu.machine import Machine          # noqa: E402
 from emu import panl                     # noqa: E402
@@ -48,7 +49,7 @@ def install_lt(mem, idx):
 
 
 def main():
-    m = Machine.load(os.environ.get("SNAP", "cache/emu_dsp_playing7.pkl"))
+    m = Machine.load(os.environ.pop("CKPT", "cache/emu_dsp_playing7.pkl"))
     mem, dev, c = m.mem, m.mem.dev, m.cpu
     names = TS.default_names()
     light = names.index("light") + 1
@@ -71,13 +72,24 @@ def main():
     else:
         EmuApp._install_themesw(None, m)
         U.install(mem)
-        s = install_lt(mem, light)
+        s = None if os.environ.get("NOLT") else install_lt(mem, light)
+    pre = os.environ.get("SHOT", "screenshots/light_emu")
     w0 = TS.with_own_art(__import__("theme_deck").stock_words())
     regs = TS.regions(w0)
 
+    hb = {"tot": 0, "t": time.time()}
+
     def run(n, keys=(), touch=None):
         dev.panel_frame = panl.build_frame(keys=list(keys), touch=touch)
+        t0 = time.time()
         c.run(limit=n)
+        hb["tot"] += n
+        hb["t"] += time.time() - t0
+        print(f"    run {n:>12,} keys={','.join(keys) or '-'} "
+              f"dt={time.time()-t0:6.1f}s tot={hb['tot']/1e9:5.2f}G "
+              f"ts={mem.r8(TS.TS_DATA + 32)} "
+              f"mode={mem.r32(0x0BA371D4)} skipped={mem.r32(TS.TS_DATA + 48)}",
+              flush=True)
 
     def key(k):
         run(12_000_000, [k]); run(25_000_000)
@@ -89,8 +101,10 @@ def main():
         run(20_000_000)
 
     def theme(k):
-        run(200_000_000, ["MenuUtility"]); run(60_000_000); turn(20)      # THEME row (last)
+        run(200_000_000, ["MenuUtility"]); run(60_000_000); turn(U.STOCK_N + U.NOURS + 2)  # THEME row (last)
+        if os.environ.get("DBG"): fb_png(m, pre + f"_dbg_row{k}.png")
         key("RotaryPush")
+        if os.environ.get("DBG"): fb_png(m, pre + f"_dbg_push{k}.png")
         cur = mem.r8(TS.TS_DATA + 32)
         turn(k - cur)                      # the THEME list does not wrap
         run(12_000_000, ["RotaryPush"])
@@ -106,6 +120,16 @@ def main():
         return mem.r8(TS.TS_DATA + 32)
 
     run(30_000_000)
+    if os.environ.get("NOLT"):
+        # 2026-11-03 deck state (add-on never installed): LIGHT must not
+        # even be offered in UTILITY -- the row stays on OFF
+        got = theme(light)
+        fb_png(m, pre + "_nolt.png")
+        print("NOLT: theme now", got, f"(LIGHT = {light} must be refused: "
+              "the list ends one row earlier)")
+        ok = got == light - 1
+        print("RESULT:", "PASS" if ok else "FAIL")
+        return 0 if ok else 1
     got = theme(light)
     if os.environ.get("SAVE"):
         m.save(os.environ["SAVE"])
@@ -113,13 +137,19 @@ def main():
             return 0
     print("screen mode", mem.r32(0x0BA371D4), "theme now", got, "(light =", light, ") skipped", mem.r32(TS.TS_DATA + 48),
           "text calls", mem.r32(s["lt_calls"]), "fills", mem.r32(s["lt_fills"]))
-    fb_png(m, "screenshots/light_emu_main.png")
+    fb_png(m, pre + "_main.png")
     run(6_000_000, touch=(718, 38)); run(80_000_000)
-    fb_png(m, "screenshots/light_emu_perform.png")
+    fb_png(m, pre + "_perform.png")
     run(6_000_000, touch=(718, 38)); run(60_000_000)
+    run(12_000_000, ["Browse"]); run(150_000_000)
+    fb_png(m, pre + "_browse.png")
+    run(12_000_000, ["Browse"]); run(150_000_000)
+    run(6_000_000, touch=(433, 38)); run(120_000_000)       # INFO tab
+    fb_png(m, pre + "_info.png")
+    run(6_000_000, touch=(433, 38)); run(120_000_000)
     ok = got == light
     back = theme(0)
-    fb_png(m, "screenshots/light_emu_back.png")
+    fb_png(m, pre + "_back.png")
     if os.environ.get("SAVEBACK"):
         m.save(os.environ["SAVEBACK"])
     img = np.frombuffer(bytes(mem.ram0[:2 * len(w0)]), "<u2")

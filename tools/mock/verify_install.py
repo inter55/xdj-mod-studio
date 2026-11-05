@@ -70,8 +70,28 @@ def main():
             break
     else:
         print("  ok   versions code")
-    for base, blob in PP.blobs():
-        region("PERFORM pads", base, blob)
+    fb = mem.r8(PP.FEATB)                 # installer-chosen hidden-tab bits
+    print(f"  ok   PERFORM hidden-tab bits (FEATB) = {fb:#x}")
+    # PDKW (PST+56): the stub, or the light add-on's ink flip (5l re-arms it)
+    pdk = mem.r32(PP.PDKW)
+    lt_pdk = None
+    try:
+        for ln in open("build/lighttext/lt.syms"):
+            a_, _, n_ = ln.split()
+            if n_ == "_lt_pdk":
+                lt_pdk = int(a_, 16)
+    except OSError:
+        pass
+    g_ = pdk in (PP.PDKSTUB, lt_pdk)
+    print(f"  {'ok  ' if g_ else 'FAIL'} PERFORM ink hook (PDKW) = {pdk:#x}")
+    ok &= g_
+    for base, blob in PP.blobs(fb):
+        # PBUSY (PST+63) = the pads' runtime re-entrancy latch (1 while a
+        # flush is in progress, so a snapshot can catch it set)
+        region("PERFORM pads", base, blob,
+               skip=set(range(PP.PDKW, PP.PDKW + 4)) | {PP.PBUSY}
+               # the pads' exit literal: TOUCH FX chains in there (checked below)
+               | set(range(PP.pbo_lit(), PP.pbo_lit() + 4)))
     import utility as UT                  # UTILITY rows (5u)
     _, us = UT.build()
     for p_ in UT.POOLS:
@@ -80,9 +100,19 @@ def main():
     ub = UT.image(bytes(mem.r8(us["ut_tab"] + i) for i in range(UT.STOCK_N * UT.REC)))[1]
     region("UTILITY module", us["ut_head"], ub,
            skip=range(us["ut_tab"], us["ut_tab"] + (UT.STOCK_N + UT.NOURS) * UT.REC))
+    _tfx_touch = None
+    try:
+        for ln in open("build/touchfx/tfx.syms"):
+            a_, _, n_ = ln.split()
+            if n_ == "_tfx_touch_entry":
+                _tfx_touch = int(a_, 16)
+    except OSError:
+        pass
     for pool, old, new in PP.hooks():
         if pool == 0x08C92E20:            # flush hook: hot cues -> phase? -> pads
             continue
+        if pool == 0x08D5278C and _tfx_touch and mem.r32(pool) == _tfx_touch:
+            continue                      # TOUCH FX in front: checked below
         hook("PERFORM pads", pool, new)
     # theme switching: code (entry word = on-switch) + tables
     (cb, code), (db, data) = TS.plan(TS.default_names())
@@ -94,19 +124,60 @@ def main():
         a, _, n = ln.split()
         syms[n.lstrip("_")] = int(a, 16)
     flush = mem.r32(0x08C92E20)
-    # optional phase meter (deck_session --phasemeter) sits in front of the
-    # hot cues: follow its pm_prev
-    pm = {}
-    for ln in open("build/phasemeter/pm.syms"):
-        a, _, n = ln.split()
-        pm[n.lstrip("_")] = int(a, 16)
-    if flush == pm["pm_entry"]:
-        print(f"  ok   phase meter at the head of the flush chain")
-        flush = mem.r32(pm["pm_prev"])
-        print(f"  {'ok  ' if flush == syms['hc_entry'] else 'FAIL'} chain: phase meter -> {flush:#x} (hot cues)")
-        ok &= flush == syms["hc_entry"]
-    else:
-        hook("2DG flush chain", 0x08C92E20, lambda v: v == syms["hc_entry"])
+    # optional heads in front of the hot cues (each chains to what was live
+    # when it was installed): light add-on (lt_prev), TOUCH FX
+    # (tfx_prev_flush), phase meter (pm_prev). Walk them to the hot cues.
+    def _syms(path):
+        d = {}
+        try:
+            for ln in open(path):
+                a, _, n = ln.split()
+                d[n.lstrip("_")] = int(a, 16)
+        except OSError:
+            pass
+        return d
+    pm = _syms("build/phasemeter/pm.syms")
+    lt = _syms("build/lighttext/lt.syms")
+    tf = _syms("build/touchfx/tfx.syms")
+    heads = {pm.get("pm_entry"): ("phase meter", pm.get("pm_prev")),
+             lt.get("lt_flush"): ("light add-on", lt.get("lt_prev"))}
+    heads.pop(None, None)
+    for _ in range(4):
+        if flush not in heads:
+            break
+        name, prevp = heads[flush]
+        print(f"  ok   {name} in the flush chain")
+        flush = mem.r32(prevp)
+    print(f"  {'ok  ' if flush == syms['hc_entry'] else 'FAIL'} flush chain reaches the hot cues ({flush:#x})")
+    ok &= flush == syms["hc_entry"]
+    if tf and mem.r32(tf["tfx_flush_entry"]) == int.from_bytes(
+            open("build/touchfx/tfx.bin", "rb").read()[:4], "little"):
+        tb = open("build/touchfx/tfx.bin", "rb").read()
+        skip = set()
+        for k in ("tfx_prev_flush", "tfx_prev_touch"):
+            skip |= set(range(tf[k], tf[k] + 4))
+        region("TOUCH FX screen", tf["tfx_flush_entry"], tb, skip=skip)
+        b = mem.r32(PP.pbo_lit())
+        g = b == tf["tfx_flush_entry"] and mem.r32(tf["tfx_prev_flush"]) == PP.ORIG_BLIT
+        print(f"  {'ok  ' if g else 'FAIL'} TOUCH FX flush entry behind the pads ({b:#x})")
+        ok &= g
+        t = mem.r32(0x08D5278C)
+        pads_touch = PP.hooks()[0][2]
+        g = t == tf["tfx_touch_entry"] and mem.r32(tf["tfx_prev_touch"]) == pads_touch
+        print(f"  {'ok  ' if g else 'FAIL'} TOUCH FX touch hook -> pads ({t:#x})")
+        ok &= g
+        e = mem.r32(tf["tfx_engine"])
+        d = getattr(mem.dev, "dspemu", None)
+        call = d.bus.read(0xC0008D64, 4) if d is not None else None
+        g = e == 1 and (call is None or call == 0x00ACEC10) and mem.r16(0x08D36B3A) == 0x0009
+        print(f"  {'ok  ' if g else 'FAIL'} TOUCH FX engine flag {e}, DSP call word "
+              f"{call if call is None else hex(call)}, BD8 store NOP {mem.r16(0x08D36B3A):#06x}")
+        ok &= g
+        if d is not None:
+            fx = open("build/fx/fx.bin", "rb").read()
+            got = bytes(d.bus.read(0xC005F4C0 + i, 1) for i in range(len(fx)))
+            print(f"  {'ok  ' if got == fx else 'FAIL'} DSP FX engine code in DDR ({len(fx)} B)")
+            ok &= got == fx
     prev = mem.r32(syms["hc_prev"])
     pads_flush = [n for p, o, n in PP.hooks() if p == 0x08C92E20][0]
     print(f"  {'ok  ' if prev == pads_flush else 'FAIL'} chain: hot cues -> {prev:#x} (pads)")

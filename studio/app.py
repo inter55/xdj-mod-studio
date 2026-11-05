@@ -95,7 +95,7 @@ UIHTML = os.path.join(BUNDLE, "studio", "ui.html") if FROZEN else os.path.join(H
 
 APP_SUPPORT = app_support_dir()
 # the app's own release number (GitHub release tag v<APP_VERSION>)
-APP_VERSION = "0.99"
+APP_VERSION = "1.0"
 RELEASES_API = "https://api.github.com/repos/inter55/xdj-mod-studio/releases/latest"
 RELEASES_PAGE = "https://github.com/inter55/xdj-mod-studio/releases/latest"
 SETTINGS = os.path.join(APP_SUPPORT, "studio.json")
@@ -160,6 +160,15 @@ def find_project():
 
 ROOT = find_project()
 os.environ["XDJ_ROOT"] = ROOT          # emu.paths reads this (before emu loads)
+# Every deck module is looked up as a path relative to the project root
+# (build/themesw/ts.bin, build/stems/...), which is also where a checkout is
+# run from. A packaged app is started with cwd "/" (Finder, Windows shortcut),
+# so pin it: without this the emulator fails with "deck module not built and
+# no compiler here: missing ['build/themesw/ts.bin', ...]".
+try:
+    os.chdir(ROOT)
+except OSError:
+    pass
 # Faster emulator defaults (safe/fast by construction: identical byte results
 # except I/O batching, verified in tools/usb_fast_bench.py + /tmp/usbfast_emu.py)
 os.environ.setdefault("XDJ_USB_FAST", "1")
@@ -287,19 +296,45 @@ def run_tool_main(argv):
         script += "c"           # tester bundle ships compiled tools only
     sys.argv = [script] + argv[1:]
     sys.path.insert(0, os.path.dirname(script))
+    # a frozen runtime ignores PYTHONPATH; honour it (the mock deck's
+    # stand-in `hid` module for the USB-stick pack recorder)
+    for d in reversed([x for x in os.environ.get("PYTHONPATH", "").split(os.pathsep) if x]):
+        sys.path.insert(0, d)
     sys.stdout.reconfigure(line_buffering=True)
     runpy.run_path(script, run_name="__main__")
 
 
 # --------------------------------------------------------------- tracks ---
 _SCAN = {}
+_SCAN_TTL = 20
+_SCAN_BUSY = set()
+_SCAN_LOCK = threading.Lock()
 
 
 def scan(stick):
-    """Library scan, cached for a few seconds (the previews and the track
-    list all ask for it); jobs invalidate it when they finish."""
+    """Library scan, stale-while-revalidate: the first call for a stick
+    blocks, later calls answer from the cache at once (the previews and the
+    track list all ask for it) and refresh in the background once the entry
+    is older than _SCAN_TTL -- a slow rescan of a big stick no longer
+    stalls every preview and tab switch. Jobs invalidate it when they
+    finish (_SCAN.clear())."""
     hit = _SCAN.get(stick)
-    if hit and time.time() - hit[0] < 20:
+    if hit and time.time() - hit[0] < _SCAN_TTL:
+        return hit[1]
+    if hit:
+        with _SCAN_LOCK:
+            if stick not in _SCAN_BUSY:
+                _SCAN_BUSY.add(stick)
+
+                def _refresh(st=stick):
+                    try:
+                        _SCAN[st] = (time.time(), _scan(st))
+                    except Exception:
+                        pass
+                    finally:
+                        with _SCAN_LOCK:
+                            _SCAN_BUSY.discard(st)
+                threading.Thread(target=_refresh, daemon=True).start()
         return hit[1]
     res = _scan(stick)
     _SCAN[stick] = (time.time(), res)
@@ -329,24 +364,36 @@ def _scan(stick):
         artist, title = (base.split(" - ", 1) + [""])[:2] if " - " in base else ("", base)
         md = track_meta(audio) or {}
         rel = os.path.relpath(d, stick)
+        datb = anlz(stick, rel, "ANLZ0000.DAT")
         rows.append({"dir": rel, "audio": audio,
                      "title": md.get("title") or title or base,
                      "artist": md.get("artist") or artist,
                      "duration": md.get("duration"),
-                     "bpm": bpm_of(anlz(stick, rel, "ANLZ0000.DAT")),
+                     "bpm": bpm_of(datb),
+                     "cues": cues_of(datb, eb),
                      "exists": os.path.exists(audio), "three_band": has3,
                      "has_2ex": os.path.exists(os.path.join(d, "ANLZ0000.2EX")),
                      "has_x7k": os.path.exists(audio + ".x7k"),
                      "has_sidecar": os.path.exists(audio + ".x7s"),
-                     "has_stems": os.path.exists(out_path(audio, "STEMS"))})
-    # version files written by the studio (not yet analysed by rekordbox)
-    vers = []
+                     "has_stems": os.path.exists(out_path(audio, "STEMS"))
+                     or os.path.exists(audio + STEMS_BACKUP),
+                     "can_replace": can_replace(audio)})
+    # files written by the studio (not yet analysed by rekordbox):
+    # STEMS-4 stems files ("XST4" trailer) and, if any remain from older
+    # builds, key/stem VERSION files ("XVTR"). Both load on the deck from
+    # BROWSE > FOLDER next to the original track.
+    vers, stemsfiles = [], []
     for p in glob.glob(os.path.join(stick, "**", "*"), recursive=True):
-        if p.lower().endswith(AUDIO_EXT) and is_version_file(p):
-            try:
-                sz = os.path.getsize(p)
-            except OSError:
-                sz = 0
+        if not p.lower().endswith(AUDIO_EXT):
+            continue
+        try:
+            sz = os.path.getsize(p)
+        except OSError:
+            sz = 0
+        if is_stems_file(p):
+            stemsfiles.append({"path": os.path.relpath(p, stick),
+                               "mb": round(sz / 1e6, 1)})
+        elif is_version_file(p):
             vers.append({"path": os.path.relpath(p, stick),
                          "names": version_names(p), "mb": round(sz / 1e6, 1)})
     fill_meta([r["audio"] for r in rows if r["exists"]])
@@ -362,8 +409,9 @@ def _scan(stick):
                 sidecar_mb += os.path.getsize(r["audio"] + ".x7s") / 1e6
         except OSError:
             pass
-    stems_mb = round(sum(v.get("mb", 0) for v in vers) + sidecar_mb, 1)
-    return {"tracks": rows, "versions": vers, "name": os.path.basename(stick.rstrip("/")),
+    stems_mb = round(sum(v.get("mb", 0) for v in vers + stemsfiles) + sidecar_mb, 1)
+    return {"tracks": rows, "versions": vers, "stems_files": stemsfiles,
+            "name": os.path.basename(stick.rstrip("/")),
             "disk": disk, "stems_mb": stems_mb}
 
 
@@ -372,6 +420,16 @@ def is_version_file(p):
         with open(p, "rb") as f:
             f.seek(-128, 2)
             return f.read(4) == b"XVTR"
+    except OSError:
+        return False
+
+
+def is_stems_file(p):
+    """STEMS-4 (tools/stems4.py): 128-B 'XST4' trailer at the end."""
+    try:
+        with open(p, "rb") as f:
+            f.seek(-128, 2)
+            return f.read(4) == b"XST4"
     except OSError:
         return False
 
@@ -518,7 +576,48 @@ def demucs_ok():
     return ok
 
 
-def j_stems(log, prog, audio, keys=(), quality="opus"):
+STEMS_BACKUP = ".pre-stems"            # original kept as "Track.aiff.pre-stems"
+
+
+def can_replace(audio):
+    """WAV / AIFF originals can be swapped for their stems file under the
+    SAME name: rekordbox's database (and its cues, grid, waveforms) keeps
+    pointing at it, so the deck lists it in ARTIST / TRACK. MP3 / M4A
+    can't: the deck picks the decoder by the file's extension."""
+    return os.path.splitext(audio)[1].lower() in (".wav", ".aif", ".aiff")
+
+
+def drop_id3_chunk(path):
+    """Remove the ID3 tag chunk ffmpeg writes after the audio of a STEMS-4
+    file, fixing the stem plane offsets in its trailer. With that chunk a
+    track opened from the rekordbox LIBRARY hangs at loading (even on stock
+    firmware; emulator 2026-11-02) -- the library supplies title/artist
+    anyway, so a file that replaces a library track goes without it."""
+    import struct
+    big = open(path, "rb").read(4) == b"FORM"
+    fmt = ">I" if big else "<I"
+    with open(path, "rb") as f:
+        b = bytearray(f.read())
+    i = 12
+    while i + 8 <= len(b):
+        cid, n = bytes(b[i:i + 4]), struct.unpack_from(fmt, b, i + 4)[0]
+        if cid in (b"ID3 ", b"id3 "):
+            cut = 8 + n + (n & 1)
+            del b[i:i + cut]
+            struct.pack_into(fmt, b, 4, len(b) - 8)
+            t = len(b) - 128                     # trailer: rel[4] at +16
+            assert bytes(b[t:t + 4]) == b"XST4", "not a STEMS-4 file"
+            rel = struct.unpack_from("<4I", b, t + 16)
+            struct.pack_into("<4I", b, t + 16, *[r - cut for r in rel])
+            with open(path + ".tmp", "wb") as f:
+                f.write(b)
+            os.replace(path + ".tmp", path)
+            return True
+        i += 8 + n + (n & 1)
+    return False
+
+
+def j_stems(log, prog, audio, keys=(), quality="opus", replace=True):
     if not demucs_ok():
         raise RuntimeError("Demucs is not installed (Settings > Stem separation)")
     miss = [t for t in ("ffmpeg", "ffprobe") if not shutil.which(t)]
@@ -529,20 +628,32 @@ def j_stems(log, prog, audio, keys=(), quality="opus"):
     import re
     with tempfile.TemporaryDirectory() as td:
         log("separating with Demucs (htdemucs) -- a few minutes per track")
+        # Demucs gets a plain-named copy: accented / long track names broke
+        # it on Windows (cp1252 console, MAX_PATH) after the separation had
+        # already run -- Reddit "80-100% then failed" (2026-11-01). UTF-8 I/O
+        # for the same reason; the tail of its output goes into the error.
+        src = os.path.join(td, "input" + os.path.splitext(audio)[1].lower())
+        shutil.copyfile(audio, src)
+        denv = dict(os.environ, PYTHONIOENCODING="utf-8", PYTHONUTF8="1")
         p = subprocess.Popen([DEMUCS_PY, "-m", "demucs", "-n", "htdemucs", "-o", td,
-                              audio], stdout=subprocess.PIPE,
-                             stderr=subprocess.STDOUT, text=True)
+                              src], stdout=subprocess.PIPE,
+                             stderr=subprocess.STDOUT, text=True, env=denv,
+                             encoding="utf-8", errors="replace")
+        tail = []
         for line in p.stdout:
             if line.strip():
+                tail = (tail + [line.rstrip()[-200:]])[-4:]
                 log(line.rstrip()[-160:])
                 m = re.search(r"(\d{1,3})%", line)
                 if m:
                     prog(0.05 + 0.75 * int(m.group(1)) / 100.0,
                          "separating vocals / drums / bass / other")
         if p.wait():
-            raise RuntimeError("demucs failed")
+            raise RuntimeError("demucs failed: " + (" | ".join(tail) or f"exit {p.returncode}"))
         prog(0.80, "building the version file")
-        stem_dir = glob.glob(os.path.join(td, "htdemucs", "*"))[0]
+        stem_dir = os.path.join(td, "htdemucs", "input")
+        if not os.path.isdir(stem_dir):
+            raise RuntimeError("demucs wrote no stems (output folder missing)")
         stems = [os.path.join(stem_dir, f"{s}.wav") for s in ("bass", "drums", "vocals", "other")]
         out = out_path(audio, "STEMS")
         # STEMS-4 file: the normal mix + 4 stem planes; on the deck the
@@ -552,8 +663,25 @@ def j_stems(log, prog, audio, keys=(), quality="opus"):
                               "vocals": stems[2], "other": stems[3]},
                  aiff=out.endswith(".aiff"),
                  progress=lambda f, n: prog(0.80 + 0.12 * f, n))
-        log(f"done: {os.path.basename(out)}  ({os.path.getsize(out) / 1e6:.0f} MB) -- "
-            "load it on the deck; PERFORM > STEMS mutes vocals / drums / bass / other")
+        size = os.path.getsize(out) / 1e6
+        if replace and can_replace(audio):
+            # the original moves aside (same folder, a name the deck never
+            # lists) and the stems file takes its name
+            drop_id3_chunk(out)
+            bak = audio + STEMS_BACKUP
+            if not os.path.exists(bak):
+                os.replace(audio, bak)
+            os.replace(out, audio)
+            log(f"done: {os.path.basename(audio)} is now the stems version "
+                f"({size:.0f} MB; the original is kept as "
+                f"{os.path.basename(bak)}). On the deck it is in the usual "
+                "lists; PERFORM > STEMS mutes vocals / drums / bass / other")
+        else:
+            log(f"done: {os.path.basename(out)}  ({size:.0f} MB) -- on the deck: "
+                "BROWSE > FOLDER (the last category), then the track's folder. "
+                + ("MP3 / M4A tracks can't be replaced (the deck reads them by "
+                   "their extension). " if replace else "")
+                + "PERFORM > STEMS then mutes vocals / drums / bass / other")
         # X7S sidecar next to the audio (quality choice from the dialog)
         try:
             import x7s as X7
@@ -667,6 +795,36 @@ def bpm_of(dat):
     if e and len(e) >= 8:
         return int.from_bytes(e[2:4], "big") / 100.0
     return None
+
+
+def cues_of(*anlz_bytes):
+    """How many hot cues (A..H) the track's EXPORTED analysis carries.
+    The deck's A-C / D-F / G-H pages read these -- cues set in rekordbox
+    after the stick was exported never reach it, which is the first thing
+    to check when the pages do not appear."""
+    nums = set()
+    for b in anlz_bytes:
+        if len(b) < 32:
+            continue
+        p = int.from_bytes(b[4:8], "big")       # first section offset
+        while p + 12 <= len(b):
+            tag, ln = b[p:p + 4], int.from_bytes(b[p + 8:p + 12], "big")
+            if ln == 0 or p + ln > len(b):
+                break
+            if tag == b"PCOB" and p + 16 <= len(b) \
+                    and int.from_bytes(b[p + 12:p + 16], "big") == 1:
+                q, end = p + 16, p + ln
+                while q + 16 <= end:
+                    if b[q:q + 4] == b"PCPT":
+                        step = int.from_bytes(b[q + 8:q + 12], "big") or 0x38
+                        num = int.from_bytes(b[q + 14:q + 16], "big")
+                        if 1 <= num <= 8 or 0x41 <= num <= 0x48:
+                            nums.add(num if num <= 8 else num - 0x40)
+                        q += step
+                    else:
+                        q += 8
+            p += ln
+    return len(nums)
 
 
 # ------------------------------------------------------------ waveforms ---
@@ -1005,12 +1163,72 @@ def screens():
     return _SCREENS
 
 
-def preview_png(spec, screen, wave=False, wopts=None, track=None):
+# Lit touch buttons: addresses, positions and the colour maths live in
+# mods/litbuttons.py, shared with the deck's theme tables and the emulator.
+LIT_KEY = 0xF81F
+_LIT = None
+
+
+def lit_sprites():
+    """{name: (x, y, uint16[53, 72])} read from the user's firmware block1
+    (firmware home blk1.bin, loaded at 0x08000000); {} if it is missing."""
+    global _LIT
+    if _LIT is None:
+        import litbuttons as LB
+        from emu import fwhome
+        out = {}
+        try:
+            with open(fwhome.path("blk1.bin"), "rb") as f:
+                for k in LB.SHOWN:
+                    a, _ap, x, y = LB.BUTTONS[k]
+                    f.seek(a - LB.IMG_BASE)
+                    px = np.frombuffer(f.read(LB.W * LB.H * 2), "<u2")
+                    if len(px) == LB.W * LB.H:
+                        out[k] = (x, y, px.reshape(LB.H, LB.W).copy())
+        except OSError:
+            pass
+        _LIT = out
+    return _LIT
+
+
+_LIT_REF = None
+
+
+def lit_ref():
+    """one shared (saturation, brightness) reference for every button"""
+    global _LIT_REF
+    if _LIT_REF is None:
+        import litbuttons as LB
+        _LIT_REF = LB.reference([px for _x, _y, px in lit_sprites().values()])
+    return _LIT_REF
+
+
+def lit_recolour(px, colour):
+    """one lit button (stock RGB565) in the user's lit colour -- the same
+    maths as the deck's theme tables (mods/litbuttons.py)"""
+    import litbuttons as LB
+    return LB.recolour(px, colour, lit_ref())
+
+
+def preview_png(spec, screen, wave=False, wopts=None, track=None, lit=None):
     """wave=True: the waveforms follow the theme too (the deck recolours the
     stock waveform palettes with the same maths). wopts: overview style +
-    colours, drawn with the deck's own overview maths on a stick track."""
+    colours, drawn with the deck's own overview maths on a stick track.
+    screen "lit" = the player screen with every lit-able touch button lit.
+    lit = "#rrggbb": the lit buttons in that colour (the deck does the
+    same with a theme saved with that lit colour)."""
     import themes as T
+    show_lit = screen == "lit"
+    screen = "main" if show_lit else screen
     fb = screens()[screen].copy()
+    lits = {}
+    if screen == "main" and (show_lit or lit):
+        for k, (x, y, px) in lit_sprites().items():
+            if show_lit or k == "quantize":       # QUANTIZE is lit in the shot
+                lits[k] = (x, y, px)
+                if show_lit:
+                    sub = fb[y:y + 53, x:x + 72]
+                    fb[y:y + 53, x:x + 72] = np.where(px == LIT_KEY, sub, px)
     if spec:
         keep = np.zeros(fb.shape, bool)
         for x, y, w, h in ([] if wave else MASKS.get(screen, [])):
@@ -1019,6 +1237,13 @@ def preview_png(spec, screen, wave=False, wopts=None, track=None):
         new = T.map_colours(cols, spec)        # == the deck's theme tables
         out = new[inv].reshape(fb.shape)
         fb = np.where(keep, fb, out)
+    if lit:
+        try:
+            for x, y, px in lits.values():
+                sub = fb[y:y + 53, x:x + 72]
+                fb[y:y + 53, x:x + 72] = np.where(px == LIT_KEY, sub, lit_recolour(px, lit))
+        except (ValueError, IndexError):
+            pass                                  # bad colour: theme only
     stick = stick_path()
     d = track or demo_track(stick)
     # `track` may be a dir (lookup) or a ready label dict from the caller
@@ -1197,6 +1422,8 @@ def j_theme_save(log, prog, name, spec):
     for k in ("vivid", "lift"):
         if spec.get(k):
             args += [f"--{k}", str(spec[k])]
+    if spec.get("lit") and re.fullmatch(r"#?[0-9a-fA-F]{6}", str(spec["lit"])):
+        args += ["--lit", str(spec["lit"])]     # lit buttons (on-deck switching)
     prog(0.2, "building the theme")
     rc, _ = run_tool(log, args)
     if rc:
@@ -1278,30 +1505,27 @@ INSTALL_STEPS = [          # sessions per step (mock-deck measured 2026-10-12)
     ("5v", "Vinyl brake length", 1),
     ("5m", "Phase meter", 3),                                # survey + 2
     ("5k", "Live key shift (no audio-chip restart)", 2),     # probe + install
+    ("5x", "TOUCH FX (no audio-chip restart)", 4),   # engine probe + install, screen survey + install
 ]
 SESSION_S = 55.0            # per session incl. 30 s cool-down (mock-deck model)
 
 
-def j_deck_install(log, prog, mode, pads=True,
-                   themes=True, liveks=False, phase=False, brake=0.0, flac=True,
-                   opus=False):
-    if deck_ready():
-        raise RuntimeError(deck_ready())
-    try:
-        s = settings()
-        s["mods"] = {"mode": mode, "pads": bool(pads), "themes": bool(themes),
-                     "liveks": bool(liveks), "phase": bool(phase),
-                     "brake": float(brake or 0), "flac": bool(flac)}
-        save_settings(s)
-    except Exception:
-        pass
-    args = ["tools/deck_session.py", "--mode", mode]
+def install_args(mode, pads=True, themes=True, liveks=False, stems=True,
+                 phase=False, brake=0.0, flac=True, opus=False, touchfx=False):
+    """tools/deck_session.py options for a Mods-page selection (the cable
+    install and the USB-stick pack record the very same install)."""
+    args = ["--mode", mode]
     if not pads:
         args.append("--no-pads")
     if not themes:
         args.append("--no-themes")
+    if touchfx and pads:                     # TOUCH FX and live key shift share
+        liveks = False                       # the audio chip's hook: one of the two
+        args.append("--touchfx")
     if liveks:
         args.append("--keyshift")
+    if not stems:
+        args.append("--no-stems")
     if phase and pads:
         args.append("--phasemeter")
     if not flac:
@@ -1310,6 +1534,137 @@ def j_deck_install(log, prog, mode, pads=True,
         args.append("--no-opus")             # FLAC only: smaller, faster
     if brake and brake != 1:
         args += ["--brake", f"{brake:g}"]
+    return args
+
+
+def j_stick_pack(log, prog, sel):
+    """USB-STICK mods file: record the cable install for this selection on
+    the mock deck (the emulator answering the deck's USB shell) and write it
+    as XDJMODS/PACK.BIN on the library stick. A deck flashed once with the
+    loader update replays it at every stick mount (tools/stick_pack.py,
+    tools/usbloader/lc.c)."""
+    stick = settings().get("stick")
+    if not stick or not os.path.isdir(stick):
+        raise RuntimeError("choose your USB stick in Settings first")
+    from emu import fwhome
+    ckpt = fwhome.path("dspsound.pkl.gz")
+    if not ckpt or not os.path.exists(ckpt):
+        raise RuntimeError("firmware setup first (Home > Firmware: Add)")
+    os.environ["MOCK_CKPT"] = ckpt
+    out = os.path.join(stick, "XDJMODS", "PACK.BIN")
+    prog(0.02, "Recording the install on the emulated deck", eta=300)
+    rc, txt = run_tool(log, ["tools/stick_pack.py", "record"] + install_args(**sel)
+                       + ["--out", out])
+    if rc or "wrote " not in txt:
+        raise RuntimeError("could not make the mods file -- see the log")
+    log(f"ready: {out} -- eject the stick safely; the deck applies it when "
+        "the stick goes in. The deck needs the loader in memory first: send "
+        "it over the cable (5 seconds, no flash) or build the loader update "
+        "once if you never want the cable again.")
+    prog(1.0, "Mods file written to your stick")
+
+
+def j_stick_loader(log, prog, upd):
+    """The one-time update for the USB-stick method: STOCK firmware + the
+    stick loader only (permanent_build.py --stick-loader), boot-tested in
+    the emulator -- with the stick's pack when there is one."""
+    out_dir = os.path.expanduser("~/Downloads/XDJ700 modded update")
+    os.makedirs(out_dir, exist_ok=True)
+    out = os.path.join(out_dir, "XDJ700.UPD")
+    prog(0.0, "Building the loader update", eta=90)
+    rc, txt = run_tool(log, ["tools/permanent_build.py", upd, out, "--stick-loader",
+                             "--banner", "1.16", "--i-know-flashing-can-brick"])
+    if rc or "RESULT: built" not in txt:
+        if os.path.exists(out):
+            os.remove(out)
+        raise RuntimeError("build refused -- see log (nothing was written)")
+    stick = settings().get("stick") or ""
+    pack = os.path.join(stick, "XDJMODS", "PACK.BIN")
+    if os.path.isfile(pack):
+        os.environ["PACK"] = pack
+    prog(0.3, "Boot-testing it in the emulator (about 5 minutes)", eta=300)
+    os.environ.setdefault("XDJ_SHOTS", os.path.join(out_dir, "boot-test"))
+    rc, txt = run_tool(log, ["tools/permanent_build.py", "--emu", out])
+    os.environ.pop("PACK", None)
+    if rc or "RESULT: PASS" not in txt:
+        bad = out + ".FAILED-BOOT-TEST"
+        os.replace(out, bad)
+        raise RuntimeError("the emulator boot test FAILED -- do NOT flash it "
+                           f"(kept as {bad} for inspection)")
+    with open(os.path.join(out_dir, "READ ME FIRST.txt"), "w") as f:
+        f.write(STICK_README)
+    log(f"ready: {out} -- stock 1.15 + the stick reader only; no mods baked in")
+    prog(1.0, "Built + boot-tested. Read the warnings before flashing.")
+
+
+def j_stick_arm(log, prog):
+    """The USB-stick method WITHOUT flashing anything: write the 2.7 KB
+    loader into the deck's RAM over the cable and arm the mount reader
+    (tools/usbloader_hot.py). From then on every stick with
+    XDJMODS/PACK.BIN brings the mods and other sticks play stock. A
+    power-cycle is stock again, so this is once per power-on."""
+    if not deck_present():
+        raise RuntimeError("connect the deck over USB first -- this is the "
+                          "no-flash step, and it needs the cable once per "
+                          "power-on (5 seconds, nothing is written to flash)")
+    prog(0.05, "Putting the loader in the deck's memory", eta=30)
+    rc, txt = run_tool(log, ["tools/usbloader_hot.py"])
+    if rc or "RESULT: PASS" not in txt:
+        if "REFUSED" in txt:
+            raise RuntimeError("the deck refused (another hook or live data in "
+                              "that area) -- see the log; power-cycle the deck "
+                              "and try again")
+        raise RuntimeError("the loader was not armed -- see the log; nothing "
+                          "was written to flash")
+    log("loader is in the deck's memory. Unplug the cable, then insert your "
+        "stick: any stick with XDJMODS/PACK.BIN brings the mods, any other "
+        "stick plays stock. Power-cycle = stock again.")
+    prog(1.0, "Done -- unplug the cable and insert your stick")
+
+
+STICK_README = """XDJ-700 -- USB-stick mods loader (version shows 1.16 in UTILITY)
+
+This update is the OFFICIAL v1.15 firmware plus one small addition: when a
+USB stick goes in, the deck looks for XDJMODS/PACK.BIN on it (made by XDJ
+Mod Studio > Mod > File on your USB stick) and loads those mods. A stick
+without that file = a completely stock deck.
+
+FLASHING CAN BRICK A DECK. Mains power, do not touch the deck or the stick
+until the update says it is complete. The way back to stock: flash the
+official XDJ700.UPD v1.15 the same way -- keep that file to hand (the
+same stick will do once you swap it back in).
+
+If a stick ever makes the deck misbehave, power it off, take the stick out
+and start it again: it comes up stock.
+
+How to update: copy XDJ700.UPD to the root of an empty FAT32 stick, then
+follow Pioneer DJ's own firmware update steps for the XDJ-700.
+
+Nothing on the deck changes until a stick with a mods file goes in; each
+time, the mods are checked before anything is written (a deck that does
+not look stock refuses the whole file and stays as it is).
+"""
+
+
+def j_deck_install(log, prog, mode, pads=True,
+                   themes=True, liveks=False, stems=True, phase=False,
+                   brake=0.0, flac=True, opus=False, touchfx=False):
+    if deck_ready():
+        raise RuntimeError(deck_ready())
+    try:
+        s = settings()
+        s["mods"] = {"mode": mode, "pads": bool(pads), "themes": bool(themes),
+                     "liveks": bool(liveks), "stems": bool(stems),
+                     "phase": bool(phase),
+                     "brake": float(brake or 0), "flac": bool(flac),
+                     "opus": bool(opus), "touchfx": bool(touchfx and pads)}
+        save_settings(s)
+    except Exception:
+        pass
+    args = ["tools/deck_session.py"] + install_args(mode, pads, themes, liveks, stems,
+                                                    phase, brake, flac, opus, touchfx)
+    if touchfx and pads:
+        liveks = False
     plan = {pre: n for pre, _, n in INSTALL_STEPS}
     if os.path.exists(os.path.expanduser("~/.xdj700_surveys.json")):
         plan["1/5"] = 1                   # this Mac has surveyed a deck before
@@ -1317,10 +1672,14 @@ def j_deck_install(log, prog, mode, pads=True,
         plan["5d"] = 0
         plan["5f"] = 0
         plan["5g"] = 0
+    elif not stems:
+        plan["5g"] = 0
     if not themes:
         plan["5e"] = 0
     if not liveks:
         plan["5k"] = 0
+    if not (touchfx and pads):
+        plan["5x"] = 0
     if not (phase and pads):
         plan["5m"] = 0
     if not flac:
@@ -1437,11 +1796,32 @@ def j_upd_build(log, prog, upd, mode, pads, versions, banner, extras=()):
                            for n in names) or "- (no extras ticked)\n",
             usb=", ".join([n for e, n in UPD_EXTRA_NAMES.items() if e not in extras]
                           + ["theme switching", "FLAC & Opus"])))
-    log(f"ready: {out}")
+    log(f"ready: {out} -- stock 1.15 + the stick reader only; no mods baked in")
     prog(1.0, "Built + boot-tested. Read the warnings before flashing.")
 
 
 _FMT_CACHE = {}
+_FMT_BUSY = set()
+
+
+def lib_formats_async(root):
+    """lib_formats() with the walk off the request thread: the polled
+    /api/state answers at once (the cached value, or zeros on the first
+    ask) and a background thread refreshes it. Walking a big stick inside
+    /api/state stalled the 6 s poll and the UI with it."""
+    if not root or not os.path.isdir(root):
+        return {"flac": None, "opus": None}
+    hit = _FMT_CACHE.get(root)
+    if (hit is None or time.time() - hit[0] >= 60) and root not in _FMT_BUSY:
+        _FMT_BUSY.add(root)
+
+        def _walk(r=root):
+            try:
+                lib_formats(r)
+            finally:
+                _FMT_BUSY.discard(r)
+        threading.Thread(target=_walk, daemon=True).start()
+    return hit[1] if hit else {"flac": 0, "opus": 0}
 
 
 def lib_formats(root):
@@ -1575,7 +1955,8 @@ def emu_cmd(b):
     elif c == "restart":
         h.restart()
     elif c == "mods":
-        m = {"wave": b.get("wave") or None}
+        m = {"wave": b.get("wave") or None,
+             "fx": b.get("fx") if b.get("fx") in ("keyshift", "touchfx") else None}
         th = b.get("theme")
         if th and th.get("spec"):
             m["theme"] = {"name": th.get("name") or "custom", "spec": th["spec"]}
@@ -1606,7 +1987,7 @@ class H(BaseHTTPRequestHandler):
     def log_message(self, format, *args):
         pass                               # no per-request console noise
 
-    def send(self, body, ctype="application/json", code=200):
+    def send(self, body, ctype="application/json", code=200, headers=None):
         if isinstance(body, (dict, list)):
             body = json.dumps(body).encode()
         elif isinstance(body, str):
@@ -1614,6 +1995,8 @@ class H(BaseHTTPRequestHandler):
         self.send_response(code)
         self.send_header("Content-Type", ctype)
         self.send_header("Content-Length", str(len(body)))
+        for k, v in (headers or {}).items():
+            self.send_header(k, v)
         self.send_header("Cache-Control", "no-store")
         self.send_header("Content-Security-Policy",
                          "default-src 'self' 'unsafe-inline' data: blob:; "
@@ -1632,10 +2015,11 @@ class H(BaseHTTPRequestHandler):
                 return self.send(update_check(force=q.get("force") == "1"))
             if u.path == "/api/state":
                 s = settings()
-                fmts = lib_formats(stick_path())
+                fmts = lib_formats_async(stick_path())
                 themes = theme_list()
                 return self.send({"stick": stick_path(),
                                   "stick_ok": os.path.isdir(stick_path()),
+                                  "app": FROZEN,
                                   "project": ROOT,
                                   "project_ok": os.path.isdir(os.path.join(ROOT, "tools")),
                                   "deck": deck_present(), "deck_err": deck_err(), "deck_multi": _DECK_N[0] > 1,
@@ -1676,6 +2060,9 @@ class H(BaseHTTPRequestHandler):
         self.send({"error": "not found"}, code=404)
 
     def _audio(self, q):
+        """The track file, with byte ranges: WebKit (the Mac app window)
+        needs 206 / Accept-Ranges to seek, and often to play at all."""
+        import re
         stick = os.path.realpath(stick_path())
         p = os.path.realpath(q["path"])
         if not p.startswith(stick + os.sep):
@@ -1683,8 +2070,34 @@ class H(BaseHTTPRequestHandler):
         ext = os.path.splitext(p)[1].lower()
         ct = {".mp3": "audio/mpeg", ".wav": "audio/wav", ".m4a": "audio/mp4",
               ".aif": "audio/aiff", ".aiff": "audio/aiff", ".flac": "audio/flac"}
+        ctype = ct.get(ext, "application/octet-stream")
+        try:
+            size = os.path.getsize(p)
+        except OSError:
+            return self.send({"error": "cannot open the track"}, code=404)
+        m = re.match(r"bytes=(\d*)-(\d*)$", (self.headers.get("Range") or "").strip())
+        if not m:
+            with open(p, "rb") as f:
+                return self.send(f.read(), ctype, headers={"Accept-Ranges": "bytes"})
+        a, b = m.group(1), m.group(2)
+        if a == "" and b == "":
+            return self.send(b"", ctype, code=416,
+                             headers={"Content-Range": f"bytes */{size}"})
+        if a == "":                       # suffix range: the last N bytes
+            start, end = max(0, size - int(b)), size - 1
+        else:
+            start = int(a)
+            end = int(b) if b else size - 1
+        end = min(end, size - 1)
+        if start > end or start >= size:
+            return self.send(b"", ctype, code=416,
+                             headers={"Content-Range": f"bytes */{size}"})
         with open(p, "rb") as f:
-            return self.send(f.read(), ct.get(ext, "application/octet-stream"))
+            f.seek(start)
+            body = f.read(end - start + 1)
+        return self.send(body, ctype, code=206, headers={
+            "Content-Range": f"bytes {start}-{end}/{size}",
+            "Accept-Ranges": "bytes"})
 
     def _x7k(self, q):
         """.x7k key version as WAV (decoded on the Mac): proof-of-concept
@@ -1811,7 +2224,8 @@ class H(BaseHTTPRequestHandler):
         wopts = {k: q.get(k) for k in ("style", "tint", "low", "mid", "high", "custom")}
         return self.send(preview_png(spec, q.get("screen", "main"),
                                      q.get("wave") == "1", wopts,
-                                     q.get("track") or None), "image/png")
+                                     q.get("track") or None,
+                                     lit=q.get("lit") or None), "image/png")
 
     def do_POST(self):
         n = int(self.headers.get("Content-Length") or 0)
@@ -1857,7 +2271,8 @@ class H(BaseHTTPRequestHandler):
             if p == "/api/stems":
                 return self.send({"job": job(f"Stems: {os.path.basename(b['audio'])}",
                                              j_stems, b["audio"], [],
-                                             b.get("quality", "opus"))})
+                                             b.get("quality", "opus"),
+                                             b.get("replace", True) is not False)})
             if p == "/api/x7s":
                 return self.send({"job": job(f"Deck file from sidecar: {os.path.basename(b['audio'])}",
                                              j_x7s, b["audio"])})
@@ -1885,16 +2300,36 @@ class H(BaseHTTPRequestHandler):
                                              upd, b.get("mode", "rgb"), pads,
                                              bool(b.get("versions", True)), banner,
                                              extras)})
+            if p == "/api/stick/pack":
+                sel = {k: b[k] for k in ("mode", "pads", "themes", "liveks", "stems",
+                                         "phase", "brake", "flac", "opus", "touchfx")
+                       if k in b}
+                return self.send({"job": job("Write mods file to the USB stick",
+                                             j_stick_pack, sel)})
+            if p == "/api/stick/loader":
+                if not all(b.get("ack", {}).get(k) is True for k in UPD_ACKS):
+                    return self.send({"error": "tick all three warnings first"}, code=400)
+                upd = os.path.expanduser((b.get("path") or "").strip())
+                if not os.path.isfile(upd):
+                    return self.send({"error": "pick your official XDJ700.UPD (v1.15) file"},
+                                     code=400)
+                return self.send({"job": job("Build the USB-stick loader update",
+                                             j_stick_loader, upd)})
+            if p == "/api/stick/arm":
+                return self.send({"job": job("Send the stick loader to the deck "
+                                             "(no flash)", j_stick_arm)})
             if p == "/api/deck/install":
                 return self.send({"job": job("Install mods on deck", j_deck_install,
                                              b.get("mode", "rgb"),
                                              bool(b.get("pads", True)),
                                              bool(b.get("themes", True)),
                                              bool(b.get("liveks", False)),
+                                             bool(b.get("stems", True)),
                                              bool(b.get("phase", False)),
                                              float(b.get("brake") or 0),
                                              bool(b.get("flac", False)),
-                                             bool(b.get("opus", False)))})
+                                             bool(b.get("opus", False)),
+                                             bool(b.get("touchfx", False)))})
         except (BrokenPipeError, ConnectionResetError):
             raise
         except Exception as e:

@@ -1,0 +1,31 @@
+diff --git a/ui/vnc.c b/ui/vnc.c
+index 656768f..8ff07e0 100644
+--- a/ui/vnc.c
++++ b/ui/vnc.c
+@@ -3271,17 +3271,15 @@ static void vnc_refresh(DisplayChangeListener *dcl)
+         /* vs might be free()ed here */
+     }
+ 
+-    if (has_dirty && rects) {
+-        vd->dcl.update_interval /= 2;
+-        if (vd->dcl.update_interval < VNC_REFRESH_INTERVAL_BASE) {
+-            vd->dcl.update_interval = VNC_REFRESH_INTERVAL_BASE;
+-        }
+-    } else {
+-        vd->dcl.update_interval += VNC_REFRESH_INTERVAL_INC;
+-        if (vd->dcl.update_interval > VNC_REFRESH_INTERVAL_MAX) {
+-            vd->dcl.update_interval = VNC_REFRESH_INTERVAL_MAX;
+-        }
+-    }
++    /*
++     * XDJ Mod Studio: a client is watching, so keep the base refresh. The
++     * stock back-off (+50 ms per quiet tick, only halved again on change)
++     * left a deck that redraws in bursts at 1-7 frames a second; with no
++     * change a tick costs one screen compare and sends nothing.
++     */
++    (void)has_dirty;
++    (void)rects;
++    vd->dcl.update_interval = VNC_REFRESH_INTERVAL_BASE;
+ }
+ 
+ static void vnc_connect(VncDisplay *vd, QIOChannelSocket *sioc,

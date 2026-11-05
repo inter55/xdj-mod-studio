@@ -15,7 +15,14 @@ XDJ-700 DSP image actually programs (2026-10-12 boot log)):
 Event numbers (OMAP-L137 datasheet table 5-8): 4 T64P0_TINT12,
 8 EDMA3_CC0_INT1, 34 UHPI_DSPINT, 61 MCASP_INT.
 """
+import ctypes
+import os
+
 MASK = 0xFFFFFFFF
+# Edma3.burst's word loop in C (c6xcore.c c6x_dma_words); 0 = Python
+_NO_CDMA = os.environ.get("XDJ_DSP_CDMA", "1") == "0"
+# Edma3.transfer's ABSYNC frame loop in C (c6xcore.c c6x_dma_frames); 0 = Python
+_NO_CFRAME = os.environ.get("XDJ_DSP_CFRAME", "1") == "0"
 
 
 class Intc:
@@ -213,6 +220,28 @@ class Edma3:
             muted = getattr(sink.dev, "muted", False)
             blen = len(buf) - 4
             done = 0
+            fast = self._cdma(buf, p) if not _NO_CDMA else None
+            if fast is not None:                      # same loop, in C
+                cw, bufp, parp = fast
+                if len(cw) < n:
+                    cw = self._cbuf = (ctypes.c_uint32 * n)()
+                    fast = (cw, bufp, parp)
+                done = self._clib.c6x_dma_words(bufp, blen, lo, parp + b, n, cw,
+                                                1 if muted else 0)
+                out.extend(cw[:done])
+                ccnt = 0 if not (p[b + 28] | p[b + 29]) else 1
+                self.stats["events"] += done
+                self.stats["transfers"] += done
+                n -= done
+                if ccnt == 0:
+                    self._complete(ch, opt, lnk & 0xFFFF, False)
+                elif done == 0:
+                    self.stats["events"] += 1
+                    self.transfer(ch)
+                    n -= 1
+                if len(out) >= sink.keep:
+                    sink.trim()
+                continue
             while done < n and ccnt:
                 o = src - lo
                 if o < 0 or o > blen:
@@ -239,6 +268,74 @@ class Edma3:
                 n -= 1
             if len(out) >= sink.keep:
                 sink.trim()
+
+    def _cdma(self, buf, p):
+        """(word buffer, &buf, &param) for c6x_dma_words, or None when the
+        C core library is not in use / lacks it. The bus RAM bytearrays
+        never resize (the C core shares them); restore() swaps `param`."""
+        cache = self.__dict__.setdefault("_cd", {})
+        key = (id(buf), id(p))
+        e = cache.get(key)
+        if e is not None and e[3] is buf and e[4] is p:
+            return e[0], e[1], e[2]
+        lib = getattr(self.dev.cpu, "lib", None)
+        if lib is None or not hasattr(lib, "c6x_dma_words"):
+            return None
+        f = lib.c6x_dma_words
+        P = ctypes.c_void_p
+        f.argtypes = [P, ctypes.c_int64, ctypes.c_uint32, P, ctypes.c_int,
+                      P, ctypes.c_int]
+        f.restype = ctypes.c_int
+        self._clib = lib
+        bufp = ctypes.addressof((ctypes.c_char * len(buf)).from_buffer(buf))
+        parp = ctypes.addressof((ctypes.c_char * len(p)).from_buffer(p))
+        cw = getattr(self, "_cbuf", None) or (ctypes.c_uint32 * 64)()
+        self._cbuf = cw
+        if len(cache) > 16:
+            cache.clear()
+        cache[key] = (cw, bufp, parp, buf, p)
+        return cw, bufp, parp
+
+    def _frames(self, src, dst, acnt, bcnt, sbidx, dbidx):
+        """c6x_dma_frames: up to bcnt frames of acnt bytes from src/dst,
+        strides sbidx/dbidx, when both ranges sit wholly inside RAM buffers
+        (nothing to watch, no device window). Returns frames copied; 0 means
+        the Python loop below must do it (same order, same bytes)."""
+        if _NO_CFRAME or sbidx < 0 or dbidx < 0:
+            return 0
+        bus = self.dev.bus
+        if bus.watch:
+            return 0
+        sb = db = None
+        slo = dlo = 0
+        for rlo, rhi, rb in bus.ram:
+            if sb is None and rlo <= src and src + sbidx * (bcnt - 1) + acnt <= rhi:
+                sb, slo = rb, rlo
+            if db is None and rlo <= dst and dst + dbidx * (bcnt - 1) + acnt <= rhi:
+                db, dlo = rb, rlo
+        if sb is None or db is None:
+            return 0
+        lib = getattr(self.dev.cpu, "lib", None)
+        if lib is None or not hasattr(lib, "c6x_dma_frames"):
+            return 0
+        cache = self.__dict__.setdefault("_cf", {})
+        key = (id(sb), id(db))
+        e = cache.get(key)
+        if e is None or e[2] is not sb or e[3] is not db:
+            f = lib.c6x_dma_frames
+            P = ctypes.c_void_p
+            f.argtypes = [P, ctypes.c_int64, ctypes.c_uint32,
+                          P, ctypes.c_int64, ctypes.c_uint32,
+                          ctypes.c_uint32, ctypes.c_uint32, ctypes.c_uint32,
+                          ctypes.c_uint32, ctypes.c_int, ctypes.c_int]
+            f.restype = ctypes.c_int
+            sbp = ctypes.addressof((ctypes.c_char * len(sb)).from_buffer(sb))
+            dbp = ctypes.addressof((ctypes.c_char * len(db)).from_buffer(db))
+            if len(cache) > 8:
+                cache.clear()
+            e = cache[key] = (sbp, dbp, sb, db, len(sb), len(db))
+        return lib.c6x_dma_frames(e[0], e[4], slo, e[1], e[5], dlo, src, dst,
+                                  acnt, bcnt, sbidx, dbidx)
 
     def _p(self, s, w):
         return int.from_bytes(self.param[32 * s + 4 * w:32 * s + 4 * w + 4], "little")
@@ -278,6 +375,16 @@ class Edma3:
                 # copy; _copy falls back to word order if the ranges overlap
                 self._copy(src, dst, acnt * bcnt)
                 bcnt = 0
+            elif acnt == 4 and bcnt:
+                # MP3 audio path: 588 words, source stride 4, destination
+                # stride 8 (interleaved into the stereo buffer). The frame
+                # loop in C -- in Python it was one _copy call per frame,
+                # and it runs on the DSP thread (measured 2026-11-01).
+                k = self._frames(src, dst, acnt, bcnt, sbidx, dbidx)
+                if k:
+                    src += sbidx * k
+                    dst += dbidx * k
+                    bcnt -= k
             for _ in range(bcnt):
                 self._copy(src, dst, acnt)
                 src, dst = src + sbidx, dst + dbidx

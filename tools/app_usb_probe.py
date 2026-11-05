@@ -86,14 +86,15 @@ def main():
             ops = len(getattr(d, "access", [])) if d else 0
         return ops, m.cpu.steps if m else 0
 
-    def press(k, hold=0.25):
-        # the served app reaches the deck via key_event/pointer_down, which
-        # open the input burst; st.held bypasses those, so fire it here too
-        app._input_burst()
+    def press(k, hold=0.14):
+        # held keys are sampled by the 30 Hz frame injection. Open the fast-
+        # forward burst on RELEASE (emu/ui.py pointer_up does the same): a
+        # burst under a held knob turns the click into a long press (the
+        # firmware answers with the scroll hint and never navigates).
         app.st.held.add(k)
         time.sleep(hold)
-        app._input_burst()
         app.st.held.discard(k)
+        app._input_burst()
 
     t_ins = time.time()
     app.insert_usb(STICK)
@@ -140,10 +141,8 @@ def main():
                 print(f"LOAD DONE push={i} {now-t_push:.1f}s "
                       f"(total {now-t0:.1f}s)", flush=True)
                 if os.environ.get("PLAY"):
-                    app.st.held.add("PlayPause")
-                    time.sleep(0.3)
-                    app._input_burst()
-                    app.st.held.discard("PlayPause")
+                    # A LOAD AUTO-PLAYS here (SH mode 3, DSP state 2): do not
+                    # press PLAY, that PAUSES the deck (mode 5, DSP state 3).
                     t_p = time.time()
                     snd = app.info().get("sound") or {}
                     while time.time() - t_p < 45:
@@ -151,20 +150,21 @@ def main():
                         m = app.machine
                         d = getattr(m.mem.dev, "dspemu", None)
                         dac = len(d.asp1.out) if d else -1
+                        st = d.bus.read(0x11837BF8, 4) if d else -1
                         snd = app.info().get("sound") or {}
                         if int(time.time() - t_p) % 5 == 0:
                             print(f"    play[{time.time()-t_p:4.0f}s] "
-                                  f"mode={m.mem.r8(MODE)} dac={dac} "
+                                  f"mode={m.mem.r8(MODE)} dsp_state={st} dac={dac} "
                                   f"snd={snd.get('playing')}", flush=True)
-                        if m.mem.r8(MODE) == 5 and dac > 0:
+                        if st == 2 and dac > 0:
                             time.sleep(10)
                             d2 = m.mem.dev.dspemu
-                            print(f"PLAY OK mode=5 dac {len(d2.asp1.out)} "
+                            print(f"PLAY OK dsp_state=2 dac {len(d2.asp1.out)} "
                                   f"snd={snd.get('playing')} "
                                   f"muted={snd.get('muted')}", flush=True)
                             break
                     else:
-                        print("PLAY never reached mode 5", flush=True)
+                        print("PLAY never reached dsp state 2", flush=True)
                 stop[0] = True
                 return
         print(f"    push {i}: no load in 60 s", flush=True)

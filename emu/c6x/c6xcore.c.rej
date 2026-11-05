@@ -1,0 +1,139 @@
+diff a/emu/c6x/c6xcore.c b/emu/c6x/c6xcore.c	(rejected hunks)
+@@ -189,7 +208,7 @@ Core *c6x_new(int hbits)
+     return c;
+ }
+ 
+-void c6x_free(Core *c) { free(c->ins); free(c->epi); free(c->epc); free(c->hkey); free(c->hval); free(c); }
++void c6x_free(Core *c) { free(c->idle_stk); free(c->ref_stk); free(c->ins); free(c->epi); free(c->epc); free(c->hkey); free(c->hval); free(c); }
+ int c6x_sizeof_ins(void) { return sizeof(Ins); }
+ int c6x_sizeof_core(void) { return sizeof(Core); }
+ u32 *c6x_regs(Core *c) { return c->r; }
+@@ -269,22 +290,71 @@ static inline uint8_t *ram(Core *c, u32 a, int n)
+     return 0;
+ }
+ 
++/* L2 is also seen at 0x00800000 */
++static inline u32 gaddr(u32 a) { return (a >= 0x00800000u && a < 0x00840000u) ? a + 0x11000000u : a; }
++/* recording an idle pass: is [a, a+n) on the stack and written by the pass
++ * itself before this read? (then its value is the pass's own, not input) */
++static int rs_own(Core *c, u32 a, int n)
++{
++    u32 g = gaddr(a);
++    if (g < c->idle_lo || g >= c->idle_hi) return 0;
++    for (int i = 0; i < c->sw_cnt; i++) {
++        u32 w = c->sw_a[i];
++        if (g >= w && g + n <= w + c->sw_n[i]) return 1;
++    }
++    return 0;
++}
++
+ static u64 mread(Core *c, u32 a, int n)
+ {
+     uint8_t *p = ram(c, a, n);
+-    if (p) { u64 v = 0; memcpy(&v, p, n); return v; }
++    if (p) {
++        u64 v = 0; memcpy(&v, p, n);
++        if (c->rs_on && !rs_own(c, a, n)) {   /* recording an idle pass's reads */
++            if (c->rs_cnt < RSMAX) {
++                c->rs_a[c->rs_cnt] = a; c->rs_n[c->rs_cnt] = (uint8_t)n; c->rs_v[c->rs_cnt] = v;
++                c->rs_cnt++;
++            } else c->rs_over = 1;
++        }
++        return v;
++    }
+     c->idle_dirty = 1;
+     if (n == 8) return (u64)c->mrd(a, 4) | (u64)c->mrd(a + 4, 4) << 32;
+     return c->mrd(a, n);
+ }
+ 
++/* does every load of the recorded idle pass still find the value it read? */
++static int rs_still(Core *c)
++{
++    for (int i = 0; i < c->ref_cnt; i++) {
++        uint8_t *p = ram(c, c->ref_a[i], c->ref_n[i]);
++        u64 v = 0;
++        if (!p) return 0;
++        memcpy(&v, p, c->ref_n[i]);
++        if (v != c->ref_v[i]) return 0;
++    }
++    return 1;
++}
++
+ static void mwrite(Core *c, u32 a, int n, u64 v)
+ {
+     uint8_t *p = ram(c, a, n);
+     if (p) {
+-        u32 g = (a >= 0x00800000u && a < 0x00840000u) ? a + 0x11000000u : a;   /* L2 alias */
+-        if (!c->idle_dirty && (g < c->idle_lo || g >= c->idle_hi) && memcmp(p, &v, n))
+-            c->idle_dirty = 1;               /* a real change outside the stack */
++        u32 g = gaddr(a);   /* L2 alias */
++        if (c->rs_on && g >= c->idle_lo && g < c->idle_hi) {
++            if (c->sw_cnt < RSMAX) { c->sw_a[c->sw_cnt] = g; c->sw_n[c->sw_cnt] = (uint8_t)n; c->sw_cnt++; }
++            else c->rs_over = 1;
++        }
++        if (g < c->idle_lo || g >= c->idle_hi) {
++            if (!c->idle_dirty && memcmp(p, &v, n))
++                c->idle_dirty = 1;           /* a real change outside the stack */
++            if (c->rs_on) {                  /* recording an idle pass: its writes */
++                if (c->rs_cnt < RSMAX) {
++                    c->rs_a[c->rs_cnt] = a; c->rs_n[c->rs_cnt] = (uint8_t)n; c->rs_v[c->rs_cnt] = v;
++                    c->rs_cnt++;
++                } else c->rs_over = 1;
++            }
++        }
+         memcpy(p, &v, n);
+         return;
+     }
+@@ -1308,17 +1469,20 @@ u32 c6x_need(Core *c) { return c->need; }
+ int c6x_err(Core *c) { return c->err; }
+ u32 c6x_err_pc(Core *c) { return c->err_pc; }
+ u32 c6x_pc(Core *c) { return c->pc; }
+-void c6x_set_pc(Core *c, u32 pc) { c->dff_frozen = 0; c->dff_learn = 0; c->pc = pc; }
++void c6x_set_pc(Core *c, u32 pc) { c->dff_frozen = 0; c->dff_learn = 0; c->idle_armed = 0; c->ref_ok = 0; c->pc = pc; }
+ u64 c6x_cycle(Core *c) { return c->cycle; }
+-void c6x_set_cycle(Core *c, u64 v) { c->dff_frozen = 0; c->dff_learn = 0; c->cycle = v; }
++void c6x_set_cycle(Core *c, u64 v) { c->dff_frozen = 0; c->dff_learn = 0; c->idle_armed = 0; c->ref_ok = 0; c->cycle = v; }
+ int c6x_stall(Core *c) { return c->stall; }
+ int c6x_evcount(Core *c) { return c->evcount; }
+ int c6x_npend(Core *c) { return c->npend; }
+ int c6x_sp_on(Core *c) { return c->sp_on; }
+ u32 c6x_idle(Core *c) { return c->idle; }
+ void c6x_set_idle(Core *c, u32 v) { c->idle = v; }
++/* 0 packets, 1 instructions, 2 interrupts, 3 Python ops, 4 idle cycles
++ * jumped, 5 idle jumps, 6 jumps from the reference pass */
+ u64 c6x_counts(Core *c, int k)
+-{ return k == 0 ? c->ep_count : k == 1 ? c->insn_count : k == 2 ? c->interrupts : c->py_calls; }
++{ return k == 0 ? c->ep_count : k == 1 ? c->insn_count : k == 2 ? c->interrupts :
++         k == 3 ? c->py_calls : k == 4 ? c->idle_jumped : k == 5 ? c->idle_jumps : c->idle_refhits; }
+ 
+ void c6x_watch(Core *c, u32 lo, u32 hi) { c->wlo = lo; c->whi = hi; c->wn = 0; }
+ int c6x_watch_get(Core *c, int k, u32 *out)
+@@ -1338,4 +1502,27 @@ void c6x_skip(Core *c, u64 n)
+ int c6x_splx_pending(Core *c) { return c->splx_irq; }
+ 
+ void c6x_set_idle_loop(Core *c, u32 head, u32 lo, u32 hi)
+-{ c->idle_head = head; c->idle_lo = lo; c->idle_hi = hi; c->idle_armed = 0; }
++{
++    c->idle_head = head; c->idle_lo = lo; c->idle_hi = hi; c->idle_armed = 0;
++    c->nidle = head ? 1 : 0; c->idle_heads[0] = head; c->idle_last = -1;
++    free(c->idle_stk); c->idle_stk = 0; c->idle_stkn = 0;
++    free(c->ref_stk); c->ref_stk = 0; c->ref_ok = 0;
++    if (head && hi > lo && hi - lo <= 0x10000u) {
++        c->idle_stkn = hi - lo;
++        c->idle_stk = malloc(c->idle_stkn);
++        c->ref_stk = malloc(c->idle_stkn);
++        if (!c->idle_stk || !c->ref_stk) {
++            free(c->idle_stk); free(c->ref_stk);
++            c->idle_stk = c->ref_stk = 0; c->idle_stkn = 0;
++        }
++    }
++}
++/* one more loop of the idle task (same stack) for the busy-wait skip */
++int c6x_add_idle_head(Core *c, u32 head)
++{
++    if (!head || c->nidle >= 4) return 0;
++    for (int k = 0; k < c->nidle; k++) if (c->idle_heads[k] == head) return 1;
++    c->idle_heads[c->nidle++] = head; c->idle_armed = 0; c->idle_last = -1; c->ref_ok = 0;
++    return 1;
++}
++

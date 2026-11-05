@@ -220,8 +220,10 @@ class MachineMem:
     def take_interrupt(self, imask=-1):
         return self.dev.take_interrupt(imask)
 
-    def tick(self, cyc):
-        self.dev.tick(cyc)
+    def tick(self, cyc, ev=False):
+        """ev=True (play mode, C event loop): the TMU/LCDC counters live in
+        the C core -- fastcpu ticks them via core_ev_tick right after this."""
+        self.dev.tick(cyc, ev=ev)
 
 
 class Machine:
@@ -642,10 +644,13 @@ class Machine:
         return m
 
     def run(self, limit=2000000, report_every=0, stop_on_fault=False,
-            stop_on_watch=False, stop_on_pc=()):
+            stop_on_watch=False, stop_on_pc=(), max_cycles=None):
         t = time.time()
         if not stop_on_fault and not stop_on_watch and not stop_on_pc:
-            res = self.cpu.run(limit=limit)
+            if max_cycles is not None and type(self.cpu).__name__ == "FastSH4":
+                res = self.cpu.run(limit=limit, max_cycles=max_cycles)
+            else:
+                res = self.cpu.run(limit=limit)
         else:
             start = self.exc_total
             # run in slices so a halt condition stops promptly, state intact

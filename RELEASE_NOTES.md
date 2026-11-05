@@ -1,32 +1,100 @@
-# XDJ Mod Studio v0.99 (XDJ-700, firmware 1.15)
+# XDJ Mod Studio v1.0 (XDJ-700, firmware 1.15)
 
 Open-source mods for the Pioneer DJ XDJ-700, loaded into the deck's memory
-over USB. Nothing is flashed: **switch the deck off and on and it is stock
-again.** You need your own official XDJ-700 v1.15 update file (from Pioneer
-DJ's support site); the app checks it and builds everything from it.
+over USB. **Recommended: flash the small stick loader once**, then carry the
+mods on your normal rekordbox stick — the deck reads XDJMODS/PACK.BIN at
+every mount, and a stick without it leaves the deck stock. That update changes
+9 bytes of Pioneer's file and boots correctly in the emulator with and without
+a pack, but it has **not** been through a real deck flash yet: keep the
+official 1.15 file to hand before you start — it can go back on the same stick
+afterwards, so one stick is enough. You do not have to flash
+at all to try this: the app can send the same loader into the deck's memory
+over the cable in a few seconds, and the stick then works until you power the
+deck off. After that one update the deck never needs the computer again. If
+you want zero risk,
+use the cable instead — nothing is written, and **switch the deck off and on
+and it is stock again.** You need your own official XDJ-700 v1.15 update file
+(from Pioneer DJ's support site); the app checks it and builds everything from
+it. Every route that writes firmware shows 1.16 in UTILITY, and Pioneer's own
+1.15 file puts the deck back the same way you flashed it.
 
 Apple Silicon Mac, macOS 14 or newer (Windows build: see the README inside
 the Windows zip). First launch: right-click the app → Open.
 
-## About 0.99 — please read
-**0.99 is a stepping stone, not the finished 1.0.** It brings every fix
-that is ready today, but not everything on the list is fixed yet. The
-rest comes in **1.0**, and 1.0 is where everything will be fixed. If
-something below says "still to come", it is not in this version.
+## What changed in 1.0
+- **The emulator's sound no longer speeds up and drags.** The emulated audio
+  chip was being told to run at a clock faster than the Mac could deliver, so
+  it fell seconds behind and then dumped the backlog in one burst — heard as
+  a sudden speed-up, then a crawl, then a stutter. It now drops that clock to
+  what the machine can actually deliver and climbs back when there is spare
+  capacity, and the audio output is paced by the deck's own clock, so pitch
+  and tempo do not change. Measured with a track playing on an M5: no gaps,
+  no dropped frames, pitch correction sitting at zero.
+- **Mods can come off your USB stick.** Two ways: send the loader into the
+  deck's memory over the cable (a few seconds, nothing written, gone at
+  power-off), or build a loader-only update file that the deck keeps. Either
+  way the loader replays `XDJMODS/PACK.BIN` at every stick mount. A stick
+  with no pack leaves the deck stock, so one stick can carry the mods for
+  several decks and a stock stick is still a stock deck.
+- **Centre RGB waveform fixed on longer tracks.** The colour data's entry
+  count was read as 16 bits, so on any track past 7 min 17 s the count
+  wrapped and the centre waveform fell back to stock blue part-way through
+  the track (jumping back to a cue made it RGB again — that was this bug).
+  Waveform exports that use a colour rate other than 150 entries/s are now
+  scaled to the deck's grid instead of drawing off the beat.
+- **Hot cue pages D–F / G–H.** Paging now also reads letter-coded cue
+  entries and larger cue lists (newer rekordbox exports), and Track
+  Builder shows an **A–H** tag on every track whose exported analysis
+  carries 4+ hot cues. If the pages don't appear on a track, its analysis
+  on the stick predates the cues: set them in rekordbox and export the
+  stick again — cues set after an export never reach the deck.
+- **Pick only the PERFORM features you use.** Live Stems now has its own
+  tick box in the app, and the deck's PERFORM screen only draws the KEY
+  SHIFT and STEMS tabs when those mods are actually installed. Untick
+  both and you keep just HOT CUE + BEAT JUMP, with no dead tabs. The same
+  choice applies to the Permanent (UPD) tab's extras.
+- **The stems list works.** The app's "stems files" section looked for an
+  older file format only, so it stayed empty even after a successful
+  build; it now lists your `Title (STEMS).wav` files with their size.
+  And to be clear about the deck: stems files are **not** in the
+  rekordbox export, so they don't show in the Track/Artist lists — press
+  BROWSE and scroll to the **bottom** category (FOLDER), then into the
+  track's folder. PERFORM › STEMS mutes vocals / drums / bass / other.
+- **Light mode.** In the app (Settings › Appearance: System, Light, Dark)
+  and on the deck (UTILITY › THEME › LIGHT). The deck light theme is an
+  early preview: it has been tested in the emulator, not on a real deck
+  yet; power-cycle to leave it.
 
-**Still to come in 1.0 (not in 0.99):**
-- **Phase meter, master row:** on linked decks the top (orange) row
-  stays empty. Your own deck's row works.
-- **Faster stem mute:** muting a stem can still take a few seconds to
-  be heard.
+## Known issues (not in 1.0)
+- **Pro DJ Link:** waveform colours, the phase meter's master (orange) row
+  and hot-cue pages only work on the deck that holds the USB stick; a deck
+  loading the track over Link from the other player stays stock (it never
+  sees the analysis data our mods read). Proper Link support is the next
+  big item after 1.0.
+- **3-band waveforms need the data:** 3-BAND in UTILITY › WAVEFORM COLOR
+  only draws on tracks whose analysis carries the 3-band section — Track
+  Builder › Add 3-band writes it (the list shows Ready / In rekordbox /
+  Missing per track). On tracks without it the deck falls back to blue —
+  that is the "selecting 3-band shows blue" some of you saw, not a broken
+  setting. RGB needs the colour data your rekordbox export already has.
 - **Hot cues E–H set on the deck:** pages D–F / G–H play cues made in
   rekordbox; setting them on the deck comes later.
-- **Light mode** — for the app and as a deck theme — is saved for 1.0.
-- **Mods file on your USB stick** (the "coming soon" choice in the app).
-- **Emulator:** much faster than 0.9.8 (about 3× while a track plays) but
-  still not real time, so sound comes in short bursts.
+- **Track filter:** not in 1.0, and it is not a hidden setting — the
+  XDJ-700's firmware contains no filter code at all (no FILTER, no FLTR, no
+  RBFLTR anywhere in its 18.6 MB), so there is nothing to switch on. It has
+  to be built in the browse menu; it is the first item for 1.1.
+- **Mods on a stick are emulator-tested only so far.** Nobody has mounted a
+  pack-bearing stick on a real deck yet.
+- **Emulator on a heavily loaded Mac:** the audio chip drops to a lower
+  clock to keep time, so a busy machine can give a brief gap now and then.
+  It no longer speeds up or drags. Windows is still slower than real time.
 - **Windows** stays a beta.
-- Live key shift stays beta and off by default.
+- **Live key shift** stays beta and is **on by default** (untick it on the
+  Mods page if you would rather leave it out). It needs MASTER TEMPO on — with MT off the tab says MT OFF and
+  does nothing (that is by design: without MT the deck resamples, and a
+  key change would also change tempo). One tester's "freeze + file
+  corrupted" report is still being looked into; if you hit it, send the
+  track's file type and whether it was loaded over Pro DJ Link.
 
 ## What changed in 0.99
 - **Emulator about 3× faster while playing** (the audio chip now runs on
@@ -62,7 +130,7 @@ something below says "still to come", it is not in this version.
 - **Live key shift v3:** fixes two bugs that put a buzz on the sound
   while shifted (it misread the samples just before each block and could
   read past the valid ones) — the likely cause of the right-channel noise
-  on AIFF tracks. Still beta and off by default.
+  on AIFF tracks. Still beta, now on by default.
 - **Faster, honest install:** the time estimate only counts down.
 - **Two decks on one computer:** the installer now talks to exactly one
   deck and refuses to start with two connected (before, an install could
@@ -140,8 +208,9 @@ something below says "still to come", it is not in this version.
   hot cue paging after power-off.
 
 ## Working in the emulator, not yet tested on a deck
-These run on the deck's own firmware in the emulator, so they should work
-on a real deck too, but nobody has tried them on one yet:
+None of this has been seen on a real deck. The faster stem mute and the
+live-position phase meter are the two we are aiming to finish properly in
+1.1; the others are in 1.0 as beta features waiting for a deck report:
 - **Faster stem mute (beta)** — rewrites the audio the deck has already
   buffered, so a mute is heard in under a second in the emulator.
 - **Phase meter with the live position source** — this deck's beats and
@@ -152,22 +221,28 @@ on a real deck too, but nobody has tried them on one yet:
 - **FLAC and Opus** playback.
 
 ## Known issues
-- **Live key shift (beta, off by default):** v3 fixes the buzz found in
+- **Live key shift (beta, on by default):** v3 fixes the buzz found in
   the code, but it hasn't been heard on a deck yet, and one tester's
-  "freeze + file corrupted" report is still being looked into. Leave it
-  unticked if you play live.
+  "freeze + file corrupted" report is still being looked into. Untick it
+  on the Mods page if you play live.
 - **Not yet confirmed on a real deck:** the FLAC fix, the phase meter's
   stock-meter fix with a linked master, key shift v3.
-- The emulator's audio stutters (the emulated audio chip runs slower than
-  real time). Browsing, loading and the screens are fine.
+- The emulator plays at real time with clean audio on Apple Silicon (an M5
+  holds the audio chip at ~100-104 MHz, where the governor settled it, with
+  zero gaps). Under heavy load expect an occasional brief gap rather than
+  any change of pitch or tempo. Windows is still slower than real time.
 - Stems need PWV6/PWV7 waveform data in the track's .EXT (rekordbox's
   Track Builder can add it); without it the STEMS tab shows the mix only.
 
 ## Safety
-Everything lives in the deck's memory; a power-cycle always returns it to
-stock. The optional **Permanent (UPD)** tab builds a firmware file you
-would flash yourself. That one *can* brick a deck, and the app says so
-before it builds anything.
+The cable install lives in the deck's memory: a power-cycle returns it to
+stock. The stick loader and the **Permanent (UPD)** tab write firmware, and
+the app says so — it refuses to build either until you tick the brick
+acknowledgement. The loader-only update changes 9 bytes of Pioneer's own
+file, and Pioneer's 1.15 update puts a deck back the same way you flashed it —
+keep that file to hand; the same stick will do. The loader only runs when a
+stick goes in: it is not part of the boot, so a deck with no stick in it always
+starts up stock.
 
 ## Open source
 All of it — the Mac app, the emulator, every mod and the tools that build

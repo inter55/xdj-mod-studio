@@ -3,7 +3,7 @@
 set -e
 ROOT=$(cd "$(dirname "$0")/../.." && pwd)
 SH=$ROOT/work/sh-tools/bin
-OUT=$ROOT/build/centre
+OUT=${CW_OUT:-$ROOT/build/centre}
 BASE=${CW_BASE:-0x098A0000}
 mkdir -p "$OUT"
 cd "$ROOT/tools/centre"
@@ -11,6 +11,7 @@ cd "$ROOT/tools/centre"
   -DMODE_ADDR=${MODE_ADDR:?}u -DSLOT5=${SLOT5:?}u -DSNAP_HASH=${SNAP_HASH:?}u \
   -DCTX_TAB=${CTX_TAB:?}u -DIDX_OFF=${IDX_OFF:?}u -DTAG_PWV5=${TAG_PWV5:?}u \
   -DTAG_PWV7=${TAG_PWV7:?}u -DSLOT7=${SLOT7:?}u -DSLOT7_MAX=${SLOT7_MAX:?}u \
+  -DTS_DATA=${TS_DATA:-0x09779000}u -DTS_END=${TS_END:-0x09790000}u \
   -ffunction-sections -fdata-sections -nostdlib -Wl,--gc-sections -Wl,-e,_cw_col -Wl,-u,_cw_col2 \
   -Wl,-Ttext=$BASE \
   -o "$OUT/cw.elf" cw.c -lgcc

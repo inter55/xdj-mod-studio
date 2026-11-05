@@ -1,0 +1,17 @@
+0979262c B _end
+0979261c B _lt_active
+09792610 D _lt_bg
+09792618 B _lt_calls
+09792020 T _lt_entry
+09792328 T _lt_fill
+09792620 B _lt_fills
+09792084 T _lt_flush
+09792000 T _lt_head
+09792624 B _lt_idx
+097921fc T _lt_map
+09792058 T _lt_mset
+09792544 T _lt_msval
+09792628 B _lt_on
+097920b0 T _lt_pdk
+09792608 D _lt_prev
+097922e0 T _lt_rgb

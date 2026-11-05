@@ -582,8 +582,10 @@ STEMS_BACKUP = ".pre-stems"            # original kept as "Track.aiff.pre-stems"
 def can_replace(audio):
     """WAV / AIFF originals can be swapped for their stems file under the
     SAME name: rekordbox's database (and its cues, grid, waveforms) keeps
-    pointing at it, so the deck lists it in ARTIST / TRACK. MP3 / M4A
-    can't: the deck picks the decoder by the file's extension."""
+    pointing at it, so the deck lists it in ARTIST / TRACK. MP3 / M4A cannot
+    yet: the deck picks the decoder by the file's extension and the planes
+    live in a WAV/AIFF chunk. In-place replacement for those is a 1.1 item
+    (docs/ROADMAP.md has the two routes)."""
     return os.path.splitext(audio)[1].lower() in (".wav", ".aif", ".aiff")
 
 
@@ -679,8 +681,9 @@ def j_stems(log, prog, audio, keys=(), quality="opus", replace=True):
         else:
             log(f"done: {os.path.basename(out)}  ({size:.0f} MB) -- on the deck: "
                 "BROWSE > FOLDER (the last category), then the track's folder. "
-                + ("MP3 / M4A tracks can't be replaced (the deck reads them by "
-                   "their extension). " if replace else "")
+                + ("MP3 / M4A tracks are not replaced in 1.0 (the deck reads "
+                   "them by their extension); in-place replacement is planned "
+                   "for 1.1. " if replace else "")
                 + "PERFORM > STEMS then mutes vocals / drums / bass / other")
         # X7S sidecar next to the audio (quality choice from the dialog)
         try:

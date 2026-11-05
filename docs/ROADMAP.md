@@ -356,6 +356,24 @@ Echo, Pitch, Flanger, Roll, Reverb.
   (BPM band, key, colour, rating, my-tag) into `export.pdb` -- the writer in
   `tools/onelibrary_to_pdb.py` already carries playlists, BPM, key, colour,
   rating and my-tag ids, and the deck shows them natively under PLAYLIST.
+- **MP3 / M4A stems replace the track in place (1.1).** 1.0 replaces WAV /
+  AIFF by writing the mix plus four raw 16-bit planes into one RIFF/AIFF file
+  (`tools/stems4.py`, `xst4` chunk + `XST4` trailer) and having
+  `tools/stems/sm.c` sum the planes when the media server reads the mix's
+  sample data. That cannot be reused as-is for MP3/M4A: the bytes at the
+  trailer's offsets are compressed frames, not PCM, and the deck picks its
+  decoder from the extension, so a WAV under a `.mp3` name never loads.
+  Two routes, in order of preference:
+  1. hook the decoded stream for those codecs (a read path below the MP3/AAC
+     decoder, the way the FLAC work already finds decoded audio), and keep
+     the four planes raw inside the container (ID3v2 frame for MP3, `uuid`
+     atom for M4A) with the same relative offsets `sm.c` uses today;
+  2. transcode to WAV/AIFF and rewrite the rekordbox row for that track
+     (`tools/onelibrary_to_pdb.py` already writes the database) so cues, grid
+     and waveform follow the new file. No DSP work, but it edits the user's
+     library, so it ships with a backup and a dry run.
+  Both need the same guardrails as the 1.0 path: original kept as
+  `.pre-stems`, and the first run on a copy of a stick.
 - Track filter (if it missed 1.0).
 - Waveform preview next to track names in BROWSE (Reddit request; data is
   on the stick). Audio preview in the browser: unlikely (one playback path).

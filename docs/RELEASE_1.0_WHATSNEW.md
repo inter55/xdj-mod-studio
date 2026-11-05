@@ -83,9 +83,11 @@ That fix matters: files where a chunk of data had an odd length used to sit
 on "Loading" forever on the deck. Every chunk in a stems file now has an
 even length, the way rekordbox's own files do.
 
-MP3 and M4A tracks can't be replaced — the deck picks its decoder from the
-file extension — so those get a stems file next to the original, listed
-under BROWSE › FOLDER.
+MP3 and M4A tracks are not replaced in 1.0 — the deck picks its decoder from
+the file extension, and the stem data rides in a chunk only WAV/AIFF carries —
+so those get a stems file next to the original, under BROWSE › FOLDER.
+Replacing them in place, so they keep their cues and playlist slot too, is
+planned for 1.1.
 
 ## The emulator
 
@@ -105,7 +107,9 @@ flash anything.
   it has to be built into the browse menu. It is the first thing on the 1.1
   list, and filtered playlists written to the stick are the fast way to the
   same result.
-- MP3 / M4A stems are separate files, not replacements.
+- MP3 / M4A stems are separate files in 1.0, not replacements. Making them
+  replace the track under its own name (so they keep cues, waveform and
+  playlist slot like WAV/AIFF already do) is planned for 1.1.
 - Touch FX is beta and needs MASTER TEMPO on; Echo, Pitch, Flanger, Roll and
   Reverb are drawn but not implemented yet.
 - macOS 14 or newer.
@@ -117,6 +121,9 @@ Not in this build, and not promised:
 - **Faster stem mutes.** A mute that lands in under a second instead of the
   current ~30 s, by rewriting the audio the deck has already buffered. Works
   in the emulator; nobody has heard it on a deck yet.
+- **MP3 / M4A stems that replace the track in place**, so they stop being a
+  second file under BROWSE › FOLDER and keep the cues and playlist slot the
+  way WAV/AIFF do now.
 - **The track filter**, ported from the XDJ-1000MK2's browse menu.
 - **Pro DJ Link**, so a deck loading over the link gets the same waveforms and
   hot-cue pages as the deck holding the stick.

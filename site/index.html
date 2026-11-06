@@ -161,7 +161,7 @@ footer p { margin: 6px 0; max-width: 820px; }
     </div>
     <div class="badges">
       <span class="badge">macOS app (Apple Silicon)</span>
-      <span class="badge">Windows app (beta)</span>
+      <span class="badge">Windows app</span>
       <span class="badge">Built-in deck emulator</span>
       <span class="badge">Fully open source (MIT)</span>
     </div>
@@ -220,22 +220,36 @@ footer p { margin: 6px 0; max-width: 820px; }
 </section>
 
 <section id="safety">
-  <div class="wrap two">
-    <div>
-      <h2>Built so you can't brick it</h2>
-      <p class="sub" style="margin-bottom:18px">The XDJ-700 has a service connection over USB that can read and write the deck's working memory. Cable mode uses only that, and a power cycle brings the deck back to stock.</p>
-      <p style="color:var(--dim)">Because the patches live in memory, <b style="color:var(--text)">switching the deck off and on returns it to stock.</b> That's also how you remove the mods. To use them again, plug in and click Install.</p>
-      <p style="color:var(--dim);margin-top:14px">The other two modes are opt-in and do write to the deck's flash: the <b>USB-stick loader</b> (flashed once, after which your stick carries the mods) and a <b>firmware update file</b> with the mods baked in. Both want a careful first flash, and the official 1.15 update file is the way back.</p>
+  <div class="wrap">
+    <h2>Three ways in — you choose how much gets written</h2>
+    <p class="sub" style="margin-bottom:22px">The XDJ-700 has a service connection over USB that can read and write the deck's working memory. Every route below goes through it, but they are not equally permanent: one writes nothing at all, the other two write the firmware once.</p>
+    <div class="tablewrap" style="margin-bottom:30px">
+      <table>
+        <thead><tr><th>Route</th><th>What it writes</th><th>Survives a power cycle?</th><th>Cost</th></tr></thead>
+        <tbody>
+          <tr><td>Cable</td><td>The deck's working memory only — nothing is flashed</td><td>No: off and on puts it back to stock</td><td>15–30 minutes the first time, then one click</td></tr>
+          <tr><td>Stick loader <span style="color:var(--green);font-weight:600">· recommended</span></td><td>One firmware update that teaches the deck to read the mods off your stick</td><td>Yes — and no laptop needed at the gig</td><td>One flash, then about 5 minutes per stick rewrite</td></tr>
+          <tr><td>Update file</td><td>A full Pioneer update with the mods baked in</td><td>Yes</td><td>One flash, and a rebuild whenever you change your mods</td></tr>
+        </tbody>
+      </table>
     </div>
-    <div class="card safe">
-      <h3 style="margin-top:0">Safety rules in every tool</h3>
-      <ul>
-        <li>Writes are limited to the deck's RAM. The firmware-erase command is never included in any tool.</li>
-        <li>Every byte is checked before it's changed, then read back after. Anything unexpected stops the install.</li>
-        <li>A read-only check first proves the memory a mod will use is empty on <i>your</i> deck.</li>
-        <li>Each mod runs in the emulator against the real firmware before it goes near hardware.</li>
-        <li>Themes only recolour artwork that still matches its stock fingerprint, so live data is never touched.</li>
-      </ul>
+    <div class="two">
+      <div>
+        <p style="color:var(--dim)"><b style="color:var(--text)">Cable</b> is where to start. The mods are copied into the deck's working memory and nothing on flash changes, so a power cycle is a complete undo — switch the deck off and on and it is stock. That is also how you remove them; the app offers to re-install whenever you plug the deck back in.</p>
+        <p style="color:var(--dim);margin-top:14px"><b style="color:var(--text)">The stick loader</b> is what we recommend for your own deck. It is a firmware update built from your own 1.15 file in which only <b style="color:var(--text)">9 bytes differ</b>: it teaches the deck's own mount routine to read <code>XDJMODS/PACK.BIN</code> from any stick. After that single flash there is no laptop in the chain — put your normal rekordbox stick in and the mods are there. Changing your mods later rewrites the stick in about 5 minutes and never touches the deck again. To try that stick file without flashing anything at all, the app can also send the 2.7 KB reader over the cable for one session.</p>
+        <p style="color:var(--dim);margin-top:14px"><b style="color:var(--text)">A firmware update file</b> is the whole firmware with the mods baked in. The app only builds it and boot-tests it in the emulator; you run the update yourself, the normal Pioneer way. This is the route that can leave a deck needing a Pioneer service centre if power is lost mid-flash. The way back is the app's <b style="color:var(--text)">Back to stock</b> build — it makes a stock file numbered higher than what your deck reports, which the deck will accept, because the official 1.15 file can be refused as older. Build it before you need it and keep it on a second stick.</p>
+      </div>
+      <div class="card safe">
+        <h3 style="margin-top:0">Safety rules in every tool</h3>
+        <ul>
+          <li>The cable route writes only inside the deck's RAM window, and the firmware-erase command appears in no tool.</li>
+          <li>Every byte is checked before it changes and read back after; anything unexpected stops the install.</li>
+          <li>A read-only survey proves the memory a mod will use is empty on <i>your</i> deck first.</li>
+          <li>Each mod runs in the emulator against the real firmware before it goes near hardware.</li>
+          <li>Themes only recolour artwork that still matches its stock fingerprint, so live data is never touched.</li>
+          <li>The two flashing routes only ever happen through Pioneer's own updater, from a complete boot-tested file — never a partial write from a mod tool.</li>
+        </ul>
+      </div>
     </div>
   </div>
 </section>
@@ -244,12 +258,13 @@ footer p { margin: 6px 0; max-width: 820px; }
   <div class="wrap two">
     <div>
       <h2>Get started</h2>
-      <p class="sub">You need a Mac with Apple Silicon (M1 or newer) and macOS 14+, or a 64-bit Windows 10/11 PC (beta), plus a USB cable and an XDJ-700 on firmware 1.15.</p>
+      <p class="sub">You need a Mac with Apple Silicon (M1 or newer) and macOS 14+, or a 64-bit Windows 10/11 PC, plus a USB cable and an XDJ-700 on firmware 1.15.</p>
       <ol class="steps">
         <li><b>Download Mod Studio</b>Get it from the Releases page. Mac: the first time, right-click the app and choose Open. Windows: unzip it and run <i>XDJ Mod Studio.exe</i>; if SmartScreen warns, choose More info → Run anyway.</li>
         <li><b>Add your firmware file</b>Use the official XDJ-700 v1.15 update file from Pioneer DJ's support site. The app never ships Pioneer's firmware; it reads yours.</li>
         <li><b>Try it in the emulator</b>Insert your rekordbox USB library, load a track and switch waveform styles. No deck needed.</li>
-        <li><b>Install on the deck</b>Connect USB, tick the mods you want, and click Install. It takes about 15–25 minutes, with a progress bar and time estimate. The app asks you when to remove the stick. Later, if you want the mods to survive a power cycle, build the USB-stick loader or a firmware update file instead.</li>
+        <li><b>Install over the cable first</b>Connect USB, tick the mods you want, click Install — about 15–30 minutes the first time, with a progress bar and a time estimate. Nothing is flashed and a power cycle undoes all of it, so this is the honest way to find out whether you like the mods.</li>
+        <li><b>Then make it permanent, if you want</b>Both options are on the app's stick page. <b>Stick loader:</b> one flash teaches the deck to read the mods off your own stick, and changing them later is a 5-minute stick rewrite. <b>Update file:</b> everything baked into a firmware image you flash yourself. Both need mains power and a flash you must not interrupt — and for the update file, build <b>Back to stock</b> first and keep it on a second stick, because that is the reliable way back.</li>
       </ol>
     </div>
     <div class="card">
@@ -268,11 +283,11 @@ footer p { margin: 6px 0; max-width: 820px; }
 <section id="faq">
   <div class="wrap">
     <h2>FAQ</h2>
-    <details><summary>Will this void my warranty or damage the deck?</summary><p>In cable mode the mods only change the deck's working memory, which is cleared every time it powers off. The USB-stick loader and the baked update file do write to the deck once. Either way this is unofficial software and you use it at your own risk.</p></details>
-    <details><summary>How do I remove the mods?</summary><p>Switch the deck off and on. It starts up completely stock.</p></details>
-    <details><summary>Do I have to reinstall after every power-cycle?</summary><p>In cable mode, yes. Mod Studio remembers your choices, so reinstalling is one click. The USB-stick loader and the baked firmware update file both survive a power cycle, at the cost of writing to the deck once.</p></details>
+    <details><summary>Will this void my warranty or damage the deck?</summary><p>In cable mode the mods only change the deck's working memory, which is cleared every time it powers off — nothing on flash changes. The stick loader and the baked update file each write the firmware once, through Pioneer's own updater, and if power is lost mid-flash a deck can need a Pioneer service centre. That is why the cable route exists and why it is where we suggest you start. Either way this is unofficial software and you use it at your own risk.</p></details>
+    <details><summary>How do I remove the mods?</summary><p>Cable: switch the deck off and on — it starts up completely stock. Stick loader: the mods live in a file on your stick, so take that off (or leave the stick out) and the deck boots stock; the small reader stays on the deck but does nothing without the file. Update file: build <b>Back to stock</b> in the app and flash it the same way you flashed the modded one.</p></details>
+    <details><summary>Do I have to reinstall after every power-cycle?</summary><p>Cable: yes — Mod Studio remembers your choices, so it is one click when you plug the deck in. The stick loader and the update file both survive a power cycle; that is the whole reason to use them.</p></details>
     <details><summary>Does it work on the XDJ-1000 / MK2 or CDJs?</summary><p>No. Everything is built for the XDJ-700 on firmware 1.15 only.</p></details>
-    <details><summary>Windows?</summary><p>Yes, in beta: download the Windows zip from Releases (64-bit Windows 10/11). Every build is checked automatically on a clean Windows machine: the app starts, its pages load and the emulator engine loads. Nobody is known to have installed mods on a real deck from Windows yet (that is proven on a Mac), and emulator sound on Windows is newer than on the Mac — if it is silent, set <code>XDJ_DECK_SOUND=1</code>. If you try it, please open an issue and say how it went.</p></details>
+    <details><summary>Windows?</summary><p>Yes: download the Windows zip from Releases (64-bit Windows 10/11). It is built from the same source as the Mac app and every build is checked automatically on a clean Windows machine — the app starts, its pages load and the emulator engine loads — and mods have been installed on a real deck from Windows. Emulator sound on Windows came later than on the Mac, so if it is silent, set <code>XDJ_DECK_SOUND=1</code>. If something misbehaves, please open an issue with the log from the Details pane.</p></details>
     <details><summary>Is it open source?</summary><p>Yes. Everything is on GitHub under the MIT licence: the Mac and Windows apps, the emulator, every mod and the tools that build them. The only thing not included is Pioneer DJ's firmware, which you add yourself.</p></details>
     <details><summary>Why isn't the firmware included?</summary><p>It's Pioneer DJ's software. You download the official update file yourself, and the tools work on that.</p></details>
   </div>

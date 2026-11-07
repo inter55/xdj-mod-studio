@@ -24,6 +24,7 @@ import sys
 
 sys.path[:0] = [".", "tools"]
 HOOK = 0x08C92E20
+TOUCH = 0x08D5278C          # stock hit-tester (perform_pads chains it too)
 OUT = "build/hotcue8"
 
 
@@ -71,8 +72,11 @@ def main():
         drain(h, 1.0)
         send(h, "$CDJ", 1.5)
         live = rd32(h, HOOK)
+        live_t = rd32(h, TOUCH)
         entry = s["hc_entry"]
-        print(f"flush hook = {live:#x} (ours {entry:#x})")
+        tentry = s["hc_tentry"]
+        print(f"flush hook = {live:#x} (ours {entry:#x}), "
+              f"touch hook = {live_t:#x} (ours {tentry:#x})")
         if arg == "--precheck":
             arg = ""                      # write step reads the whole area first
         if arg == "--survey":
@@ -89,11 +93,19 @@ def main():
             if live != entry:
                 print("not armed - nothing to do")
                 return 0
+            # touch hook first: the stock row must be whole again before the
+            # module that draws it stops running
+            prev_t = rd32(h, s["hc_tprev"])
+            if live_t == tentry:
+                lw(h, TOUCH, prev_t)
+                if rd32(h, TOUCH) != prev_t:
+                    sys.exit("FAIL: touch hook not restored - REBOOT the deck")
+            lw(h, s["hc_armed"], 0)
             prev = rd32(h, s["hc_prev"])
             lw(h, HOOK, prev)
             if rd32(h, HOOK) != prev:
-                sys.exit("FAIL: hook not restored - REBOOT the deck")
-            print(f"RESULT: reverted (hook = {prev:#x})")
+                sys.exit("FAIL: flush hook not restored - REBOOT the deck")
+            print(f"RESULT: reverted (flush {prev:#x}, touch {prev_t:#x})")
             return 0
         if live == entry:
             print("RESULT: PASS (already armed)")
@@ -105,6 +117,8 @@ def main():
         want = bytearray(img) + bytes(max(0, end - base - len(img)))  # + zero state
         po = s["hc_prev"] - base
         want[po:po + 4] = struct.pack("<I", live)
+        to = s["hc_tprev"] - base
+        want[to:to + 4] = struct.pack("<I", live_t)
         import fastload
         left = fastload.install_region(h, base, bytes(want), fastload.SESSION_BUDGET,
                                        allow_live=range(s["hc_prev"], s["hc_prev"] + 4))
@@ -119,11 +133,24 @@ def main():
             lw(h, scratch, val)
             if rd32(h, scratch) != val:
                 sys.exit("FAIL: LW self-test - nothing armed (deck unchanged)")
+        # the 8-pad view needs the touch hook; arm it before the flush hook
+        # so the first paint already has a press path that is ours
+        lw(h, s["hc_armed"], 1)
+        if rd32(h, s["hc_armed"]) != 1:
+            sys.exit("FAIL: armed flag did not stick - nothing hooked")
+        lw(h, TOUCH, tentry)
+        if rd32(h, TOUCH) != tentry:
+            lw(h, s["hc_armed"], 0)
+            lw(h, TOUCH, live_t)
+            sys.exit("FAIL: touch hook verify - restored; REBOOT before playing")
         lw(h, HOOK, entry)
         if rd32(h, HOOK) != entry:
+            lw(h, TOUCH, live_t)
+            lw(h, s["hc_armed"], 0)
             lw(h, HOOK, live)
             sys.exit("FAIL: hook verify - restored; REBOOT before playing")
-        print("RESULT: PASS - PERFORM > swipe left/right along the HOT CUE tab to page A-C / D-F / G-H")
+        print("RESULT: PASS - PERFORM > tap the HOT CUE tab for all 8 pads; "
+              "swipe along it to page A-C / D-F / G-H")
         return 0
     finally:
         h.close()

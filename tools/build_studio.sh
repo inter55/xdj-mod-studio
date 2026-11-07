@@ -68,7 +68,12 @@ done
 # around (tester builds). Same filter as tools/make_tester_pack.sh.
 REPO="$APPDIR/Contents/Resources/repo"
 mkdir -p "$REPO/cache" "$REPO/work"
-for d in tools mods emu studio; do cp -R "$d" "$REPO/"; done
+for d in tools mods emu studio vendor; do cp -R "$d" "$REPO/"; done
+# vendor/ = the MIT rekordbox-pdb package: tools/stems_replace.py (MP3/M4A/FLAC
+# replacing the track), tools/filter_playlists.py and tools/onelibrary_to_pdb.py
+# all import it, and 1.0.1 shipped without it -- those features died on an
+# ImportError in the released app. tools/app_bundle_check.py fails a build that
+# drops it again.
 # our own compiled deck code (no firmware bytes): Type 1 phase meter
 if [ -f build/phasemeter/pm.bin ]; then
   mkdir -p "$REPO/build/phasemeter"
@@ -192,6 +197,9 @@ find "$APPDIR" -name direct_url.json -path "*dist-info*" -delete 2>/dev/null || 
 find "$APPDIR" -name "_buildinfo.py*" -delete 2>/dev/null || true
 .venv/bin/python tools/scrub_app.py "$APPDIR"
 codesign --force --deep -s - "$APPDIR"
+# refuse to call this build finished if it cannot do its job: 1.0.1 shipped
+# the stems replacement without vendor/rekordbox_pdb and died on ImportError
+.venv/bin/python tools/app_bundle_check.py "$APPDIR"
 FINAL="dist/XDJ Mod Studio.app"
 [ "$PUBLIC" = 1 ] && { mkdir -p dist/public; FINAL="dist/public/XDJ Mod Studio.app"; }
 rm -rf "$FINAL"

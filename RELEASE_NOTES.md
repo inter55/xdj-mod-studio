@@ -1,3 +1,94 @@
+# Confirmed on a real deck (2026-11-06)
+
+No update needed for any of this — it is the build you already have, now
+checked on hardware:
+
+- **8 hot cues work:** pages A–C / D–F / G–H page correctly, and a cue can be
+  set from an empty pad while the track plays. Page by **tapping** the HOT CUE
+  tab; swiping across the pads does not page there (swiping is for BEAT JUMP).
+- **Phase meter works:** it follows the playing track, and the master row
+  shows on a second linked deck.
+- **Vinyl brake length and FLAC playback** were confirmed the same day (the
+  brake really does change the stop, and a FLAC file lists, loads and plays).
+
+# XDJ Mod Studio v1.0.2 (app update)
+
+App-only: nothing on the deck changes, nothing needs re-flashing.
+
+- **Stems replacement actually runs now.** 1.0.1 shipped the code that
+  replaces an MP3, M4A or FLAC track with its stems version (keeping the
+  library row, cues and waveform) but not the database package it imports,
+  so that step stopped with an error. The package is in the app bundle now,
+  and the build refuses to finish if it is missing again.
+- **"Make the whole set" and the OneLibrary converter** used the same
+  package, so they hit the same error in 1.0.1. Both are fixed by the same
+  change.
+- **Stop looking in BROWSE › FOLDER.** The deck's FOLDER row is drawn but
+  pressing the knob never opens it (measured on the deck's firmware in the
+  emulator, and consistent with reports from a deck), and SEARCH only
+  searches the rekordbox database, so a file that exists only beside a
+  track can never be found by name. Every place in the app that told you to
+  look there says so correctly now.
+- **Honest limit:** replacing an MP3 in place keeps the cues and waveform in
+  the database, but nobody has played a replaced MP3 on a deck yet. The
+  original is kept as `…pre-stems`, so undo is a rename — check the track
+  once before you delete that backup.
+
+# For 1.1 (not released yet)
+
+- **All eight hot cues on one screen.** In PERFORM, tap the HOT CUE tab and the
+  stock A B C REC CALL row becomes eight pads A–H: set cues get a green strip,
+  empty ones stay dark, and holding a pad plays that cue. Tap again for the
+  stock row; swiping the tab still pages A-C / D-F / G-H (which is how D–H get
+  set on the deck). Emulator-passed (`tools/hotcue8_test.py`, which presses E and
+  the pad over the old REC spot and checks the borrowed slot is put back); it
+  has not been run on a deck yet.
+
+- **The 1.0.1 macOS download could refuse to open, or be called "damaged".**
+  The cause was the archive, not the app: it was made with `zip -r`, which
+  stored 2,468 macOS AppleDouble sidecars (`._Info.plist`, `._Contents`, …)
+  inside the app bundle. The code signature covers the bundle's file list, so
+  those extra files break the seal — `codesign --verify` says "a sealed
+  resource is missing or invalid", and macOS shows that to the user as a
+  damaged app. Proven both ways: deleting only the sidecars makes the
+  untouched app verify, and re-adding them breaks it again.
+
+  App zips are now built by `tools/make_app_zip.sh`, which strips the
+  sidecars, re-seals the signature, zips with `ditto` (no HFS metadata) and
+  then proves the result: it extracts the archive fresh, verifies the seal
+  strictly, rejects any sidecar that came back and refuses if a single file
+  is missing. Its `--verify` mode checks an existing archive: it rejects the
+  1.0.1 and 1.0 zips as shipped, passes the re-cut one, and catches a
+  deliberately damaged bundle (one file deleted) with the seal check.
+
+  **Correction, 2026-11-07: the re-cut zip must not be published.** It was
+  built from the copy in `dist/`, which turned out to be an OLDER 1.0.1 build
+  than the one users downloaded (`studio/app.pyc` dated Nov 4 22:14, without
+  `tools/stems_replace`), not a newer one. The signature/sidecar proof above
+  still holds, but the artefact was not the shipped app, and it lacks the
+  stems replacement. A 1.0.2 archive has to come from a fresh build, and both
+  `tools/build_studio.sh` and `tools/make_app_zip.sh` now refuse a bundle that
+  is missing files the app loads at runtime (`tools/app_bundle_check.py`).
+
+# XDJ Mod Studio v1.0.1 (app update)
+
+App-only: nothing on the deck changes and nothing needs re-flashing.
+
+- **Back to stock.** Advanced now has a `Back to stock (no mods)` build. It
+  makes a stock firmware file numbered higher than what the deck reports, so
+  the deck accepts it as an update. Until now the advice was "flash the
+  official 1.15 file", and a deck carrying a modded file can refuse that as
+  an older version.
+- **Choose the update-file version number.** The Advanced page takes the
+  version the file will report, and refuses anything lower than 1.15.
+- **Touch FX in the update file.** Pick Key Shift or Touch FX when baking
+  (they share one slot in the audio chip). Touch FX is the biggest extra, so
+  the build needs the phase meter or 8 hot cues left out; the app now says
+  that instead of just failing.
+- Corrected wording about going back to stock in the app, the READ ME that
+  ships with the update file, and these notes.
+- The Windows read-me now states that emulator sound works there too.
+
 # XDJ Mod Studio v1.0 (XDJ-700, firmware 1.15)
 
 Open-source mods for the Pioneer DJ XDJ-700, loaded into the deck's memory
@@ -15,8 +106,10 @@ you want zero risk,
 use the cable instead — nothing is written, and **switch the deck off and on
 and it is stock again.** You need your own official XDJ-700 v1.15 update file
 (from Pioneer DJ's support site); the app checks it and builds everything from
-it. Every route that writes firmware shows 1.16 in UTILITY, and Pioneer's own
-1.15 file puts the deck back the same way you flashed it.
+it. Every route that writes firmware shows 1.16 in UTILITY. To go back to
+stock use the app's **Back to stock** build, which gives the deck a stock
+file numbered higher than it reports; Pioneer's own 1.15 file can be
+refused as a downgrade, so keep it but do not rely on it.
 
 Apple Silicon Mac, macOS 14 or newer (Windows build: see the README inside
 the Windows zip). First launch: right-click the app → Open.
@@ -57,20 +150,23 @@ the Windows zip). First launch: right-click the app → Open.
   older file format only, so it stayed empty even after a successful
   build; it now lists your `Title (STEMS).wav` files with their size.
   And to be clear about the deck: stems files are **not** in the
-  rekordbox export, so they don't show in the Track/Artist lists — press
-  BROWSE and scroll to the **bottom** category (FOLDER), then into the
-  track's folder. PERFORM › STEMS mutes vocals / drums / bass / other.
+  rekordbox export, and there is no browsing route to them either — on
+  1.15 the BROWSE › FOLDER row is drawn but the knob does not open it
+  (emulator 2026-11-07, also reported on a deck), and SEARCH only covers
+  the database. Replacement is the supported way: the track itself becomes
+  the stems version and stays under ARTIST / TRACK with its cues.
+  PERFORM › STEMS mutes vocals / drums / bass / other.
 - **Light mode.** In the app (Settings › Appearance: System, Light, Dark)
   and on the deck (UTILITY › THEME › LIGHT). The deck light theme is an
   early preview: it has been tested in the emulator, not on a real deck
   yet; power-cycle to leave it.
 
 ## Known issues (not in 1.0)
-- **Pro DJ Link:** waveform colours, the phase meter's master (orange) row
-  and hot-cue pages only work on the deck that holds the USB stick; a deck
-  loading the track over Link from the other player stays stock (it never
-  sees the analysis data our mods read). Proper Link support is the next
-  big item after 1.0.
+- **Pro DJ Link:** waveform colours and hot-cue pages only work on the deck
+  that holds the USB stick; a deck loading the track over Link from the other
+  player stays stock (it never sees the analysis data our mods read).
+  **The phase meter's master (orange) row is not affected** — it is proven
+  working with a second deck linked (2026-11-06).
 - **3-band waveforms need the data:** 3-BAND in UTILITY › WAVEFORM COLOR
   only draws on tracks whose analysis carries the 3-band section — Track
   Builder › Add 3-band writes it (the list shows Ready / In rekordbox /
@@ -88,7 +184,10 @@ the Windows zip). First launch: right-click the app → Open.
 - **Emulator on a heavily loaded Mac:** the audio chip drops to a lower
   clock to keep time, so a busy machine can give a brief gap now and then.
   It no longer speeds up or drags. Windows is still slower than real time.
-- **Windows** stays a beta.
+- **Windows is out of beta.** The Windows app builds from the same source as
+  the Mac one, runs the same checks on every build, and has had mods installed
+  on a real deck from Windows (the PERFORM pads font bug that broke the first
+  Windows installer, `AssertionError: 2802`, was fixed in 0.9.6).
 - **Live key shift** stays beta and is **on by default** (untick it on the
   Mods page if you would rather leave it out). It needs MASTER TEMPO on — with MT off the tab says MT OFF and
   does nothing (that is by design: without MT the deck resamples, and a
@@ -108,7 +207,8 @@ the Windows zip). First launch: right-click the app → Open.
 - **Simpler Mods page.** Just tick what to install. Waveform style, theme,
   vinyl brake length and hot cue gate are chosen on the deck (hold MENU ›
   UTILITY).
-- **FLAC no longer freezes the deck.** Two bugs: the FLAC decoder needed
+- **FLAC no longer freezes the deck.** (Deck-confirmed 2026-11-06: a FLAC
+  file lists, loads and plays on the deck.) Two bugs: the FLAC decoder needed
   more working memory than the deck's track-loading task has (it now runs
   on its own), and hi-res FLAC (88.2–192 kHz) was handed raw to the deck.
   Hi-res FLAC now plays (converted to 44.1/48 kHz, which is what the
@@ -179,7 +279,9 @@ the Windows zip). First launch: right-click the app → Open.
   deck): the KEY SHIFT tab is inert while MASTER TEMPO is off, and any
   MASTER TEMPO change resets the key to 0.
 - **8 hot cues: tap works too.** Paging was swipe-only; three testers
-  naturally tapped the HOT CUE tab. Tap and swipe both page A–C / D–F / G–H.
+  naturally tapped the HOT CUE tab. Tapping the HOT CUE tab pages A–C / D–F /
+  G–H. (Deck check 2026-11-06: swiping across the pads does not page there
+  yet, so tap is the route; making swipe work is a 1.1 candidate.)
 - **Phase meter: reads the time digits' own position source.** The word it
   used first freezes on a real deck (the beats never scrolled); it now
   reads the live one, verified in the emulator against a tick-by-tick model.
@@ -217,7 +319,10 @@ live-position phase meter are the two we are aiming to finish properly in
   downbeats above the waveform, main screen and PERFORM (the 0.9.5 build's beats stood still on a
   deck; this one reads the clock's own word).
 - **Vinyl brake length** — UTILITY › VINYL BRAKE LENGTH, 0.5× to 15×.
-- **8 hot cues** — A–H, in pages of three (swipe or tap the tab).
+  Deck-confirmed 2026-11-06: the stop really does change to the length you
+  pick.
+- **8 hot cues** — A–H, in pages of three (tap the HOT CUE tab; swiping the
+  pads does not page — deck check 2026-11-06).
 - **FLAC and Opus** playback.
 
 ## Known issues

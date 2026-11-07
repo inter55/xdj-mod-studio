@@ -1,8 +1,22 @@
 # 8 hot cues at once on the PERFORM screen (design + emulator prototype)
 
-Status 2026-10-18: **emulator prototype, RESULT: PASS (27 checks).** Never run
-on the deck. Not integrated into `tools/perform_pads.py` (another session
-owns that file today); integration comes after review.
+Status 2026-11-07: **integrated** into the real module (`tools/hotcue8/hc.c`
+plus `hchook.S`): one cave, one flush hook, one touch hook, the view toggle in
+entry-table slot +12, and every installer (deck flash, the app's emulator, the
+baked firmware image) chains the touch pool. Gate: `tools/hotcue8_test.py`.
+**Never run on the deck.**
+
+Changes from the prototype below (decided during integration):
+- **Tap** the HOT CUE tab toggles the 8-pad view; **swipe** still pages A-C /
+  D-F / G-H, so the deck-side "set D-H on the deck" path (which needs pages
+  2/3) keeps working. A swipe leaves the 8-pad view. Both views sit on page 1.
+- `hc_armed` guards the view: if the touch hook is not installed (an older
+  install, or a baked image built before this), a tap keeps its old meaning
+  and pages instead of drawing pads whose presses would reach the stock zones.
+- Empty pads are still **swallowed** in the 8-pad view rather than setting a
+  cue: setting lives on pages 2/3, where REC is already blocked.
+- The prototype's separate `0x09850000` cave and its own glyph copy are gone;
+  the pads share `hc_glyphs.h` and the hot-cue state already in the module.
 
 Files:
 - `tools/hotcue8grid/hg.c`, `hghook.S`, `build.sh` — the C module (3.6 KB,
@@ -82,12 +96,19 @@ reloaded the slots itself.
 - Empty pads and the gaps between pads are swallowed. They latch until
   release, so sliding the finger onto a set pad does not fire it. An empty
   stock pad press could record a cue into the borrowed slot.
-- **Delete: OPEN, must be settled before the deck.** The 700's
-  MEMORY/DELETE button (right of the row) can combine with a hot-cue pad.
-  If DELETE is held while D-H is pressed, the deck would delete the borrowed
-  slot, which really holds A/B/C on the stick. Rule for integration: find
-  the DELETE (and SHIFT, if any) key bit and swallow D-H presses while it
-  is held. A-C presses are stock-correct and can pass.
+- **Delete: cannot combine with a pad -- settled 2026-11-07 (emulator).**
+  MEMORY-DELETE is **zone 17 (0x11)**, rect x 715 y 232 67x53, handler
+  `0x08DD0B60`; tapping it sets **KEYB+84 bit 0x40** and nothing else that a
+  pad reads (QUANTIZE next door still shows its documented KEYB+91 0x80).
+  That bit is set by DELETE's own *zone handler*, not by a panel key -- holding
+  the `"Delete"` frame bit leaves it at 0. And a panel frame carries **one
+  touch point** (payload +22..+25: one X, one Y), so DELETE and a hot-cue pad
+  cannot be pressed at the same time, on the emulator or on the deck. The
+  "delete a borrowed slot" combination does not exist.
+  `hc_touch` still reads the bit and swallows D-H presses while it is set, as
+  defence in depth; that guard deliberately cannot be driven through the
+  single-touch panel, so it is not claimed as emulator-tested. A-C presses are
+  never blocked: DELETE + A deletes cue A, which is what the screen shows.
 
 **Toggling the view.** In the prototype this is just a byte (`hg_view`,
 entry +8 `hg_set_view`). For integration, the proposal is that the HOT CUE
@@ -140,15 +161,20 @@ gets past the gate. The deck is the judge.
 5. **Pad colours.** No per-cue colours yet (rekordbox colours live in
    PCO2/PCP2; the stock 700 row doesn't show them either).
 
-## 5. Integration plan (after review)
+## 5. Integration (done 2026-11-07)
 
-- Move the touch logic into the hotcue8 module (one cave, one flush hook,
-  one touch hook). Retire `load_page`/letters; keep `find_cue`.
-- In perform_pads, change the HOT CUE tab swipe from paging to toggling the
-  view (HCSW unit → `hg_set_view`). Keep `phhc`'s REC block until paging is
-  gone.
-- Installer: same order as hotcue8_apply (code + zeroed bss, chain prevs,
-  hooks last, with LW for both pools). The touch pool must chain in FRONT of
-  perform_pads' ptouch.
-- Rerun `tools/hotcue8grid_test.py` + `perform_pads.py emu` + repro_freeze
-  play test.
+- Touch logic moved into the hotcue8 module (one cave, one flush hook, one
+  touch hook). `load_page`, `find_cue` and the page letters all stayed: paging
+  is what lets D-H be set on the deck, so it was not retired.
+- In perform_pads the HOT CUE tab **tap** now calls `hc_toggle` (entry +12);
+  the swipe keeps calling `hc_next` / `hc_prev_page`. `phhc`'s REC block is
+  unchanged and still guards pages 2/3.
+- Installer order: code + zeroed bss, both chain words (`hc_prev`,
+  `hc_tprev`) written from the live pools, then LW: armed flag, touch pool,
+  flush pool last (a failing step unwinds what it already did). Revert unwinds
+  touch before flush. The touch pool chains in FRONT of perform_pads' ptouch.
+- Baked firmware: `permanent_build.bake_hotcue8` writes the same three words,
+  so a permanent build has the view too.
+- Gate: `tools/hotcue8_test.py` (8-pad view legs + the paging legs) and
+  `tools/perform_pads.py emu`. `tools/hotcue8grid_test.py` is kept as the
+  prototype's own record; it still builds the standalone unit.

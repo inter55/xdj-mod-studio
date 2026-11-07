@@ -13,7 +13,7 @@ cache/emu_dsp_playing7.pkl), turns MASTER TEMPO on, then
                 0x09D24DD8 = the tagged FX param word (-> mailbox BD8)
                                               -> build/fx_<eff>.wav
 and prints a per-effect measurement + PASS/FAIL.
-EFF = filter | crush | gate. X/Y/DEPTH are 0..255 (default X=40 Y=200 D=255).
+EFF = filter | crush | gate | echo. X/Y/DEPTH are 0..255 (default 40/200/255).
 """
 import os
 import struct
@@ -27,7 +27,7 @@ from emu import panl                     # noqa: E402
 import dsp_pitch_probe as P              # noqa: E402
 
 HERE = os.path.dirname(os.path.abspath(__file__))
-BIN = os.path.join(HERE, "fx_dsp", "fx.bin")
+BIN = os.environ.get("FX_BIN") or os.path.join(HERE, "fx_dsp", "fx.bin")
 ELF = os.path.join(HERE, "fx_dsp", "fx.elf")
 FX_BASE = 0xC005F4C0
 CALL = 0xC0008D64
@@ -35,7 +35,13 @@ CALL_FP = 0xC0008D60
 PULLER = 0xC001CBF4
 SH_STORE = 0x08D36B3A
 SH_SLOT = 0x09D24DD8
-EFF = {"filter": 0, "crush": 1, "gate": 2}
+EFF = {"filter": 0, "crush": 1, "gate": 2, "echo": 3, "flanger": 4,
+       "pitch": 5}
+# Same numbers as fx.c. Overridable so a short-ring build (FX_RING_BASE /
+# FX_RING_FRAMES in build.sh) can be gated without editing this file.
+ECHO_FRAMES = int(os.environ.get("FX_FRAMES", "6500"))
+ECHO_MINF = int(os.environ.get("FX_MINFRAMES", "882"))
+ECHO_BASE = int(os.environ.get("FX_RING", "0xC0073400"), 0)
 
 
 def branch_word(old, fp, target):
@@ -175,6 +181,10 @@ def main():
         if mode == "fx":
             v = [d.bus.read(fx + 256 + 4 * i, 4) for i in range(4)]
             extra = f" magic {v[0]:#x} calls {v[1]} active {v[2]} w {v[3]:#x}"
+            if eff == "echo":       # delay-line diagnostics
+                extra += " pbuf " + " ".join(f"{d.bus.read(fx + 4 * i, 4):08x}" for i in range(4))
+                extra += " buf " + " ".join(f"{d.bus.read(ECHO_BASE + 4 * i, 4):08x}" for i in range(8))
+                extra += f" dpos {d.bus.read(fx + 316, 4)} pad {d.bus.read(fx + 320, 4):08x}"
         print(f"{mode}: out {len(x)/P.FS:.2f}s err={d.error}{extra} [{time.time()-t:.0f}s]", flush=True)
     c, f = res["ctl"], res["fx"]
     n = min(len(c), len(f))
@@ -220,6 +230,62 @@ def main():
         ok = r_m > 0.9 and r_m > r_c and diff > 0.05
         print(f"CRUSH X={xv} Y={yv} (bits {nb}, hold {hold}): spectrum corr vs model "
               f"{r_m:.3f}, vs dry {r_c:.3f}; rel-change {diff:.3f} -> "
+              f"RESULT: {'PASS' if ok and sane else 'FAIL'}")
+    elif eff == "echo":
+        # same mapping as fx.c: cap at ECHO_FRAMES-1 (a full ring length would
+        # read the frame being written)
+        df = ECHO_MINF + int(xv / 255 * (ECHO_FRAMES - 1 - ECHO_MINF))
+        fb = yv / 255 * 0.75
+        # cross-correlate the FX output with the dry control run: with
+        # DEPTH=255 the output is the delay line only, so its peak must sit
+        # exactly `df` frames behind the control, at the level feedback sets
+        N = 1 << (2 * len(c) - 1).bit_length()
+        rc = np.fft.irfft(np.fft.rfft(f, N) * np.conj(np.fft.rfft(c, N)), N)[:len(c)]
+        rc /= np.sqrt((c * c).sum() * (f * f).sum()) + 1e-9
+        peak = int(np.argmax(np.abs(rc[:min(len(c), 3 * df)])))
+        r1 = float(rc[peak])
+        r2 = float(rc[2 * df]) if 2 * df < len(rc) else 0.0
+        ok = abs(peak - df) <= 24 and r1 > 0.35
+        print(f"ECHO X={xv} Y={yv} D={dv}: delay {df} frames ({df/P.FS*1000:.0f} ms), "
+              f"best lag {peak} ({peak/P.FS*1000:.0f} ms) corr {r1:.2f}, "
+              f"2nd repeat {r2:.2f} (feedback {fb:.2f}) -> "
+              f"RESULT: {'PASS' if ok and sane else 'FAIL'}")
+    elif eff == "flanger":
+        base, mod = 132, 88            # frames, same numbers as fx.c
+        # a flanger's delayed copy must sit inside the swept window and the
+        # lag must MOVE (that is the sweep): look at the best lag per quarter
+        seg = len(c) // 4
+        lags, corrs = [], []
+        for k in range(4):
+            a, b = f[k*seg:(k+1)*seg], c[k*seg:(k+1)*seg]
+            N = 1 << (2 * len(a) - 1).bit_length()
+            r = np.fft.irfft(np.fft.rfft(a, N) * np.conj(np.fft.rfft(b, N)), N)[:len(a)]
+            r /= np.sqrt((a * a).sum() * (b * b).sum()) + 1e-9
+            k0 = int(np.argmax(np.abs(r[:base + mod + 40])))
+            lags.append(k0); corrs.append(float(r[k0]))
+        lo, hi = min(lags), max(lags)
+        ok = (lo >= base - 6 and hi <= base + mod + 24 and
+              max(corrs) > 0.3 and min(corrs) > 0.08)
+        print(f"FLANGER X={xv} Y={yv} D={dv}: best lag per quarter {lags} "
+              f"(window {base}..{base + mod}), sweep {hi - lo} frames, "
+              f"corr {min(corrs):.2f}..{max(corrs):.2f} -> "
+              f"RESULT: {'PASS' if ok and sane else 'FAIL'}")
+    elif eff == "pitch":
+        # same mapping as fx.c: X -> semitones -11..+11, k = 2^(semi/12).
+        # Test: the FX spectrum must look like the control's spectrum moved
+        # by 6*log2(k) of the 1/6-octave bands (bands() is 1/6 octave), and
+        # better than the same comparison without the move.
+        import math
+        semi = int(xv * 22 / 255) - 11
+        k = 2.0 ** (semi / 12.0)
+        bc, bf = bands(c), bands(f)
+        idx = np.arange(len(bc))
+        moved = np.interp(idx - 6 * math.log2(k), idx, bc)
+        r_m = float(np.corrcoef(bf, moved)[0, 1])
+        r_0 = float(np.corrcoef(bf, bc)[0, 1])
+        ok = k == 1.0 or (r_m > 0.8 and r_m > r_0)
+        print(f"PITCH X={xv} -> {semi:+d} semitones (k={k:.3f}): spectrum corr "
+              f"shifted {r_m:.3f} vs dry {r_0:.3f} -> "
               f"RESULT: {'PASS' if ok and sane else 'FAIL'}")
     elif eff == "gate":
         rate = 2.0 + (xv / 255) ** 2 * 38.0

@@ -196,3 +196,84 @@ Note for future runs: tools/stems_rec_analyse.py cannot judge a mute whose
 tap lands where the vocals are quiet -- it correlates the recording against
 the mix and the muted mix, which are 0.92 alike. Pick a vocal-heavy tap point,
 or use the A/B above, which needs no reference at all.
+
+## Deck measurement, 2026-11-06: 24.88 s, and why
+
+First stopwatch reading on hardware (XDJ-700, fw 1.15, track playing, mute pad
+tapped): **24.88 s** to hear the change. That is the chip's decoded store
+(~2100 blocks, ~28 s) running out, which is the signature of a per-pass window
+that never covered the buffer.
+
+The module's own counters said the same thing without guessing
+(`tools/stems_probe.py`, same boot): `polls 13195`, `parm 1` (one mute armed),
+`drblk 173`, `drskip 22`, `drnoslot 26`, `drwfail 21`. 173 blocks is about
+2.3 s of audio rewritten near the playhead -- the rest of the decoded store was
+never touched.
+
+**Cause:** `dr_end` was computed from `rfront`, the deck's last *read* position.
+On the deck that frontier sits only a couple of seconds past the playhead (the
+media server reads into two alternating buffers), while the chip has already
+decoded ~28 s. The rewrite therefore stopped almost immediately and the mute
+was heard only when the old audio drained.
+
+**Fix** (`tools/stems/sm.c`, `dr_run`): aim at the chip's decoded limit
+(`p + MAXAHEAD`, clamped as before) and let the slot labels say where the real
+frontier is -- `dr_slot()` returns ~0 for a block the chip has not written yet
+and `DR_GAP` stops the pass there. Same writes, same labels, no new memory.
+
+Emulator evidence (real DSP core, tap between read bursts,
+`tools/stems_fastmute_emu.py new mute`):
+
+    [new] at measure point, buffer 2178 blocks [20s]
+      ctl: polls 1710 armed 0 blocks 0 skips 0 reads 110
+      chg: polls 702 armed 1 blocks 905 skips 0 reads 110
+    RESULT new mute: change heard after 0.000 s
+
+905 blocks rewritten instead of 173, and the change is audible at the measure
+point rather than after the buffer drains. Native correctness still PASS (masks
+0b0101 / 0b1110 / 0b1111 / 0b0000, 27 reads each, 0 wrong). **Deck re-measure
+pending** -- this section is the emulator result plus the deck diagnosis, and
+the number that goes in the release notes is whatever the stopwatch says next.
+
+## Deck try of the frontier fix, 2026-11-06: instant, then stutter (not shippable)
+
+The fix above (aim at `p + MAXAHEAD`, 32 s) was installed and tapped on the deck.
+What happened, in order:
+
+* at the **start of the track the mute was essentially instant** -- the mechanism
+  works;
+* then the **audio stuttered and glitched, and the bottom waveform glitched
+  too**;
+* after that, **mid-song mutes did nothing at all**.
+
+Counters from that boot (`tools/stems_probe.py`): `parm 11`, `drblk 2974`,
+`drnoslot 17981`, `drwfail 84`, `drskip 2398`, `drlastb 4644` against
+`drlastp 2245`. Aiming 2400 blocks ahead put the pass **past the slots the
+decoder had finished with** -- exactly the half-filled-slot write that the
+2026-11-03 notes call out as the stutter cause -- and the far-ahead label
+matches came from old copies of those blocks, so later passes wrote places the
+chip never plays and the mute stopped working. The waveform glitching points at
+the shared file offset being moved far more often than before, not at the mixes.
+
+**Current code is bounded instead:** `DR_AIM 1200` (~16 s past the playhead,
+inside the ~28 s store but clear of the decode frontier) and `DR_CATCH 48`
+blocks per poll instead of 128. The blocks at the playhead are still written
+first, in the first poll, which is all "instant" needs; the rest of the store is
+fixed up behind playback.
+
+Emulator gates on that build (real DSP core, tap between read bursts):
+
+    native: mask 0b0000: 27 reads (up to 1 MB), 0 wrong
+RESULT: PASS
+    mute:   chg: polls 713 armed 1 blocks 898 skips 0 reads 110 err None
+RESULT new mute: change heard after 0.000 s [90s]
+    unmute: chg: polls 1588 armed 2 blocks 1704 skips 1 reads 210 err None
+RESULT new unmute: change heard after 0.139 s [145s]
+
+**Deck status: unproven.** No deck time was available after that try, and the
+deck stopped enumerating on USB afterwards (switched off or unplugged), so it has
+not been re-tested. The next session must (1) power-cycle the deck, which is
+stock regardless of what is in RAM, (2) install with `tools/stems_apply.py` and
+(3) time one mute at the start and one mid-track. Until then this section claims
+an emulator result only -- the 24.88 s deck figure above is still the last real
+measurement.

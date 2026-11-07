@@ -63,7 +63,14 @@ project log) and docs/ROADMAP.md for the detail behind each line.
    stores the cue at the playhead; tools/hotcue8_set_test.py PASS), but
    in RAM only: a new track or power-off forgets it. Still to build: save
    them to the stick (the deck's own ANLZ writer path, emulator-proven
-   first), plus delete. Paging by swipe already exists.
+   first), plus delete. Paging by swipe is implemented but does NOT page on
+   the deck (user, 2026-11-06: "8 Hot cues funktionieren, aber wischen geht
+   nicht, man muss tippen") -- tapping the HOT CUE tab is the working route
+   and is what the docs now say. Swipe paging is a **1.1 candidate** (user
+   asked 2026-11-06 whether it can be done): the code exists, and the same day
+   its 40-px gate was lowered to 24 px because the tab strip is only 92 px
+   wide. tools/hotcue8_test.py now proves a 32-px drag pages both ways and an
+   8-px wobble is still a tap (PASS). Left: the deck run.
    SAVE TO STICK, 2026-11-03 late: two findings.
    (a) REC does NOT save D-H. Tested in the emulator with a stick carrying
    A-C only, page D-F made live exactly as hc.c load_page(1) does, REC
@@ -98,15 +105,24 @@ project log) and docs/ROADMAP.md for the detail behind each line.
     docs/TOUCHFX_MEMORY_SURVEY.md. Our DSP window is 0xC005F4C0..
     0xC0060000 = 2,880 B, already shared with live key shift; Echo needs
     44-88 KB, Reverb 50-65 KB, Flanger 8.8 KB, Roll 44 KB (or 0 by using
-    the deck's own loop engine). Pitch needs NO new memory -- it is the
-    key-shift stretcher we already have, so it only needs the UI wired.
-    Lead to check on the deck: the DSP download list at blk1 0x00004D70
-    puts the program around 0xC0045900, leaving a ~101 KB gap up to our
-    window that is unproven (parse the record lengths, then read the range
-    through the DSP address window before designing anything into it).
+    the deck's own loop engine). Pitch needs NO new memory of its own -- it is
+    the key-shift stretcher we already have -- but the CODE does not fit:
+    written 2026-11-07, it builds at 2,912 B against the 2,496 B wall
+    (`-DFX_PITCH`, refused by the build gate). 416 B of code room is the
+    blocker, not a buffer. See docs/TOUCHFX_MEMORY_SURVEY.md.
+    MEASURED TWICE 2026-11-05 (emulator): the "~101 KB gap at 0xC0045900"
+    is USED (97,308 of 105,408 bytes, through 0xC005F4A6) -- the 0x4D70
+    block is a pointer table, not load addresses. The first replacement
+    (0xC0062000, 66 KB) was ALSO wrong: with MASTER TEMPO on it fills with
+    the audio path's samples. The block that stays zero through playback is
+    0xC0073400..0xC0080000 = 52,224 B, and Echo is built there (147 ms max,
+    emulator-pass). Flanger and Roll also fit; Reverb does not. One deck
+    read still needed before flashing.
 11. Phase meter as a UTILITY setting, TYPE 1 / TYPE 2 like the
     XDJ-1000MK2 (built), plus the master row for a second linked deck
-    (built, needs the deck).
+    (built, needs the deck). CONFIRMED ON THE DECK 2026-11-06: "Phasenmeter
+    funktioniert auch", master row included -- it is proven working with a
+    second deck linked, so nothing is left unproven here.
 12. Live key shift OR Touch FX, chosen in the app (they share the audio
     chip's hook).
 13. Themes (live switching on the deck), waveform colours that follow the
@@ -144,9 +160,11 @@ project log) and docs/ROADMAP.md for the detail behind each line.
     failed checks, row check 28,292 px (build/pads_test.log). The suite's
     own mask-walk taps now set STEMSOK=1 first, which is what a STEMS file
     does -- without it they were correctly inert and the run failed.
-15. Bugs to confirm fixed on the deck: FLAC load freeze, key-shift noise
-    on AIFF, beat jump 32/64, lit-button theme stripes, the STEMS tab not
-    responding when Key Shift is hidden.
+15. Bugs to confirm fixed on the deck: FLAC load freeze (**CONFIRMED
+    2026-11-06**: FLAC lists, loads and plays; the freeze did not return),
+    key-shift noise on AIFF, beat jump 32/64, lit-button theme stripes, the
+    STEMS tab not responding when Key Shift is hidden. Vinyl brake length
+    was also confirmed working that day (the stop changes with the setting).
 
 ### Emulator (in the app)
 16. **Real time, with no exceptions.** The user's words: "we need real time
@@ -165,6 +183,11 @@ project log) and docs/ROADMAP.md for the detail behind each line.
     - Master Tempo without stutter (audio was ~92 % of real time)
     - clicks must feel instant (now 0.3-0.6 s through the app)
 17. Windows: works and is tested by a real person before "beta" comes off.
+    MET 2026-11-06: the label is off -- Windows builds from the same source
+    and runs the same checks, and mods have been installed on a real deck
+    from Windows. The one Windows failure on record (issue #1, PERFORM pads
+    `AssertionError: 2802` from a system-font size difference) was fixed in
+    0.9.6, with a follow-up crash fixed in 0.9.7.
     AUDIT 2026-11-03: the CI workflow's inputs all exist (emu/fastcore.c,
     emu/c6x/c6xcore.c, both qemu patches, tools/build_studio_win.py,
     tools/win_selftest.py) and the app's own self-test -- the same one the

@@ -50,6 +50,12 @@ typedef unsigned char u8;
 #define CALL_OLD     0x0027D290u
 #define LAND         (DDR + IMG_LEN) /* 0xC005F4C0, loader padding        */
 #define LAND_END     0xC0060000u     /* runtime cos table starts here     */
+/* Bytes of zeroed STATE written after the code. Key shift keeps the
+ * generous 0x260; TOUCH FX builds with -DZSTATE=0x180 because its struct is
+ * 0x148 and the extra room is what lets Echo+Flanger share the window. */
+#ifndef ZSTATE
+#define ZSTATE       0x260u
+#endif
 #define TRACK_LEN    0x0BA3C050u
 #define HPIA_P2      0xB8040000u
 #define HPID_P2      0xB80C0000u     /* fixed (no auto-increment) port    */
@@ -119,7 +125,7 @@ void ksh_hook(void)
         ksh_flag = 0; ksh_status = 3; return;
     }
     if (R32(TRACK_LEN) != 0) { ksh_flag = 0; ksh_status = 2; goto unhook; }
-    if (R32(IMG + CALL_OFF) != CALL_OLD || LAND + blen + 0x260u > LAND_END)
+    if (R32(IMG + CALL_OFF) != CALL_OLD || LAND + blen + ZSTATE > LAND_END)
         { ksh_flag = 0; ksh_status = 3; goto unhook; }
     if (hpi_dma_busy()) {                         /* try again next frame */
         ksh_dbg[13] = ++ksh_tries;
@@ -179,7 +185,7 @@ void ksh_hook(void)
 
     /* 4. code + zeroed state, verified, BEFORE the call word */
     for (u32 i = 0; i < blen; i += 4) hwr(LAND + i, ks_word(i));
-    for (u32 i = (blen + 7u) & ~7u; i < ((blen + 7u) & ~7u) + 0x260u; i += 4)
+    for (u32 i = (blen + 7u) & ~7u; i < ((blen + 7u) & ~7u) + ZSTATE; i += 4)
         hwr(LAND + i, 0);
     for (u32 i = 0; i < blen; i += 4)
         if (hrd(LAND + i) != ks_word(i)) { ksh_status = 9; goto done; }

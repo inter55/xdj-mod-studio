@@ -33,7 +33,14 @@ import time
 # libhidapi from Homebrew (brew install hidapi).
 VENDOR = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
                       "vendor")
-if os.path.isdir(os.path.join(VENDOR, "hid")) and VENDOR not in sys.path:
+# XDJ_MOCK_SOCK = the pretend deck (tools/mock/mockdeck_server.py). Its
+# `hid` stand-in has to come from the caller's path, so do NOT put the real
+# vendor/hid in front of it: doing that made tools/stick_pack.py record (and
+# mock_install.py) report "deck not found over USB" while a real-hid module
+# was what they had actually imported.
+if (not os.environ.get("XDJ_MOCK_SOCK")
+        and os.path.isdir(os.path.join(VENDOR, "hid"))
+        and VENDOR not in sys.path):
     sys.path.insert(0, VENDOR)
 
 try:

@@ -51,7 +51,8 @@ and the bundled deck code were behind the Mac build; 0.9.6 ships the same
 source for both). If anything fails, please report it with the log
 (Settings shows the logs folder).
 
-Not on Windows yet: emulator sound (the emulator runs silent).
+Emulator: it runs on Windows; sound arrived 2026-10-24 (pygame mixer) --
+if yours is silent, set XDJ_DECK_SOUND=1 and report it.
 Track Builder needs ffmpeg (and rubberband for key versions) on PATH.
 
 Your settings and firmware files live in
@@ -99,8 +100,11 @@ def main():
                 ds.remove(d)
 
     # portable repo copy (tools run from here, --run-tool)
+    # vendor/ = the MIT rekordbox-pdb package: stems replacement (MP3/M4A/FLAC),
+    # filter playlists and OneLibrary conversion import it. 1.0.1 shipped
+    # without it on BOTH platforms and those features failed on ImportError.
     repo = os.path.join(APP, "repo")
-    for d in ("tools", "mods", "emu", "studio"):
+    for d in ("tools", "mods", "emu", "studio", "vendor"):
         shutil.copytree(os.path.join(ROOT, d), os.path.join(repo, d),
                         ignore=shutil.ignore_patterns("__pycache__", "*.pyc", ".DS_Store",
                                                       "*.bak", "*.BACKUP", "*.pre-*",
@@ -150,6 +154,11 @@ def main():
                 bad.append(os.path.join(dp, n))
     if bad:
         sys.exit("REFUSED: firmware-like files in the Windows app:\n" + "\n".join(bad))
+
+    # refuse to call this build finished if it cannot do its job (same gate as
+    # the Mac build: 1.0.1 shipped without vendor/rekordbox_pdb)
+    subprocess.check_call([sys.executable,
+                           os.path.join(ROOT, "tools", "app_bundle_check.py"), APP])
 
     zp = os.path.join(DIST, "XDJ-Mod-Studio-Windows.zip")
     with zipfile.ZipFile(zp, "w", zipfile.ZIP_DEFLATED, compresslevel=9) as z:

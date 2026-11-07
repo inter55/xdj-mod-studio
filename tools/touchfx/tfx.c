@@ -102,7 +102,7 @@ typedef unsigned int u32;
 
 /* ---- state (zeroed bss; the installer writes the cave fresh) ---- */
 u32 tfx_mode;          /* 1 = panel open */
-u32 tfx_eff;           /* 0 filter, 1 crush, 2 gate (3..7 not yet) */
+u32 tfx_eff;           /* 0 filter 1 crush 2 gate 3 echo 4 flanger (5..7 not yet) */
 u32 tfx_x = 128, tfx_y = 128, tfx_depth = 200;
 u32 tfx_on = 1, tfx_hold;
 u32 tfx_touching, tfx_drag;   /* drag: 1 pad 2 depth 3 tab 4 button */
@@ -115,11 +115,23 @@ u32 tfx_log[32], tfx_logn;   /* diagnostic: down<<31 | x<<16 | y per call */
 static u32 lay_addr[2], lay_ver[2], lay_cx[2], lay_cy[2], lay_hasc[2];
 static u16 lay_samp[2][16];
 
+/* Index = the effect id the DSP engine uses (tools/fx_dsp/fx.c), NOT the
+ * button order: 4 is the flanger (it shares echo's delay line) and 5 is
+ * pitch, so the two grid labels must follow the ids. */
 static const char *const fx_name[8] = {
-    "FILTER", "CRUSH", "GATE", "ECHO", "PITCH", "FLANGER", "ROLL", "REVERB" };
-static const char *const fx_x[3] = { "X: CUTOFF", "X: RATE", "X: SPEED" };
-static const char *const fx_y[3] = { "Y: RESONANCE", "Y: BITS", "Y: DEPTH" };
-#define N_LIVE 3
+    "FILTER", "CRUSH", "GATE", "ECHO", "FLANGER", "PITCH", "ROLL", "REVERB" };
+static const char *const fx_x[6] = { "X: CUTOFF", "X: RATE", "X: SPEED", "X: TIME",
+                                    "X: RATE", "X: SEMITONES" };
+static const char *const fx_y[6] = { "Y: RESONANCE", "Y: BITS", "Y: DEPTH", "Y: FEEDBACK",
+                                    "Y: DEPTH", "Y: -" };
+/* What is actually live in this build: FILTER, CRUSH, GATE. ECHO (3) and
+ * FLANGER (4) need a delay line the deck does not have -- the 52 KB block
+ * came back in use with audio playing (docs/TOUCHFX_MEMORY_SURVEY.md).
+ * PITCH (5) needs no buffer: it drives the deck's own stretcher, the way the
+ * key-shift engine does -- and it is written, but it does not fit the FX
+ * cave yet (2,912 B built vs the 2,496 B wall; see the survey). Flip this
+ * to ((i) < 3 || (i) == 5) together with -DFX_PITCH once it does. */
+#define FX_LIVE(i) ((i) < 3)
 
 /* ---------------------------------------------------------- drawing ---- */
 static u16 *L;            /* current layer (uncached) */
@@ -215,7 +227,7 @@ static int in_pad_label(int x, int y)          /* axis labels stay drawn */
 }
 static void pad_labels(void)
 {
-    int e = tfx_eff < N_LIVE ? (int)tfx_eff : 0;
+    int e = FX_LIVE(tfx_eff) ? (int)tfx_eff : 0;
     text(&F_SMALL, PAD_X0 + 6, PAD_Y1 - 14, fx_x[e], C_DIM, C_PAD);
     text(&F_SMALL, PAD_X1 - 6 - text_w(&F_SMALL, fx_y[e]), PAD_Y0 + 5, fx_y[e], C_DIM, C_PAD);
 }
@@ -238,7 +250,7 @@ static const char *status(char *buf)
 {
     if (!tfx_engine || R16(NOPSITE) != 0x0009u) return "FX ENGINE NOT INSTALLED";
     if (R8(MTW) != 1) return "MT OFF: TURN ON MASTER TEMPO";
-    if (tfx_eff >= N_LIVE) return "COMING SOON";
+    if (!FX_LIVE(tfx_eff)) return "COMING SOON";
     const char *n = fx_name[tfx_eff];
     char *p = buf;
     while (*n) *p++ = *n++;
@@ -274,7 +286,7 @@ static void draw_panel(void)
     fill(112, 230, AR_X1 - 112, AR_Y1 - 230, C_BG);
     /* left column (above the tab stack) */
     text(&F_SMALL, LX, 74, "TOUCH FX", C_WH, C_BG);
-    text(&F_SMALL, LX, 96, tfx_eff < N_LIVE ? fx_name[tfx_eff] : "-", tfx_active ? C_OR : C_GREY, C_BG);
+    text(&F_SMALL, LX, 96, FX_LIVE(tfx_eff) ? fx_name[tfx_eff] : "-", tfx_active ? C_OR : C_GREY, C_BG);
     pct(buf, "X", tfx_x);     text(&F_SMALL, LX, 122, buf, C_GREY, C_BG);
     pct(buf, "Y", tfx_y);     text(&F_SMALL, LX, 138, buf, C_GREY, C_BG);
     pct(buf, "D", tfx_depth); text(&F_SMALL, LX, 154, buf, C_GREY, C_BG);
@@ -287,7 +299,7 @@ static void draw_panel(void)
     text(&F_SMALL, RX, GB_Y0 - 14, "FX SELECT", C_DIM, C_BG);
     for (int i = 0; i < 8; i++) {
         int x = RX + (i & 1) * GB_DX, y = GB_Y0 + (i >> 1) * GB_DY;
-        button(x, y, GB_W, GB_H, fx_name[i], (u32)i == tfx_eff, i < N_LIVE);
+        button(x, y, GB_W, GB_H, fx_name[i], (u32)i == tfx_eff, FX_LIVE(i));
     }
     /* depth */
     num(buf, (tfx_depth * 100u + 127u) / 255u);
@@ -328,7 +340,7 @@ static int intact(int k)
 static void set_word(void)
 {
     int live = tfx_mode && tfx_engine && R16(NOPSITE) == 0x0009u && R8(MTW) == 1 &&
-               tfx_eff < N_LIVE && tfx_on && (tfx_touching || tfx_hold) &&
+               FX_LIVE(tfx_eff) && tfx_on && (tfx_touching || tfx_hold) &&
                R32(MODEW) == 7u && !R8(MSOFF);
     u32 w = 0x80000000u | 1u << 29 | (tfx_eff & 7u) << 26 | (tfx_x & 0xFFu) << 18 |
             (tfx_y & 0xFFu) << 10 | (tfx_depth & 0xFFu) << 2;
@@ -519,7 +531,7 @@ static int touch(int down, int x, int y)
     for (int i = 0; i < 8; i++) {
         int bx = RX + (i & 1) * GB_DX, by = GB_Y0 + (i >> 1) * GB_DY;
         if (inr(x, y, bx, by, GB_W, GB_H)) {
-            if (i < N_LIVE && (u32)i != tfx_eff) { tfx_eff = (u32)i; tfx_ver++; }
+            if (FX_LIVE(i) && (u32)i != tfx_eff) { tfx_eff = (u32)i; tfx_ver++; }
             tfx_drag = 4;
             return 1;
         }

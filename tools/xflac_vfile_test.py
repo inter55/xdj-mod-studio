@@ -12,6 +12,8 @@ mono/44.1k FLACs made by ffmpeg from a real track:
   * hi-res FLAC (96 kHz) becomes a 48 kHz WAV (2:1 low-pass decimation;
     2026-10-25: passing it through raw froze the deck -- its WAV parser
     got FLAC bytes); 32 kHz (unsupported) becomes an EMPTY file
+The cuts start 60 s in, so SRC (env SRC=, any ffmpeg-readable track) must be
+at least 67 s long; a shorter one makes empty FLACs, which would "match".
 """
 import os
 import random
@@ -20,9 +22,9 @@ import subprocess
 import sys
 import tempfile
 
-SRC = os.path.expanduser("~/Downloads/Rekordbox stuff/Contents/Lifelike & "
-                         "Roman Salzger/UnknownAlbum/Lifelike & Roman "
-                         "Salzger - Radio 84.aiff")
+SRC = os.environ.get("SRC") or os.path.expanduser(
+    "~/Downloads/Rekordbox stuff/Contents/Lifelike & Roman Salzger/"
+    "UnknownAlbum/Lifelike & Roman Salzger - Radio 84.aiff")
 BIN = "build/xflac/vfile_native"
 
 
@@ -69,7 +71,8 @@ def main():
             tag == 1 and nch == ch and sr == rate and bits == 8 * bps and \
             ba == ch * bps and br == rate * ch * bps and dlen == len(ref) and \
             size == len(hdr) - 8 + dlen and "ISFT" in tags
-        whole = data == ref
+        filled = len(ref) >= 7 * rate * ch * bps * 99 // 100  # not an empty cut
+        whole = filled and data == ref
         full = hdr + ref
         rnd = random.Random(7)
         pairs = [(rnd.randrange(0, len(full) - 1), rnd.randrange(1, 30000)) for _ in range(200)]
@@ -78,7 +81,8 @@ def main():
         seeks = got == want
         print(f"   tags {tags}")
         print(f"{name}: header {'ok' if hdr_ok else 'BAD'}, whole-file data "
-              f"{'==' if whole else '!='} ffmpeg ({len(data)} B), 200 random seeks "
+              f"{'==' if data == ref else '!='} ffmpeg ({len(data)} B"
+              f"{'' if filled else ', EMPTY CUT: SRC too short'}), 200 random seeks "
               f"{'match' if seeks else 'DIFFER'}")
         ok &= hdr_ok and whole and seeks
     f96 = os.path.join(tmp, "hi.flac")
@@ -92,7 +96,8 @@ def main():
     x = np.frombuffer(v[i:i + len(ref) // 2 * 2], "<i2").astype(float)
     y = np.frombuffer(ref, "<i2")[:len(x)].astype(float)
     err = np.sqrt(np.mean((x - y) ** 2)) / max(1.0, np.sqrt(np.mean(y ** 2)))
-    good = rate == 48000 and abs(len(v) - i - len(ref)) <= 8 and err < 0.01
+    good = rate == 48000 and len(ref) > 0 and abs(len(v) - i - len(ref)) <= 8 \
+        and err < 0.01
     print(f"96 kHz -> {rate} Hz WAV, rel. error vs ffmpeg {err:.4f}: {'ok' if good else 'BAD'}")
     ok &= good
     f32 = os.path.join(tmp, "lo.flac")

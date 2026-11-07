@@ -5,12 +5,13 @@ Needs the snapshot tools/hotcue8_emu.py saves (mini stick, track with hot
 cues A-H at 5,13,..61 s loaded): $TMPDIR/hotcue8_loaded.pkl or argv[1].
 Installs the PERFORM pads + the hotcue8 C module exactly like the deck
 installers would, then with REAL touches:
-  HOT CUE tab tap (in HOT CUE mode) -> page 2 (slots = D,E,F), again ->
-  page 3 (G,H,empty), again -> page 1 (A,B,C); swipes page both ways
-  too (2026-10-21: tap AND swipe both work -- three testers naturally
-  tapped); REC tap on page 2 is swallowed (stock REC never sees it);
-  BEAT JUMP tab then HOT CUE tab = a mode change, not a page change;
-  letters drawn (hc_draws > 0) + screenshots/hotcue8/*.png.
+  TAP the HOT CUE tab (in HOT CUE mode) -> the 8-pad view: all eight cues
+  drawn at once, a press on E/H borrows a live slot and puts it back, an
+  empty pad is swallowed; tap again -> the stock A B C REC CALL row.
+  SWIPES page A-C -> D-F -> G-H both ways (2026-10-21); a swipe leaves the
+  8-pad view. REC tap on page 2 is swallowed (stock REC never sees it);
+  BEAT JUMP tab then HOT CUE tab = a mode change, not a view change;
+  letters drawn (hc_draws/hc_draws8 > 0) + screenshots/hotcue8/*.png.
 """
 import os
 import subprocess
@@ -48,8 +49,11 @@ def install_hc(mem, code, syms):
         mem.w32(a, 0)
     for i, b in enumerate(code):
         mem.w8(base + i, b)
-    hook = 0x08C92E20
+    hook, touch = 0x08C92E20, 0x08D5278C
     mem.w32(syms["hc_prev"], mem.r32(hook))
+    mem.w32(syms["hc_tprev"], mem.r32(touch))
+    mem.w32(syms["hc_armed"], 1)
+    mem.w32(touch, syms["hc_tentry"])
     mem.w32(hook, syms["hc_entry"])
 
 
@@ -101,11 +105,76 @@ def main():
             run(8_000_000)
         dev.panel_frame = panl.build_frame()
         run(30_000_000)
-    tap(*tab)                                     # tap -> page 2 (D E F)
+
+    def drag(dx, steps=3):                        # a SHORT drag from the middle
+        for k in range(0, steps + 1):             # of the 92-px tab strip (k=0 is
+                                                  # the touch-down: without it the
+                                                  # deck records the down-x at the
+                                                  # first moved position)
+            dev.panel_frame = panl.build_frame(touch=(tab[0] + dx * k // steps, tab[1]))
+            run(8_000_000)
+        dev.panel_frame = panl.build_frame()
+        run(30_000_000)
+    # --- the 8-pad view (tap; integrated 2026-11-07) --------------------
+    tap(*tab)
+    chk("tap: 8-pad view on, page 1", mem.r32(syms["hc_view"]) == 1 and
+        mem.r8(PP.HCPAGE) == 0)
+    run(30_000_000)
+    chk("8 pads drawn", mem.r32(syms["hc_draws8"]) > 0)
+    fb_png(m, f"{OUT}/grid8.png")
+    padx = [116 + 63 * i + 29 for i in range(8)]
+    pady = 263
+    page1 = slots()
+    dev.panel_frame = panl.build_frame(touch=(padx[4], pady))   # pad E
+    run(12_000_000)
+    chk("grid: E held borrows slot 1 -> cue 5",
+        (mem.r16(SLOT + 0x40 + 0x0A), mem.r32(SLOT + 0x40 + 0x0C)) == (5, TIMES[4]))
+    chk("grid: E sets no stock zone (hit-tester untouched)",
+        mem.r32(0x0C0E75BC) == 0x1E)
+    fb_png(m, f"{OUT}/grid8_held_E.png")
+    dev.panel_frame = panl.build_frame()
+    run(40_000_000)
+    chk("grid: E released restores slot 1", slots() == page1)
+    dev.panel_frame = panl.build_frame(touch=(padx[7], pady))   # pad H = old REC
+    run(12_000_000)
+    chk("grid: H (old REC spot) borrows -> cue 8",
+        (mem.r16(SLOT + 0x40 + 0x0A), mem.r32(SLOT + 0x40 + 0x0C)) == (8, TIMES[7]))
+    dev.panel_frame = panl.build_frame()
+    run(40_000_000)
+    chk("grid: H released restores slot 1", slots() == page1)
+    sw_before = mem.r32(syms["hc_swallowed"])
+    dev.panel_frame = panl.build_frame(touch=(116 + 63 * 2 + 60, pady))  # gap
+    run(12_000_000)
+    chk("grid: gap swallowed", mem.r32(syms["hc_swallowed"]) == sw_before + 1 and
+        slots() == page1)
+    dev.panel_frame = panl.build_frame()
+    run(30_000_000)
+    # DELETE and a borrowed slot (measured 2026-11-07): MEMORY-DELETE is zone
+    # 17 (0x11) and its own handler 0x08DD0B60 sets KEYB+84 bit 0x40 -- it is
+    # NOT a panel key (holding the "Delete" frame bit does not move it). One
+    # panel frame carries a SINGLE touch point (payload +22..+25), so DELETE
+    # and a pad cannot be pressed together: the "delete the borrowed slot"
+    # combination is unreachable. hc_touch still reads that bit and swallows
+    # D-H presses as defence in depth; that guard cannot be driven through the
+    # emulator's one point, so it is not claimed as emulator-tested here.
+    # What IS tested: D (a borrowed pad) works normally afterwards.
+    dev.panel_frame = panl.build_frame(touch=(padx[3], pady))      # pad D
+    run(12_000_000)
+    chk("grid: D works (slot 0 = cue 4)",
+        (mem.r16(SLOT + 0x0A), mem.r32(SLOT + 0x0C)) == (4, TIMES[3]))
+    dev.panel_frame = panl.build_frame()
+    run(40_000_000)
+    chk("grid: D released restores slot 0", slots() == page1)
+    tap(*tab)
+    chk("tap again: stock row back", mem.r32(syms["hc_view"]) == 0 and
+        mem.r8(PP.HCPAGE) == 0)
+
+    swipe(100, 30)                                # swipe -> page 2 (D E F)
     s = slots()
     print("page", mem.r8(PP.HCPAGE), "slots", s, "count", mem.r32(syms["hc_count"]))
     chk("page 2 = D E F", mem.r8(PP.HCPAGE) == 1 and
         [x[0] for x in s] == [4, 5, 6] and [x[1] for x in s] == TIMES[3:6])
+
     run(30_000_000)
     fb_png(m, f"{OUT}/page2.png")
     chk("letters drawn", mem.r32(syms["hc_draws"]) > 0)
@@ -143,15 +212,38 @@ def main():
     tap(*tab)                                     # back to HOT CUE: mode, no page step
     chk("HOT CUE tab from other mode = mode change only",
         mem.r8(PP.PST + 2) == 0 and mem.r8(PP.HCPAGE) == 1)
-    tap(*tab)                                     # in mode now: tap pages -> page 3
-    chk("tap pages forward", mem.r8(PP.HCPAGE) == 2 and slots()[0][0] == 7)
-    tap(*tab)                                     # -> wraps to page 1
-    chk("tap wraps to page 1", mem.r8(PP.HCPAGE) == 0 and slots()[0][0] == 1)
+    tap(*tab)                                     # in mode now: tap = 8 pads
+    chk("tap from the stock row: 8-pad view, page 1",
+        mem.r32(syms["hc_view"]) == 1 and mem.r8(PP.HCPAGE) == 0 and
+        slots()[0][0] == 1)
+    tap(*tab)                                     # -> stock row
+    chk("tap again: stock row, page 1", mem.r32(syms["hc_view"]) == 0 and
+        mem.r8(PP.HCPAGE) == 0 and slots()[0][0] == 1)
     run(30_000_000)
     fb_png(m, f"{OUT}/back_to_hc.png")
-    mem.w8(MS.MSOFF, 1)                           # MODS OFF: no paging
+    # 2026-11-06: the swipe threshold went 40 -> 24 px because the tab strip is
+    # only TAB_W=92 px wide, so a 40-px drag rarely fit inside it. These run
+    # LAST so they cannot shift the page for the legs above. The gate is
+    # cmp/gt (strictly greater), hence a 32-px drag: 24 exactly does not pass.
+    p = mem.r8(PP.HCPAGE)                         # 0 = A B C
+    drag(+32)                                     # right = previous page
+    chk("32 px swipe right pages back", mem.r8(PP.HCPAGE) == (p - 1) % 3)
+    run(30_000_000)
+    drag(-32)                                     # left = next page
+    chk("32 px swipe left pages forward", mem.r8(PP.HCPAGE) == p)
+    run(30_000_000)
+    drag(-8)                                      # wobble: a TAP -> 8-pad view
+    chk("8 px wobble is a tap (8-pad view)", mem.r8(PP.HCPAGE) == 0 and
+        mem.r32(syms["hc_view"]) == 1)
+    run(30_000_000)
+    tap(*tab)                                     # tap back: stock row, page 1
+    chk("tap back: page 1, stock row", mem.r8(PP.HCPAGE) == 0 and
+        mem.r32(syms["hc_view"]) == 0 and slots()[0][0] == 1)
+    mem.w8(MS.MSOFF, 1)                           # MODS OFF: no paging/view
+    v = mem.r32(syms["hc_view"])
     tap(*tab)
-    chk("MODS OFF: tab does not page", mem.r8(PP.HCPAGE) == 0)
+    chk("MODS OFF: tab does nothing", mem.r8(PP.HCPAGE) == 0 and
+        mem.r32(syms["hc_view"]) == v)
     print("RESULT:", "PASS" if ok else "FAIL")
     return 0 if ok else 1
 

@@ -27,6 +27,21 @@ done
 [ -f cache/emu_dsp_sound.pkl.gz ] && cp cache/emu_dsp_sound.pkl.gz "$STAGE/cache/" || true
 # + its decode tool (emu/c6x/c6xcore.c already travels with the emu/ copy)
 [ -f work/tic6x/objdump ] && mkdir -p "$STAGE/work/tic6x" && cp work/tic6x/objdump "$STAGE/work/tic6x/" || true
+# the pack goes to someone else: no real names or machine paths in it
+if [ -d "$STAGE" ]; then
+  # text files: plain replacement. Binaries (objdump, .so): same-length
+  # bytes only, so nothing inside them shifts or breaks.
+  grep -rla -e '/Users/' -e "Mac""Book" -e "Jam""esG" "$STAGE" 2>/dev/null |
+    while IFS= read -r f; do
+      if grep -qI . "$f" 2>/dev/null; then
+        sed -i '' -e 's|/Users/[A-Za-z0-9._-]*|~|g' \
+                  -e "s|Mac""Book[-A-Za-z0-9._]*\.local|localhost|g" \
+                  -e "s|Jam""esG|tester|g" "$f"
+      else
+        perl -pi -e "s{/Users/Jam""esG}{/build/ccache}g; s{Mac""Book}{Machine}g; s{Jam""esG}{tester}g" "$f"
+      fi
+    done
+fi
 cat > "$STAGE/DO_NOT_SHARE.txt" <<'EOF'
 Private tester pack. Contains files derived from Pioneer firmware for
 ONE tester only (emulator snapshots, firmware image, screen captures).

@@ -193,6 +193,7 @@ TRKKEY = PC0 + 0x19C8                   # 2026-11-03: was 0x19A4; the
                                         # are the only room there is.
 TRK_KEYSTR = 0x09D30430
 HC_PREVP = HC_BASE + 8 if HC_NEXTP != SAFE_ZERO else SAFE_ZERO
+HC_TOGGLEP = HC_BASE + 12 if HC_NEXTP != SAFE_ZERO else SAFE_ZERO
 RTKEEP = PC0 + 0x1130                   # per-flush key re-assert (own unit)
                                         # 2026-10-21: +MT watch -> the units
                                         # below moved +0x20/+0x30
@@ -2542,7 +2543,11 @@ hcheld:                     ; r1 = PST, r5 = x: swipe left = next page,
   mov.w @r3,r0
   extu.w r0,r0
   sub r5,r0                 ; > 0: moved left
-  mov #40,r2
+  mov #24,r2                ; 40 -> 24 (2026-11-06): the tab strip is only
+                            ; TAB_W=92 px wide, so a 40-px drag rarely fit
+                            ; inside it and the deck never paged; 24 px is
+                            ; still well clear of a tap's wobble (see
+                            ; hotcue8_test's short-drag / wobble checks)
   cmp/gt r2,r0
   bt hcl
   neg r0,r0
@@ -2567,17 +2572,17 @@ hccall:
 hcret:
   rts
   mov #0,r0
-hcrel:                      ; r1 = PST: release on the tab. A swipe already
-  mov.l @({PSW:#x},pc),r3   ; paged (hcheld); since 2026-10-21 a plain TAP
-  mov.b @(3,r3),r0          ; pages forward too (three testers naturally
-  tst r0,r0                 ; tapped; swipe and tap both work now)
+hcrel:                      ; r1 = PST: release on the tab. A swipe paged
+  mov.l @({PSW:#x},pc),r3   ; (hcheld); a plain TAP now flips the 8-pad view
+  mov.b @(3,r3),r0          ; (2026-11-07) -- all eight cues at once, A-H,
+  tst r0,r0                 ; and the stock A B C REC CALL row with it
   bt hctap
   bra hcrd
   nop
 hctap:
   mov #0,r0
-  mov.b r0,@r1              ; drop the latch first (hc_next may repaint)
-  mov.l @({HC_NEXTP:#x},pc),r2
+  mov.b r0,@r1              ; drop the latch first (hc_toggle may repaint)
+  mov.l @({HC_TOGGLEP:#x},pc),r2
   bra hcgo                  ; null-safe via hccall (SAFE_ZERO = no hotcue8)
   nop
 hcrd:

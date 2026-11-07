@@ -181,8 +181,9 @@ main { flex: 1; min-height: 0; position: relative; }
 .sw[aria-pressed=true] i { border-color: var(--text); } .sw[aria-pressed=true] { color: var(--text); }
 .ctl { display: grid; grid-template-columns: 84px 1fr 38px; align-items: center; gap: 10px; margin-top: 9px; color: var(--dim); }
 .ctl output { text-align: right; font-variant-numeric: tabular-nums; color: var(--text); font-size: 12px; }
-.screen { border-radius: 8px; overflow: hidden; background: #000; aspect-ratio: 5 / 3; border: 1px solid var(--line); }
+.screen { border-radius: 8px; overflow: hidden; background: #000; aspect-ratio: 5 / 3; border: 1px solid var(--line); position: relative; }
 .screen img { display: block; width: 100%; height: 100%; object-fit: cover; }
+.pmsg { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; padding: 18px; text-align: center; font-size: 12px; line-height: 1.5; color: #cfd3da; background: #0b0c0f; }
 .actionbar { flex: none; display: flex; align-items: center; gap: 12px; padding: 12px 16px; border-top: 1px solid var(--line); background: var(--panel); }
 .kv { display: grid; grid-template-columns: auto 1fr; gap: 4px 14px; }
 .kv dt { color: var(--dim); } .kv dd { margin: 0; text-align: left; white-space: normal; overflow: visible; }
@@ -504,7 +505,7 @@ dialog h2 { font-size: 16px; margin-bottom: 6px; }
           <div class="seg" id="pscreen"><button data-v="main">Player</button><button data-v="perform">Perform</button><button data-v="lit">Lit</button></div>
           <span class="small faint grow" id="ptrack" style="text-align:right;overflow:hidden;text-overflow:ellipsis;white-space:nowrap"></span>
         </div>
-        <div class="screen"><img id="pimg" alt="Theme preview of the deck screen"></div>
+        <div class="screen"><img id="pimg" alt="Theme preview of the deck screen"><div id="pmsg" class="pmsg" hidden></div></div>
         <div class="small faint" style="margin-top:8px">Uses the deck's own colour maths. Waveforms follow the track from Track Builder.</div>
       </div>
     </div>
@@ -522,12 +523,25 @@ dialog h2 { font-size: 16px; margin-bottom: 6px; }
     <div id="callout" class="notice" hidden style="margin-bottom:10px"><span id="ctitle"></span><button class="btn sm" id="fixall">Add to all</button></div>
     <div class="chips">
       <div class="seg" id="filters"><button data-f="all">All tracks</button><button data-f="need3">Needs 3-band</button><button data-f="vers">Stems files</button></div>
+      <button class="btn sm" id="fshow">Filter playlists</button>
       <input class="field" id="search" type="text" placeholder="Search" style="margin-left:auto;width:200px" autocomplete="off">
     </div>
+    <div class="notice" id="filtercard" hidden style="margin-bottom:10px"><div style="flex:1">
+      <b>The deck has no browse filter.</b> It does show playlists from your stick, so Studio turns a filter into one: fill in what you want and it is saved under BROWSE › PLAYLIST. Your <code>export.pdb</code> is backed up first, and only that playlist is added.
+      <div class="chips" style="margin-top:8px">
+        <input class="field" id="fbpm" placeholder="BPM, e.g. 124-128" style="width:150px" autocomplete="off">
+        <input class="field" id="fkey" placeholder="Key, e.g. Am" style="width:110px" autocomplete="off">
+        <input class="field" id="fcolour" placeholder="Colour" style="width:100px" autocomplete="off">
+        <select class="field" id="frating" aria-label="Rating"><option value="">Any rating</option><option value="3">3 stars and up</option><option value="4">4 stars and up</option><option value="5">5 stars only</option></select>
+        <input class="field" id="fsearch" placeholder="Words in the title" style="width:150px" autocomplete="off">
+        <button class="btn primary" id="ffilter">Make playlist</button>
+        <button class="btn" id="fpresets" title="Three BPM bands, 4+ and 5 stars, your biggest keys">Make the whole set</button>
+      </div>
+    </div></div>
     <div class="list" id="list"></div>
     <div class="selbar">
       <span class="dim" id="selc">Nothing selected</span><span class="grow"></span>
-      <span class="small faint" style="margin-right:10px">Stems only work on tracks made here. WAV/AIFF: replaces the track (original kept as a backup). MP3: a new file in BROWSE › <b>FOLDER</b>.</span>
+      <span class="small faint" style="margin-right:10px">Stems only work on tracks made here. The track is replaced by its stems version under its own name (cues kept, original backed up); MP3/M4A/FLAC move their library entry with it. Leave Replacement on: a copy beside the track cannot be reached on the deck.</span>
       <button class="btn" id="b3">Add 3-band</button><button class="btn primary" id="bstems">Make stems</button>
     </div>
   </div>
@@ -543,6 +557,7 @@ dialog h2 { font-size: 16px; margin-bottom: 6px; }
     <div class="actions">
       <button class="btn" id="i3">Add 3-band</button>
       <button class="btn primary" id="istems" style="grid-column: span 3">Make stems</button>
+      <button class="btn" id="icues">Hot cues A–H</button>
     </div>
     <div id="x7srow" hidden>
       <div class="lbl"><span>Stems sidecar</span><span class="faint">small opus file present</span></div>
@@ -621,7 +636,7 @@ dialog h2 { font-size: 16px; margin-bottom: 6px; }
         <li><b>It can brick your deck.</b> A bad file, a power cut or pulling the stick mid-update can leave the XDJ-700 needing a Pioneer DJ service centre.</li>
         <li><b>Flashed on a real deck once.</b> A tester ran a v1.16 build and reported it working. Every file is also boot-tested in the emulator before you get it, but one successful flash is not a guarantee — keep the official v1.15 file to hand.</li>
         <li><b>No warranty.</b> Pioneer DJ / AlphaTheta do not support modified firmware.</li>
-        <li><b>The way back</b> is to flash the official v1.15 file, so keep it on a second stick.</li>
+        <li><b>The way back</b> is the <b>Back to stock</b> button below: it builds a stock file numbered higher than what your deck reports, which the deck will accept. The official v1.15 file can be refused as an older version, so keep it only as a spare.</li>
       </ul>
     </div>
     <div class="panel stack" style="gap:10px">
@@ -633,12 +648,15 @@ dialog h2 { font-size: 16px; margin-bottom: 6px; }
         <div class="row" style="margin-top:6px;flex-wrap:wrap;gap:6px"><span class="small dim" style="align-self:center">Presets:</span>
           <button class="btn sm" id="updpre-all">Everything</button>
           <button class="btn sm" id="updpre-pm">Phase meter only</button>
-          <button class="btn sm" id="updpre-wave">Waveform colours only</button></div></div>
+          <button class="btn sm" id="updpre-wave">Waveform colours only</button>
+          <button class="btn sm" id="updpre-stock">Back to stock (no mods)</button></div></div>
+      <div class="row"><span class="dim" style="width:150px">Version number</span><input class="field" id="updver" type="text" value="1.16" style="width:86px" spellcheck="false" autocomplete="off"><span class="small dim">The deck only accepts a file numbered higher than the one it already has — UTILITY shows the current one. Going back to stock after a modded flash needs a higher number too: build with nothing ticked and the stock overview colour.</span></div>
       <div class="row"><span class="dim" style="width:150px">Overview waveform</span><div class="seg" id="updwave"><button data-v="blue">Blue</button><button data-v="rgb" aria-pressed="true">RGB</button><button data-v="3band">3-Band</button></div></div>
       <label class="row"><input type="checkbox" id="updpads" checked> PERFORM pads: HOT CUE / BEAT JUMP tabs (KEY SHIFT / STEMS only when ticked below), beat jump 1–64</label>
       <div class="small dim">Extras: the file carries them and a small start-up routine copies them into the deck's memory every time it switches on.</div>
       <label class="row"><input type="checkbox" class="updx" data-x="centre" checked> RGB / 3-band centre waveform</label>
       <label class="row"><input type="checkbox" class="updx" data-x="keyshift" checked> Live key shift (KEY SHIFT tab, MASTER TEMPO on)</label>
+      <label class="row"><input type="checkbox" class="updx" data-x="touchfx" data-pads="1"> Touch FX (X/Y pad with Filter, Crush, Gate) &mdash; instead of live key shift; needs room, so leave out the phase meter</label>
       <label class="row"><input type="checkbox" class="updx" data-x="stems" data-pads="1" checked> Live stems (STEMS tab)</label>
       <label class="row"><input type="checkbox" class="updx" data-x="hotcue8" data-pads="1" checked> 8 hot cues (swipe the HOT CUE tab for D–H)</label>
       <label class="row"><input type="checkbox" class="updx" data-x="phasemeter" checked> Phase meter</label>
@@ -648,7 +666,7 @@ dialog h2 { font-size: 16px; margin-bottom: 6px; }
           <li>PERFORM tabs and beat jump pads (if ticked)</li>
           <li>Mod settings in UTILITY (hold MENU): MODS, WAVEFORM COLOR, VINYL BRAKE LENGTH, HOT CUE GATE (always)</li>
           <li>The extras you ticked above (live stems and 8 hot cues need the PERFORM pads)</li>
-          <li>Version 1.16 in UTILITY, so you can tell it apart</li></ul></div>
+          <li>The version number above, shown in UTILITY so you can tell it apart</li></ul></div>
         <div><div class="bakeh">Want live themes and FLAC too?</div>
           <div class="small dim">They don't fit inside the update file. Use <a href="#" data-go="stick">On your USB stick</a> instead: same one-time update, and the stick carries every mod, themes and FLAC included.</div></div>
       </div>
@@ -656,7 +674,7 @@ dialog h2 { font-size: 16px; margin-bottom: 6px; }
     <div class="panel stack" style="gap:8px">
       <h2>3. I understand</h2>
       <label class="row"><input type="checkbox" class="updack" data-k="brick"> Flashing this can brick my deck, and I am doing it at my own risk.</label>
-      <label class="row"><input type="checkbox" class="updack" data-k="recovery"> I have the official v1.15 update on a second USB stick to go back to stock.</label>
+      <label class="row"><input type="checkbox" class="updack" data-k="recovery"> I know how to get back to stock: the Back to stock build above gives the deck a stock file it will accept.</label>
       <label class="row"><input type="checkbox" class="updack" data-k="power"> I will keep the deck on mains power and not touch it or the stick until the update says it is complete.</label>
       <div class="row"><button class="btn primary" id="updbtn" disabled>Build update file</button><span class="small dim" id="updmsg">Takes about 5 minutes. The file goes to Downloads / “XDJ700 modded update”, with a READ ME FIRST.</span></div>
       <div class="small faint">The app only builds the file and boot-tests it in the emulator. It never flashes your deck. You run the update yourself, the normal Pioneer way.</div>
@@ -870,7 +888,7 @@ function updPreset(which) {          /* one click instead of six unticks */
   const set = (id, v) => { const c = $('#' + id); if (c) c.checked = v; };
   if (which === 'all') {
     set('updpads', true);
-    $$('.updx').forEach(c => c.checked = true);
+    $$('.updx').forEach(c => c.checked = c.dataset.x !== 'touchfx');
     UPD.wave = 'rgb';
   } else if (which === 'pm') {       /* "just the phase meter" */
     set('updpads', false);
@@ -887,7 +905,22 @@ function updPreset(which) {          /* one click instead of six unticks */
 $('#updpre-all').onclick = () => updPreset('all');
 $('#updpre-pm').onclick = () => updPreset('pm');
 $('#updpre-wave').onclick = () => updPreset('wave');
-$$('.updx').forEach(c => c.onchange = updReady);
+$('#updpre-stock').onclick = () => {          /* the restore file: no mods at all */
+  $('#updpads').checked = false;
+  $$('.updx').forEach(c => { c.checked = false; });
+  UPD.wave = 'blue';
+  segSet('updwave', UPD.wave);
+  const v = $('#updver');
+  const m = /^(\d)\.(\d\d)$/.exec(v.value.trim());
+  if (m) v.value = m[1] + '.' + String(Math.min(99, +m[2] + 1)).padStart(2, '0');
+  updPads(); updReady();
+  toast('Stock build: nothing ticked, stock colours, version bumped. Set it higher than the number UTILITY shows on your deck, then build.');
+};
+$$('.updx').forEach(c => c.onchange = () => {   /* one DSP slot: Key Shift or Touch FX */
+  if (c.checked && c.dataset.x === 'touchfx') { const ks = $('.updx[data-x="keyshift"]'); if (ks) ks.checked = false; }
+  if (c.checked && c.dataset.x === 'keyshift') { const tf = $('.updx[data-x="touchfx"]'); if (tf) tf.checked = false; }
+  updReady();
+});
 $('#updpath').oninput = updReady;
 $('#updpick').onclick = async () => {
   const p = await pickFile('Choose the OFFICIAL XDJ-700 v1.15 update file (XDJ700.UPD)');
@@ -901,6 +934,7 @@ $('#updbtn').onclick = async () => {
   const ack = {}; $$('.updack').forEach(c => ack[c.dataset.k] = c.checked);
   const r = await api('/api/upd/build', {path: $('#updpath').value.trim(), mode: UPD.wave,
     pads: $('#updpads').checked, versions: false, ack,
+    banner: ($('#updver').value || '1.16').trim(),
     extras: $$('.updx').filter(c => c.checked && !c.disabled).map(c => c.dataset.x)});
   if (r) { toast('Building + boot-testing — about 5 minutes.'); watch(); }
 };
@@ -1052,6 +1086,36 @@ function wopts() {
   if (MOD.wave === 'custom') return {style: 'custom', custom: MOD.custom};
   return {style: MOD.wave};
 }
+// A failed render used to leave a black box with a broken-image icon and no
+// hint at all. Fetch the image so the server's own message ("Firmware not set
+// up yet...") can be shown in its place.
+let PV_N = 0;
+async function previewImg(url) {
+  const my = ++PV_N;
+  const msg = m => { const el = $('#pmsg'); if (!el) return;
+                     el.hidden = !m; el.textContent = m || '';
+                     if (m) $('#pimg').removeAttribute('src'); };
+  const slow = setTimeout(() => {
+    if (my === PV_N && !$('#pimg').getAttribute('src'))
+      msg('Rendering the deck screen… the first one reads your library.');
+  }, 700);
+  try {
+    const r = await fetch(url);
+    if (my !== PV_N) return;
+    if (!r.ok) {
+      let m = `Preview failed (${r.status}).`;
+      try { m = (await r.json()).error || m; } catch (_) {}
+      return msg(m);
+    }
+    const blob = await r.blob();
+    if (my !== PV_N) return;
+    msg('');
+    $('#pimg').src = URL.createObjectURL(blob);
+  } catch (e) {
+    if (my === PV_N) msg('Studio is not responding.');
+  } finally { clearTimeout(slow); }
+}
+
 function preview() {
   if (TAB !== 'builder') return;
   SL.forEach(k => $('#o-' + k).textContent = k === 'hue' ? Math.round($('#' + k).value) + '°' : (+$('#' + k).value).toFixed(2));
@@ -1065,7 +1129,7 @@ function preview() {
     const p = MOD.theme === 'stock' ? {hue: 'stock'} : spec();
     const q = {...p, ...wopts(), screen: pscreen, wave: 0, track: CUR || ''};
     if (MOD.lit) q.lit = MOD.lit;
-    $('#pimg').src = '/api/preview?' + new URLSearchParams(q);
+    previewImg('/api/preview?' + new URLSearchParams(q));
     const t = CUR && track(CUR);
     $('#ptrack').textContent = t ? t.title : 'Pick a track in Track Builder to preview its waveforms';
   }, 90);
@@ -1276,7 +1340,7 @@ function render() {
   if (FILTER === 'vers') {
     const sf = LIB.stems_files || [];
     const rowsH = sf.map(v => `<div class="tr" style="grid-template-columns:minmax(0,2fr) 90px minmax(0,2fr)"><span class="t">${esc(v.path.split('/').pop())}</span>
-      <span class="tag ok"><i></i>stems</span><span class="t dim">${v.mb} MB · BROWSE › FOLDER</span></div>`).join('')
+      <span class="tag ok"><i></i>stems</span><span class="t dim">${v.mb} MB · replaces the track</span></div>`).join('')
       + LIB.versions.map(v => `<div class="tr" style="grid-template-columns:minmax(0,2fr) 90px minmax(0,2fr)"><span class="t">${esc(v.path.split('/').pop())}</span>
       <span class="dim">stems</span><span class="t dim">${v.names.versions.map(esc).join(', ')}</span></div>`).join('');
     $('#list').innerHTML = rowsH || '<div class="empty">No stems files yet. Select tracks, then choose Make stems.</div>';
@@ -1343,7 +1407,57 @@ $('#audio').ontimeupdate = () => {
 $('#wfs').onclick = e => { const img = e.target.closest('img'), a = $('#audio'); if (!img || !a.duration) return;
   const r = img.getBoundingClientRect(); a.currentTime = a.duration * (e.clientX - r.left) / r.width; };
 
+/* hot cues A-H: written into the track's own analysis file, so the deck
+   shows all eight the next time the track loads (no deck needed to set them) */
+const fmtMs = ms => `${Math.floor(ms / 60000)}:${String(Math.floor(ms / 1000) % 60).padStart(2, '0')}.${String(ms % 1000).padStart(3, '0')}`;
+function parseMs(s) {
+  s = String(s).trim(); if (!s) return null;
+  const m = s.match(/^(?:(\d+):)?(\d+)(?:\.(\d{1,3}))?$/);
+  if (!m) return NaN;
+  return ((+m[1] || 0) * 60 + +m[2]) * 1000 + +String(m[3] || '0').padEnd(3, '0');
+}
+async function cuesDlg() {
+  if (!CUR) return toast('Pick a track first.');
+  const t = track(CUR); if (!t) return;
+  const r = await api('/api/cues?path=' + encodeURIComponent(t.audio)); if (!r) return;
+  const L = 'ABCDEFGH';
+  const extra = '<div class="stack" style="gap:6px;margin:10px 0">' + [...Array(8)].map((_, i) => {
+    const n = i + 1, ms = r.cues[n];
+    return `<div class="row" style="gap:8px"><span class="num" style="width:16px">${L[i]}</span>
+      <input class="field" data-n="${n}" value="${ms != null ? fmtMs(ms) : ''}" placeholder="empty = no cue" style="width:120px" autocomplete="off">
+      <button class="btn sm quiet" data-at="${n}">use playhead</button></div>`;
+  }).join('') + `</div><div class="small faint">Times are m:ss.mmm. An empty row deletes that cue. The deck reads these when it loads the track: eject and load it again after saving.</div>`;
+  const p = ask(`Hot cues — ${t.title}`, '', 'Save cues', extra);
+  $$('#dextra [data-at]').forEach(b => b.onclick = () => {
+    const a = $('#audio'), i = $(`#dextra input[data-n="${b.dataset.at}"]`);
+    if (!a.duration) return toast('Load the track in the player first.');
+    i.value = fmtMs(Math.round(a.currentTime * 1000));
+  });
+  if (!(await p)) return;
+  const cues = {}, clear = [];
+  for (const i of $$('#dextra input[data-n]')) {
+    const n = +i.dataset.n, ms = parseMs(i.value);
+    if (ms === null) { if (r.cues[n] != null) clear.push(n); continue; }
+    if (Number.isNaN(ms)) return toast('Times look like 1:23.456 (m:ss.mmm).', true);
+    cues[n] = ms;
+  }
+  const res = await api('/api/cues', {path: t.audio, cues, clear});
+  if (res) { toast(`${Object.keys(res.cues).length} hot cue(s) on this track.`); load(); }
+}
+$('#icues').onclick = cuesDlg;
+
 const do3 = dirs => { if (!dirs.length) return toast('Pick a track first.'); api('/api/3band', {dirs}).then(r => r && watch()); };
+$('#fshow').onclick = () => { $('#filtercard').hidden = !$('#filtercard').hidden; };
+$('#ffilter').onclick = () => {
+  const body = {bpm: $('#fbpm').value.trim(), key: $('#fkey').value.trim(),
+                colour: $('#fcolour').value.trim(), search: $('#fsearch').value.trim(),
+                rating: $('#frating').value};
+  if (!body.bpm && !body.key && !body.colour && !body.search && !body.rating)
+    return toast('Fill in at least one filter.');
+  api('/api/filter/playlists', body).then(r => r && (toast('Writing the playlist onto your stick…'), watch()));
+};
+$('#fpresets').onclick = () => api('/api/filter/playlists', {presets: true, folder: 'FILTERS'})
+  .then(r => r && (toast('Writing the filter set onto your stick…'), watch()));
 $('#fixall').onclick = () => api('/api/3band', {}).then(r => r && watch());
 $('#b3').onclick = () => do3(chosen()); $('#i3').onclick = () => do3(CUR ? [CUR] : []);
 
@@ -1354,7 +1468,7 @@ async function kdlg(dirs) {
   const mins = dirs.reduce((s, d) => s + ((track(d)?.duration) || 0), 0) / 60;
   const rep = dirs.filter(d => track(d)?.can_replace).length;
   const extra = `<div class="small" style="margin-top:6px">The track is replaced by its stems version under the same name, so it stays in ARTIST / TRACK with its cues. The original is kept next to it as a backup.</div>
-      <div class="small faint" style="margin-top:4px">${rep < dirs.length ? `${dirs.length - rep} MP3/M4A track${dirs.length - rep > 1 ? 's' : ''} aren't replaced in 1.0: ${dirs.length - rep > 1 ? 'they go' : 'it goes'} next to the original, under BROWSE › FOLDER (in-place replacement is planned for 1.1).` : ''}</div>
+      <div class="small faint" style="margin-top:4px">${rep < dirs.length ? `${dirs.length - rep} MP3/M4A/FLAC track${dirs.length - rep > 1 ? 's' : ''} ${dirs.length - rep > 1 ? 'are' : 'is'} replaced in place as WAV or AIFF, keeping cues and waveform (the original is kept as .pre-stems).` : ''}</div>
       <div class="est" id="dxest"></div>`;
   const est = () => { const t = 0.8 + mins * 0.45;
       return `≈ <b>${Math.round(mins * 52)} MB</b> on the stick for ${mins.toFixed(1)} min of audio · about <b>${t < 1 ? '1 min' : Math.round(t) + ' min'}</b>${dirs.length > 1 ? ` (${dirs.length} tracks)` : ''}`; };

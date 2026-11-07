@@ -33,11 +33,15 @@ MAGIC = 0x08000118
 def main():
     code = assemble(SRC)
     print(f"assembled {len(code)} bytes:", code.hex(" "))
-    m = Machine.load(sys.argv[1] if len(sys.argv) > 1 else
-                     "/root/emu-ckpt/emu_clean3.pkl", core="py")
     import os
+    # was a hardcoded /root/... path and a dead duplicate load: take the
+    # argument, fall back to ~/emu-ckpt, and say what is missing
     ckpt = sys.argv[1] if len(sys.argv) > 1 else \
         os.path.expanduser("~/emu-ckpt/emu_clean3.pkl")
+    if not os.path.exists(ckpt):
+        raise SystemExit(f"no emulator snapshot at {ckpt}: pass one as the "
+                         "first argument (Studio builds one from your "
+                         "firmware file)")
     m = Machine.load(ckpt, core="py")
     c, mem = m.cpu, m.mem
     for i, b in enumerate(code):

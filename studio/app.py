@@ -705,10 +705,11 @@ def j_stems(log, prog, audio, keys=(), quality="opus", replace=True):
                     "lists; PERFORM > STEMS mutes vocals / drums / bass / other")
             else:
                 log(f"done: {os.path.basename(out)}  ({size:.0f} MB) -- it sits "
-                    "next to the original, but the deck cannot be relied on to "
-                    "show it: on 1.15 the BROWSE > FOLDER row is drawn and the "
-                    "knob does not open it (emulator 2026-11-07, reported on a "
-                    "deck), and SEARCH only covers the rekordbox database. "
+                    "next to the original. BROWSE > FOLDER opens on the deck "
+                    "(checked on hardware 2026-11-07) but lists only folders at "
+                    "the root of the stick, not the Contents folder the track "
+                    "is in, and SEARCH only covers the rekordbox database, so "
+                    "it cannot be reached there. "
                     "Run this again with Replacement on to keep the track in "
                     "ARTIST / TRACK. "
                     + ("Replacement is switched off. " if not replace else "")

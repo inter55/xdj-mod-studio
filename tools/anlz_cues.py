@@ -109,6 +109,39 @@ def write_cues(path, cues):
     return have
 
 
+def _cue_section(tag, cues):
+    """The PCOB (DAT) / PCO2 (EXT) section holding {n: ms}."""
+    if tag == b"PCOB":
+        ents = b"".join(pcpt(n, cues[n]) for n in sorted(cues))
+        return (b"PCOB" + struct.pack(">II", 0x18, 0x18 + len(ents)) +
+                struct.pack(">IHHI", 1, 0, len(cues), 0xFFFFFFFF) + ents)
+    ents = b"".join(pcp2(n, cues[n]) for n in sorted(cues))
+    return (b"PCO2" + struct.pack(">II", 0x14, 0x14 + len(ents)) +
+            struct.pack(">IHH", 1, len(cues), 0) + ents)
+
+
+def clear_cues(path, nums):
+    """Remove cues 1..8 (A..H) from the file; returns {n: ms} that remain.
+    Every other section is copied byte for byte, like write_cues."""
+    b = open(path, "rb").read()
+    head, secs = sections(b)
+    drop = {int(n) for n in nums}
+    keep = {n: ms for n, ms in read_cues(b).items() if n not in drop}
+    out = bytearray(head)
+    touched = 0
+    for tag, sec, typ in secs:
+        if tag in TAGS and typ == 1:
+            out += _cue_section(tag, keep)
+            touched += 1
+        else:
+            out += sec
+    if not touched:
+        return keep
+    struct.pack_into(">I", out, 8, len(out))
+    open(path, "wb").write(out)
+    return keep
+
+
 def main(argv):
     if len(argv) < 3:
         print(__doc__)
@@ -129,27 +162,8 @@ def main(argv):
             print(f, "->", write_cues(f, cues))
         return 0
     if cmd == "clear":
-        cues = {int(n): None for n in spec.split(",")}
         for f in files:
-            b = open(f, "rb").read()
-            cur = read_cues(b)
-            keep = {n: ms for n, ms in cur.items() if n not in cues}
-            head, secs = sections(b)
-            out = bytearray(head)
-            for tag, sec, typ in secs:
-                if tag in TAGS and typ == 1:
-                    if tag == b"PCOB":
-                        ents = b"".join(pcpt(n, keep[n]) for n in sorted(keep))
-                        sec = (b"PCOB" + struct.pack(">II", 0x18, 0x18 + len(ents)) +
-                               struct.pack(">IHHI", 1, 0, len(keep), 0xFFFFFFFF) + ents)
-                    else:
-                        ents = b"".join(pcp2(n, keep[n]) for n in sorted(keep))
-                        sec = (b"PCO2" + struct.pack(">II", 0x14, 0x14 + len(ents)) +
-                               struct.pack(">IHH", 1, len(keep), 0) + ents)
-                out += sec
-            struct.pack_into(">I", out, 8, len(out))
-            open(f, "wb").write(out)
-            print(f, "->", keep)
+            print(f, "->", clear_cues(f, [int(n) for n in spec.split(",")]))
         return 0
     print(__doc__)
     return 2

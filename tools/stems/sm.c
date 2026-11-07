@@ -281,7 +281,11 @@ static void vre_remix(u32 vs, u32 rel, u32 fp)
 #define BLKF      588u                 /* frames per block                 */
 #define PLAYBLK   0x11837CCCu
 #define DR_BUDGET 24u                   /* blocks per read call (slow path, before the poll runs) */
-#define DR_CATCH  128u                  /* blocks per poll while a backlog is cleared           */
+#define DR_CATCH  48u                   /* blocks per poll while catching up: 128 at a far
+                                         * aim starved the audio path (deck, 2026-11-06) */
+#define DR_AIM    1200u                 /* aim this far past the playhead: ~16 s, inside the
+                                         * chip's ~28 s store but clear of the slots it is
+                                         * still decoding (writing those made the deck stutter) */
 #define DR_KEEP   4u                    /* blocks per poll once caught up (28 polls x 4 > 75/s) */
 #define MAXAHEAD  2400u                 /* never aim more than 32 s past the playhead           */
 #define DR_GAP    8u                    /* missing blocks in a row = the decoded frontier        */
@@ -454,8 +458,14 @@ static void dr_run(u32 fp, u32 budget)
     /* a jump back leaves rfront far in the future: never chase blocks the
      * chip has not decoded (the old code stalled there and mutes went to
      * stale copies -- the deck's ~30 s) */
-    if (dr_end > p + MAXAHEAD) dr_end = p + MAXAHEAD;
-    u32 done = 0, miss = 0;
+    /* A bounded aim, not the store's limit: aiming at p + MAXAHEAD (32 s) made the
+ * deck stutter, glitch its waveform and then stop muting at all -- drlastb
+ * 4644 while drlastp was 2245 says it was writing slots the decoder had not
+ * finished with. DR_AIM keeps the pass inside decoded audio and still covers
+ * what the chip plays for the next ~16 s; the blocks at the playhead are
+ * written first, in the first poll, which is what "instant" needs. */
+    dr_end = p + DR_AIM;
+u32 done = 0, miss = 0;
     while (done < budget && miss < DR_GAP) {
         if (dr_next >= dr_end) { dr_on = 0; break; }
         sm_drlastb = dr_next;

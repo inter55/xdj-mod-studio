@@ -48,8 +48,10 @@ waveforms, beat jump up to 64, 8 hot cues, live stems, key shift, Touch FX
    flash, and switching the deck off puts it back to stock; the app offers
    to reinstall when you plug the deck back in.
 3. **UPD file.** Builds a proper firmware update with the mods baked in, so
-   they survive a power cycle. It is a real flash: it can brick the deck and
-   the way back is the official 1.15 file.
+   they survive a power cycle. It is a real flash: it can brick the deck. To
+   go back to stock use the app's **Back to stock** build (a stock file
+   numbered higher than the deck reports); the official 1.15 file can be
+   refused as an older version once a modded file is installed.
 
 ## What the mods do
 
@@ -121,7 +123,7 @@ Not in this build, and not promised:
 - **Faster stem mutes.** A mute that lands in under a second instead of the
   current ~30 s, by rewriting the audio the deck has already buffered. Works
   in the emulator; nobody has heard it on a deck yet.
-- **MP3 / M4A stems that replace the track in place**, so they stop being a
+- **MP3 / M4A / FLAC stems that replace the track in place**, so they stop being a
   second file under BROWSE › FOLDER and keep the cues and playlist slot the
   way WAV/AIFF do now.
 - **The track filter**, ported from the XDJ-1000MK2's browse menu.

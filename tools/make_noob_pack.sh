@@ -55,6 +55,7 @@ when done, don't share it.
 EOF
 cp /tmp/TESTER_ONEPAGE.txt "$APP/../TESTER_ONEPAGE.txt"
 OUT="$PWD/dist/XDJ700-noob.zip"
-rm -f "$OUT"
-(cd dist && zip -qry "$OUT" "XDJ Mod Studio.app" TESTER_ONEPAGE.txt)
+# the 1.0.1 lesson: `zip -r` adds AppleDouble sidecars and a stale seal makes
+# macOS call the app damaged. This strips them, re-seals and proves the archive.
+sh tools/make_app_zip.sh "$APP" "$OUT" "dist/TESTER_ONEPAGE.txt"
 echo "noob pack: $OUT ($(du -h "$OUT" | cut -f1))"

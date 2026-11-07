@@ -66,7 +66,8 @@ whenever they're needed.
   LINK-loaded track (same re-entrancy family as the LINK report), a format
   we haven't run (AAC/M4A), tempo far from 0 + big shift.
 - 3 hot cues only: asked whether tracks have D-H + install log. The
-  8-pad grid prototype (docs/HOTCUE8_GRID.md) = "display all 8" if wanted.
+  8-pad grid (docs/HOTCUE8_GRID.md) is now integrated into the hotcue8 module
+  (2026-11-07): tap the HOT CUE tab and all eight show at once.
 - RGB on one player: asked for MY SETTINGS state + same-version installs.
 - "N key toggles Quantize on the BEAT JUMP tab": QUANTIZE = zone 20
   (642,232) handler KEY+91 bit 0x80; our pads end x 615 and the emu shows
@@ -144,7 +145,23 @@ whenever they're needed.
 ## Next 0.9.x: fixes from the user's deck session
 - Install from the DOWNLOADED app on the real deck; check: phase meter,
   8 hot cues (Reddit: "didn't work"), faster stem mute, BEAT JUMP 32/64,
-  vinyl brake length, FLAC/Opus, new USB reads, reinstall prompt.
+  Opus, new USB reads, reinstall prompt.
+- **CONFIRMED 2026-11-06 by the user, on the deck (1.15):** vinyl brake
+  length changes the stop as chosen, and a FLAC file lists, loads and plays
+  in the deck's own decoder (the 2026-10-25 freeze does not come back). Both
+  moved out of the "emulator only" list in README, the site and this file.
+  Opus was NOT tested and stays unproven -- it shares the FLAC layer but that
+  is an argument, not a result.
+- **CONFIRMED 2026-11-06 as well (same Reddit feedback):** 8 hot cues work
+  (pages A-C / D-F / G-H, setting one from an empty pad works), and the phase
+  meter works, master row included (two decks linked). NEW BEHAVIOUR from the
+  same message: "wischen geht nicht, man muss tippen" -- hot cue swiping does
+  not page on the deck even though the code path exists; tapping the HOT CUE
+  tab is the route that works. **User question 2026-11-06: can swipe be done
+  for 1.1?** Yes -- it is not missing code: perform_pads already carries the
+  tab swipe unit (PSW: down-x, pending code 52) and tools/hotcue8_test.py
+  pages both ways in the emulator. What is missing is a deck diagnosis, so it
+  is a 1.1 candidate rather than a promise.
 - Fix what breaks; plus Windows tester reports (first full Windows install).
 - Open Reddit report: "reverted when I played a song" (waiting on details).
 
@@ -277,7 +294,8 @@ file, TOUCH FX, OneLibrary in-app, track filter, Windows out of beta.
   gain change inside the chip DSP (where the TOUCH FX engine runs); the read
   path cannot beat the buffer.
 - 8 hot cues settable on the deck (own storage on the stick).
-- Phase meter master row (second linked deck).
+- Phase meter master row (second linked deck): **DONE, proven working on
+  two linked decks (user, 2026-11-06).**
 - USB-stick install mode: usbloader flashed once via the UPD + a "mods
   pack" builder. One-time flash approved "if u can guarantee it works":
   exhaustive emulator proof, recovery path written down first, careful
@@ -314,16 +332,59 @@ file, TOUCH FX, OneLibrary in-app, track filter, Windows out of beta.
   (beta)". Echo / Pitch / Flanger / Roll / Reverb buttons are drawn but
   inert ("COMING SOON"). CLAUDE.md sec. 148.
 - Waveform colours that follow the theme (deck side).
-- Windows out of beta (after a successful Windows install by a person).
+- ~~Windows out of beta~~ **DONE 2026-11-06**: same source as the Mac app, the
+  same checks on every build, and real-deck installs from Windows; issue #1's
+  PERFORM pads `AssertionError: 2802` (a system-font size difference) was
+  fixed in 0.9.6 and its follow-up crash in 0.9.7.
 - OneLibrary converter (exportLibrary.db -> export.pdb).
 - MAYBE: track filter (lead DISPROVEN 2026-11-04, see the research note
   under "1.1 and later"), custom home screen (if possible).
 - Refreshed site + README.
 
 ## 1.1 and later (ideas)
+
+**The 1.1 plan lives in `docs/V1_1_PLAN.md` (started 2026-11-06).** It organises
+1.1 into four waves: ship what is already emulator-passed (Echo, Flanger, faster
+stem mute, Opus, saving hot cues, stems replace, hot cue swipe, filter
+playlists, 8-pad grid, light theme), finish Touch FX (Pitch, Roll, Reverb if it
+fits), one real USB-stick-loader flash with a written recovery path, then the
+research items below (track filter, RGB over Link, theme-matched waveform,
+faster emulator). Each feature needs an emulator gate, a dated deck result,
+matching wording in README/site/Reddit, and a release-note line.
 Priority (2026-11-04, from the user): **track filter first** -- the most-
 requested item -- then the rest of Touch FX in the roadmap's own order:
 Echo, Pitch, Flanger, Roll, Reverb.
+- **Echo memory, measured twice 2026-11-05 (emulator, no deck):** the
+  survey's "~101 KB free at 0xC0045900" is WRONG -- 97,308 of those 105,408
+  bytes are in use (`tools/dsp_map.py`). The first replacement it found,
+  `0xC0062000` (66,562 B), is ALSO in use: with MASTER TEMPO on it fills
+  with the audio path's own samples (2,059 non-zero words in its first
+  16 KB with our effect OFF). The block that stays byte-zero through
+  playback is `0xC0073400..0xC0080000` = 52,224 B. Flanger (8.8 KB), Echo
+  (147 ms max) and Roll (44 KB) fit there; Reverb (50-65 KB) does not.
+  Left: one deck read confirming that range is zero on hardware -- DONE
+  2026-11-05: it is NOT zero. The deck holds data through the whole block
+  (13,056/13,056 words) and 127 of 128 pages of 0xC0000000..+2 MB; only
+  0xC006C000..0xC0070000 is empty. Echo must not use that buffer. See
+  docs/TOUCHFX_MEMORY_SURVEY.md ("Deck result 2026-11-05").
+- **Echo BUILT 2026-11-05, emulator-passed:** effect 3 in
+  `tools/fx_dsp/fx.c` (delay 20..147 ms, feedback, DEPTH), line at
+  `0xC0073400`, panel button live in `tools/touchfx/tfx.c` (4 of 8).
+  Gate: `EFF=echo X=40 Y=120 DEPTH=255 tools/fx_dsp_emu.py` -> delayed copy
+  at 1763 frames exactly (corr 0.92), 2nd repeat 0.43 vs feedback 0.35,
+  play position unchanged (317 -> 317 blocks). Not yet on a deck.
+- **Flanger BUILT 2026-11-05, emulator-passed:** effect 4, same ring as
+  Echo (base 3 ms swept 0..2 ms by a triangle LFO, X = rate 0.05..4 Hz,
+  Y = depth, DEPTH = mix, linear interpolation so it does not zip), 5 of 8
+  panel buttons live. Gate: `EFF=flanger X=60 Y=200 DEPTH=255` -> best lag
+  per quarter 174/193/176/152 frames inside the 132..220 window (41-frame
+  sweep), corr 0.86..0.89, play position unchanged. Not yet on a deck.
+- **Engine window is 2,496 B, and it is tight.** Code + state must end by
+  `0xC0060000` (the key-shift cos table). A first Flanger build made the
+  binary 2,624 B, the state crossed the table and the audio path died after
+  44 blocks -- `tools/fx_dsp/build.sh` now REFUSES over-budget builds. The FX
+  installer zeroes `ZSTATE=0x180` (struct is 0x148); key shift keeps the
+  stock 0x260. Echo and Flanger share one delay routine to stay inside it.
 - **Track filter research, 2026-11-04: the RBFLTR.DAT lead is dead.** The
   decoded stock image (18,601,864 bytes) contains zero occurrences of
   `FILTER`, `FLTR` or `RBFLTR`, so the deck never had a filter reader to
@@ -348,32 +409,75 @@ Echo, Pitch, Flanger, Roll, Reverb.
   with the pm.c precedent for HOW: read the 1000's path, write our own on
   the 700's plumbing; we do not transplant Pioneer bytes (copyright, and
   their code is bound to their own screen tables and absolute addresses).
-  First step: xref the `DISPCMD FILTER` tags in MAIN1000.img (code pointers
-  use the 0x08 window, data the 0xA8 window) to find the three routines --
-  category state, parameter edit, apply -- then mirror them.
+  First step: xref the `DISPCMD FILTER` tags in MAIN1000.img to find the three
+  routines -- category state, parameter edit, apply -- then mirror them.
+  `tools/filter_scan.py` now indexes all 15 tags (0 in the 700 image, which
+  confirms the gap); `docs/TRACK_FILTER_1.1.md` records where that stops: the
+  1000 image has no absolute pointers to those strings and its block framing
+  is not the 700's, so the load base has to be found before the routines can
+  be named.
   Fastest route to the same user outcome (no deck work at all): write
   filtered playlists
   (BPM band, key, colour, rating, my-tag) into `export.pdb` -- the writer in
   `tools/onelibrary_to_pdb.py` already carries playlists, BPM, key, colour,
   rating and my-tag ids, and the deck shows them natively under PLAYLIST.
-- **MP3 / M4A stems replace the track in place (1.1).** 1.0 replaces WAV /
-  AIFF by writing the mix plus four raw 16-bit planes into one RIFF/AIFF file
-  (`tools/stems4.py`, `xst4` chunk + `XST4` trailer) and having
-  `tools/stems/sm.c` sum the planes when the media server reads the mix's
-  sample data. That cannot be reused as-is for MP3/M4A: the bytes at the
-  trailer's offsets are compressed frames, not PCM, and the deck picks its
-  decoder from the extension, so a WAV under a `.mp3` name never loads.
-  Two routes, in order of preference:
-  1. hook the decoded stream for those codecs (a read path below the MP3/AAC
-     decoder, the way the FLAC work already finds decoded audio), and keep
-     the four planes raw inside the container (ID3v2 frame for MP3, `uuid`
-     atom for M4A) with the same relative offsets `sm.c` uses today;
-  2. transcode to WAV/AIFF and rewrite the rekordbox row for that track
-     (`tools/onelibrary_to_pdb.py` already writes the database) so cues, grid
-     and waveform follow the new file. No DSP work, but it edits the user's
-     library, so it ships with a backup and a dry run.
-  Both need the same guardrails as the 1.0 path: original kept as
-  `.pre-stems`, and the first run on a copy of a stick.
+  **BUILT 2026-11-05: `tools/filter_playlists.py`** -- BPM band / key /
+  colour / genre / minimum rating / text search, optional folder and sort,
+  surgical append to the playlist tables, backup + read-back verification.
+  Test: `tools/filter_playlists_test.py` (20 checks, synthetic library).
+  `--presets` writes the whole folder in one pass -- BPM thirds worked out
+  from the library itself, 4+/5 stars, the keys with 3+ tracks -- and is
+  idempotent on a re-run; Studio has it as "Make the whole set".
+  OneLibrary sticks go through `onelibrary_to_pdb.py` first (the tool says
+  so). My-tag filters wait for an `exportExt.pdb` writer.
+- **MP3 / M4A / FLAC stems replace the track in place (1.1): works.**
+  The blocker was never the audio bytes -- it is that the deck finds the
+  analysis (cues, grid, waveform) by hashing the *audio path* into
+  `/PIONEER/USBANLZ/P{XXX}/{YYYYYYYY}`, so a renamed file silently loses it.
+  That hash is solved and checked against the three folders rekordbox itself
+  wrote for the tracks on the dev stick (3/3):
+  `h = 0; for c in path: h = (h*0x5BC9 + c) & 0xFFFFFFFF; h = (h*0x93B5 + c)
+  & 0xFFFFFFFF`, then `r = h % 200003`, `XXX` = seven scattered bits of `r`
+  (`r>>0, >>1, >>4, >>4, >>5, >>8, >>10` against masks 1,2,4,8,16,32,64) and
+  `YYYYYYYY = r`. Recovered from `CreateAnlzFileFolderPath()` (shared by
+  morizkraemer/fourfour's pioneer-usb-writer notes).
+  `tools/stems_replace.py` now does the whole swap on a stick: builds the
+  STEMS-4 WAV, byte-patches the PDB track row (filename, file_path,
+  analyze_path, file_type, size, rate, bitrate, depth, duration -- every
+  string is the same length, so no row moves and no page bookkeeping), rewrites
+  each ANLZ file's PPTH tag (UTF-16BE **plus a mandatory NUL**; without it the
+  deck finds the file, rejects it and re-analyses into `ANLZ0001.DAT`), moves
+  the folder to the new hash, keeps the original as `.pre-stems` and backs the
+  PDB up to `export.pdb.bak-pre-stems`. `selftest` passes end to end on a copy
+  of the dev stick (row says `.wav`, file_type 11, analysis folder moved, PPTH
+  matches, cue container untouched, original kept).
+  Wired in: Make stems replaces MP3 / M4A / FLAC in place -- MP3 and M4A
+  become WAV, FLAC becomes AIFF (both keep the name's length, which the
+  library row needs). The WAV / AIFF path is
+  untouched, and a switch-off still writes the sidecar). Still open: play a
+  replaced MP3 on a real deck and confirm waveform + hot cues (the only thing
+  software cannot prove), and decide what to do about `exportLibrary.db`
+  (OneLibrary sticks) -- the 700 reads `export.pdb`, so the tool refuses those
+  unless told otherwise.
+- **RGB waveform over Pro DJ Link (Reddit request 2026-11-06: "RGB waveform
+  uber pro link ware eine gute Verbesserung").** Today the colours only draw
+  on the deck holding the USB stick; a deck that loads the track over Link
+  never sees the ANLZ data the RGB modules read, so it stays stock blue. This
+  is the same media-API dispatch the LINK re-entrancy work above maps (type 4
+  reader 0x08C95760 is the likely linked-track path), so it is a follow-on to
+  that investigation, not a separate project. Colour data would have to be
+  served to the peer over the link, or the peer's own copy used.
+- **Hot cue paging by swipe: 1.1 candidate** (user, 2026-11-06). CHANGED in
+  the emulator the same day: the tab's swipe gate in perform_pads HCSW was
+  hard-coded at 40 px while the strip is only TAB_W=92 px wide, so a drag
+  rarely fit inside it -- now 24 px (cmp/gt, so 24 exactly does not fire).
+  tools/hotcue8_test.py gained two checks at the end of its run: a 32-px drag
+  pages in both directions and an 8-px wobble still counts as a TAP -- PASS,
+  and every older paging/tap/wrap leg still passes. Still unproven: the deck,
+  where the other suspect is that the touch leaves the tab zone mid-drag and
+  the move events stop (tools/bj_monitor.py prints latch / pending code /
+  swiped / downx live for that). UI only -- no DSP, no new memory, nothing
+  flashed; rollback copy of the pre-swipe file is perform_pads.py.pre-hcswipe.
 - Track filter (if it missed 1.0).
 - Waveform preview next to track names in BROWSE (Reddit request; data is
   on the stick). Audio preview in the browser: unlikely (one playback path).

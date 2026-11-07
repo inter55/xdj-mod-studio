@@ -458,6 +458,44 @@ def emu():
             mem.w32(e + o_, v_)
         mem.w32(ix, n_ + 1)
         p7 = sec
+    if os.environ.get("NOFAKE") == "1":
+        # Gallery capture: same installation and same point in the load flow
+        # as the verified run, but WITHOUT detail_fake and without wrecking
+        # the live index -- so the centre shows the loaded track's own PWV5,
+        # which is the only kind of picture worth putting on the site.
+        c.run(limit=int(os.environ.get("STEPS", "20000000")))
+        if os.environ.get("PLAY") == "1":
+            # A paused deck at position 0 paints no detail column in the
+            # emulator (verified: the centre stays black even when the
+            # track's own PWV5 is in RAM). Press play and let it run, so the
+            # shot shows a waveform the deck really drew.
+            mem.dev.panel_frame = panl.build_frame(keys=["PlayPause"])
+            c.run(limit=3_000_000)
+            mem.dev.panel_frame = panl.build_frame()
+            c.run(limit=int(os.environ.get("PLAY_STEPS", "80000000")))
+        th = os.environ.get("THEME")
+        if th:                      # theme words + redraw, as theme_shot.py
+            import numpy as np
+            import theme_deck as TD
+            w = TD.stock_words()
+            before = np.frombuffer(bytes(mem.ram0[:len(w) * 2]), "<u2").copy()
+            regions, src, dst, new = TD.theme_tables(th, w)
+            want = new != w
+            still = (before == w) & want
+            arr = before.copy()
+            arr[still] = new[still]
+            mem.ram0[:len(w) * 2] = arr.tobytes()
+            print(f"theme {th}: {int(still.sum()):,}/{int(want.sum()):,} words")
+            for _ in range(2):
+                mem.dev.panel_frame = panl.build_frame(keys=["Browse"])
+                c.run(limit=3_000_000)
+                mem.dev.panel_frame = panl.build_frame()
+                c.run(limit=30_000_000)
+        out = (f"screenshots/centre_{wmode}_nofake.png" if not th
+               else f"screenshots/centre_{wmode}_{th}.png")
+        fb_png(m, out)
+        print(f"NOFAKE capture ({wmode}) -> {out}")
+        return 0
     DF.install(m, ext, int(os.environ.get("POS", "3000")))
     seen, bad = {}, 0
     tbl = syms["cw_tbl"]

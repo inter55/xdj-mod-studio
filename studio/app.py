@@ -95,7 +95,7 @@ UIHTML = os.path.join(BUNDLE, "studio", "ui.html") if FROZEN else os.path.join(H
 
 APP_SUPPORT = app_support_dir()
 # the app's own release number (GitHub release tag v<APP_VERSION>)
-APP_VERSION = "1.0"
+APP_VERSION = "1.0.2"
 RELEASES_API = "https://api.github.com/repos/inter55/xdj-mod-studio/releases/latest"
 RELEASES_PAGE = "https://github.com/inter55/xdj-mod-studio/releases/latest"
 SETTINGS = os.path.join(APP_SUPPORT, "studio.json")
@@ -180,10 +180,14 @@ os.environ.setdefault("XDJ_USB_FAST_OUT", "0")
 # Deck sound (Mac-side audible audio of the track) stays default-on via
 # emu/decksound's own gate.
 os.environ.setdefault("XDJ_HLE_DSP", "1")
+# vendor/ carries the MIT rekordbox-pdb package (stems_replace, filter_playlists,
+# onelibrary_to_pdb); it must be importable from the app, not just a checkout.
 if FROZEN:      # bundled emu/studio win; project tools/mods are data on disk
-    sys.path.extend([os.path.join(ROOT, "tools"), os.path.join(ROOT, "mods")])
+    sys.path.extend([os.path.join(ROOT, "tools"), os.path.join(ROOT, "mods"),
+                     os.path.join(ROOT, "vendor")])
 else:
-    sys.path[:0] = [ROOT, os.path.join(ROOT, "tools"), os.path.join(ROOT, "mods")]
+    sys.path[:0] = [ROOT, os.path.join(ROOT, "tools"), os.path.join(ROOT, "mods"),
+                    os.path.join(ROOT, "vendor")]
 # a checkout of the public repo has no build/ (gitignored): stage the
 # committed prebuilt deck modules once, so deck installs and UPD builds
 # find them wherever the app runs from (packaged apps already carry them)
@@ -381,7 +385,7 @@ def _scan(stick):
     # files written by the studio (not yet analysed by rekordbox):
     # STEMS-4 stems files ("XST4" trailer) and, if any remain from older
     # builds, key/stem VERSION files ("XVTR"). Both load on the deck from
-    # BROWSE > FOLDER next to the original track.
+    # beside the original track; the deck's BROWSE > FOLDER list does not open
     vers, stemsfiles = [], []
     for p in glob.glob(os.path.join(stick, "**", "*"), recursive=True):
         if not p.lower().endswith(AUDIO_EXT):
@@ -582,11 +586,12 @@ STEMS_BACKUP = ".pre-stems"            # original kept as "Track.aiff.pre-stems"
 def can_replace(audio):
     """WAV / AIFF originals can be swapped for their stems file under the
     SAME name: rekordbox's database (and its cues, grid, waveforms) keeps
-    pointing at it, so the deck lists it in ARTIST / TRACK. MP3 / M4A cannot
-    yet: the deck picks the decoder by the file's extension and the planes
-    live in a WAV/AIFF chunk. In-place replacement for those is a 1.1 item
-    (docs/ROADMAP.md has the two routes)."""
-    return os.path.splitext(audio)[1].lower() in (".wav", ".aif", ".aiff")
+    pointing at it, so the deck lists it in ARTIST / TRACK. MP3 / M4A get
+    there a different way: the stems file is written as WAV, and the library
+    row plus its hash-named ANLZ folder move with it (tools/stems_replace.py),
+    so cues and waveform survive the extension change."""
+    return os.path.splitext(audio)[1].lower() in (
+        ".wav", ".aif", ".aiff", ".mp3", ".m4a", ".flac")
 
 
 def drop_id3_chunk(path):
@@ -657,34 +662,57 @@ def j_stems(log, prog, audio, keys=(), quality="opus", replace=True):
         if not os.path.isdir(stem_dir):
             raise RuntimeError("demucs wrote no stems (output folder missing)")
         stems = [os.path.join(stem_dir, f"{s}.wav") for s in ("bass", "drums", "vocals", "other")]
-        out = out_path(audio, "STEMS")
-        # STEMS-4 file: the normal mix + 4 stem planes; on the deck the
-        # PERFORM > STEMS pads mute / solo them live (tools/stems/sm.c)
-        import stems4 as S4
-        S4.build(audio, out, {"bass": stems[0], "drums": stems[1],
-                              "vocals": stems[2], "other": stems[3]},
-                 aiff=out.endswith(".aiff"),
-                 progress=lambda f, n: prog(0.80 + 0.12 * f, n))
-        size = os.path.getsize(out) / 1e6
-        if replace and can_replace(audio):
-            # the original moves aside (same folder, a name the deck never
-            # lists) and the stems file takes its name
-            drop_id3_chunk(out)
-            bak = audio + STEMS_BACKUP
-            if not os.path.exists(bak):
-                os.replace(audio, bak)
-            os.replace(out, audio)
-            log(f"done: {os.path.basename(audio)} is now the stems version "
-                f"({size:.0f} MB; the original is kept as "
-                f"{os.path.basename(bak)}). On the deck it is in the usual "
-                "lists; PERFORM > STEMS mutes vocals / drums / bass / other")
+        stem_map = {"bass": stems[0], "drums": stems[1],
+                    "vocals": stems[2], "other": stems[3]}
+        keep = audio                    # the file the deck plays afterwards
+        if replace and os.path.splitext(audio)[1].lower() in (
+                ".mp3", ".m4a", ".flac"):
+            # 1.1: MP3 / M4A / FLAC are replaced in place too. The stems file
+            # is written as WAV (AIFF for FLAC, so the name keeps its length)
+            # and the library row plus the hash-named ANLZ
+            # folder move with it, so the track keeps its cues and waveform
+            # (tools/stems_replace.py has the hash and the byte layout).
+            prog(0.80, "replacing the track with its stems file")
+            import stems_replace as SR
+            plan = SR.apply(stick_path(),
+                            "/" + os.path.relpath(audio, stick_path()),
+                            stems_dir=stem_dir, yes=True)
+            keep = plan["target"]
+            log(f"done: {os.path.basename(keep)} is now the stems version "
+                f"({os.path.getsize(keep) / 1e6:.0f} MB; the original is kept "
+                f"as {os.path.basename(audio)}{SR.AUDIO_BAK}). It stays in "
+                "ARTIST / TRACK with its cues and waveform; PERFORM > STEMS "
+                "mutes vocals / drums / bass / other")
         else:
-            log(f"done: {os.path.basename(out)}  ({size:.0f} MB) -- on the deck: "
-                "BROWSE > FOLDER (the last category), then the track's folder. "
-                + ("MP3 / M4A tracks are not replaced in 1.0 (the deck reads "
-                   "them by their extension); in-place replacement is planned "
-                   "for 1.1. " if replace else "")
-                + "PERFORM > STEMS then mutes vocals / drums / bass / other")
+            out = out_path(audio, "STEMS")
+            # STEMS-4 file: the normal mix + 4 stem planes; on the deck the
+            # PERFORM > STEMS pads mute / solo them live (tools/stems/sm.c)
+            import stems4 as S4
+            S4.build(audio, out, stem_map, aiff=out.endswith(".aiff"),
+                     progress=lambda f, n: prog(0.80 + 0.12 * f, n))
+            size = os.path.getsize(out) / 1e6
+            if replace and can_replace(audio):
+                # the original moves aside (same folder, a name the deck never
+                # lists) and the stems file takes its name
+                drop_id3_chunk(out)
+                bak = audio + STEMS_BACKUP
+                if not os.path.exists(bak):
+                    os.replace(audio, bak)
+                os.replace(out, audio)
+                log(f"done: {os.path.basename(audio)} is now the stems version "
+                    f"({size:.0f} MB; the original is kept as "
+                    f"{os.path.basename(bak)}). On the deck it is in the usual "
+                    "lists; PERFORM > STEMS mutes vocals / drums / bass / other")
+            else:
+                log(f"done: {os.path.basename(out)}  ({size:.0f} MB) -- it sits "
+                    "next to the original, but the deck cannot be relied on to "
+                    "show it: on 1.15 the BROWSE > FOLDER row is drawn and the "
+                    "knob does not open it (emulator 2026-11-07, reported on a "
+                    "deck), and SEARCH only covers the rekordbox database. "
+                    "Run this again with Replacement on to keep the track in "
+                    "ARTIST / TRACK. "
+                    + ("Replacement is switched off. " if not replace else "")
+                    + "PERFORM > STEMS then mutes vocals / drums / bass / other")
         # X7S sidecar next to the audio (quality choice from the dialog)
         try:
             import x7s as X7
@@ -696,7 +724,7 @@ def j_stems(log, prog, audio, keys=(), quality="opus", replace=True):
                   enumerate(("bass", "drums", "vocals", "other"))}
             data = X7.build(sp, codec=preset[0], bitrate=preset[1],
                             bitrates=preset[2])
-            xp = audio + ".x7s"
+            xp = keep + ".x7s"
             open(xp, "wb").write(data)
             log(f"x7k/x7s sidecar {quality}: {os.path.basename(xp)} "
                 f"({len(data) / 1e6:.1f} MB)")
@@ -830,6 +858,64 @@ def cues_of(*anlz_bytes):
     return len(nums)
 
 
+def _cues_paths(stick, audio):
+    """(folder, files) for a library track's analysis; refuses anything that
+    is not a track inside the library folder."""
+    stick = os.path.realpath(os.path.expanduser(stick or ""))
+    p = os.path.realpath(os.path.expanduser(audio or ""))
+    if not stick or not p.startswith(stick + os.sep):
+        raise ValueError("that track is outside your library folder")
+    d = os.path.dirname(p)
+    files = [f for f in ("ANLZ0000.DAT", "ANLZ0000.EXT")
+             if os.path.isfile(os.path.join(d, f))]
+    if not files:
+        raise ValueError("this track has no analysis file on the stick yet "
+                         "(export it from rekordbox first)")
+    return d, files
+
+
+def cues_read(stick, audio):
+    """The hot cues (A..H = 1..8, ms) the deck will read for this track."""
+    import anlz_cues as AC
+    d, files = _cues_paths(stick, audio)
+    cues = {}
+    for f in files:
+        with open(os.path.join(d, f), "rb") as fh:
+            cues.update(AC.read_cues(fh.read()))
+    return {"cues": {str(n): cues[n] for n in sorted(cues)}, "files": files}
+
+
+def cues_edit(stick, audio, set_cues=None, clear=()):
+    """Write and/or delete hot cues in the track's own analysis file(s).
+    set_cues = {1..8: ms}, clear = [1..8]. Returns the state after the edit.
+
+    Only the hot-cue section is rewritten; the waveforms, beat grid and
+    everything else in the file are copied byte for byte (anlz_cues.py),
+    so this cannot damage a track the deck already plays."""
+    import anlz_cues as AC
+    try:
+        set_cues = {int(k): int(v) for k, v in (set_cues or {}).items()}
+        clear = [int(n) for n in (clear or ())]
+    except (TypeError, ValueError):
+        raise ValueError("cues are numbered 1..8 (A..H), times in milliseconds")
+    for n, ms in set_cues.items():
+        if not 1 <= n <= 8:
+            raise ValueError("cues are numbered 1..8 (A..H)")
+        if not 0 <= ms <= 86_400_000:
+            raise ValueError("that cue time is not a real position")
+    if any(not 1 <= n <= 8 for n in clear):
+        raise ValueError("cues are numbered 1..8 (A..H)")
+    d, files = _cues_paths(stick, audio)
+    for f in files:
+        p = os.path.join(d, f)
+        if clear:
+            AC.clear_cues(p, clear)
+        if set_cues:
+            AC.write_cues(p, set_cues)
+    _SCAN.clear()           # the track list shows the A-H tag from this
+    return cues_read(stick, audio)
+
+
 # ------------------------------------------------------------ waveforms ---
 STOCK_BLUE = 0x6D1E                 # the stock overview colour (emu-sampled)
 _3B_CACHE = os.path.join(WCACHE or os.path.join(ROOT, "cache"), "studio_3band")
@@ -950,7 +1036,21 @@ def demo_track(stick):
     longest audio file. Deterministic. Falls back to any usable track."""
     import make_3band as M3
     tracks = scan(stick)["tracks"]
+    # Reading every track's ANLZ .DAT + .EXT (a few MB each) over USB took
+    # minutes on a 1100-track stick, on EVERY preview. Remember the pick per
+    # library (track count is the cheap "has it changed" key: in memory and
+    # on disk) and stop looking once enough complete tracks have been seen.
+    ck = f"{stick}|{len(tracks)}"
+    hit = _DEMO_CACHE.get(ck)
+    if hit is not None:
+        return hit or None
+    disk = _read_json(DEMO_CACHE_FILE, {})
+    if disk.get("key") == ck and (not disk.get("dir") or os.path.isdir(
+            os.path.join(stick, disk["dir"]))):
+        _DEMO_CACHE[ck] = disk.get("dir") or ""
+        return disk.get("dir") or None
     best = None
+    complete = 0
     for r in tracks:
         if not r["exists"]:
             continue
@@ -973,12 +1073,24 @@ def demo_track(stick):
         key = (score, size)
         if best is None or key > best[0]:
             best = (key, r["dir"])
-    if best:
-        return best[1]
-    for r in tracks:
-        if r["exists"]:
-            return r["dir"]
-    return None
+        if score == 4:
+            complete += 1
+            if complete >= DEMO_CANDIDATES:
+                break
+    out = best[1] if best else next((r["dir"] for r in tracks if r["exists"]), None)
+    _DEMO_CACHE[ck] = out or ""
+    try:
+        os.makedirs(os.path.dirname(DEMO_CACHE_FILE), exist_ok=True)
+        with open(DEMO_CACHE_FILE, "w") as f:
+            json.dump({"key": ck, "dir": out or ""}, f)
+    except OSError:
+        pass
+    return out
+
+
+_DEMO_CACHE = {}
+DEMO_CANDIDATES = 24        # complete tracks to compare before picking
+DEMO_CACHE_FILE = os.path.join(APP_SUPPORT, "cache", "demo_track.json")
 
 
 STOCK_DETAIL = (0x09F1, 0x0AF7, 0x037F, 0x0D5E, 0x55BE, 0x757F, 0x757F, 0xCF3F)
@@ -1161,7 +1273,15 @@ def screens():
         else:
             base = HERE
         from emu import fwhome
-        z = np.load(fwhome.path("screens.npz"))   # user's firmware home
+        p = fwhome.path("screens.npz")             # user's firmware home
+        if not os.path.exists(p):
+            # Without this the page got a raw FileNotFoundError in an <img>
+            # tag: a black panel with a broken-image icon and no hint.
+            raise RuntimeError(
+                "Firmware not set up yet: add the official XDJ-700 v1.15 "
+                "update file on Home (Setup > Firmware > Add) to see the "
+                "theme preview.")
+        z = np.load(p)
         _SCREENS = {k: z[k] for k in z.files}
     return _SCREENS
 
@@ -1513,6 +1633,41 @@ INSTALL_STEPS = [          # sessions per step (mock-deck measured 2026-10-12)
 SESSION_S = 55.0            # per session incl. 30 s cool-down (mock-deck model)
 
 
+def j_filter_playlists(log, prog, opts):
+    """A 1.1 track filter the stock deck can actually show: the 700 has no
+    browse filter in its firmware, but it shows the playlists in the stick's
+    export.pdb (BROWSE > PLAYLIST), so a filter becomes a saved playlist.
+    tools/filter_playlists.py appends the rows, backs the file up and reads
+    the result back with the independent parser before it reports."""
+    stick = settings().get("stick")
+    if not stick or not os.path.isdir(stick):
+        raise RuntimeError("choose your USB stick in Settings first")
+    args = ["tools/filter_playlists.py", stick]
+    if opts.get("presets"):
+        args.append("--presets")
+        if not opts.get("folder"):
+            args += ["--folder", "FILTERS"]
+    for key, flag in (("bpm", "--bpm"), ("key", "--key"),
+                      ("colour", "--colour"), ("genre", "--genre"),
+                      ("rating", "--rating"), ("search", "--search"),
+                      ("limit", "--limit"), ("name", "--name"),
+                      ("folder", "--folder"), ("sort", "--sort")):
+        if opts.get(key):
+            args += [flag, str(opts[key])]
+    if opts.get("dry_run"):
+        args.append("--dry-run")
+    prog(0.15, "Reading the stick's library")
+    rc, txt = run_tool(log, args)
+    if rc:
+        raise RuntimeError("no playlist was written -- see the log above")
+    if opts.get("dry_run"):
+        prog(1.0, "Dry run: nothing was changed")
+        return
+    prog(1.0, "Playlist ready -- on the deck: BROWSE > PLAYLIST")
+    log("The deck needs the stick re-inserted (or a power cycle) to see a "
+        "new playlist. export.pdb was backed up next to it before the write.")
+
+
 def install_args(mode, pads=True, themes=True, liveks=False, stems=True,
                  phase=False, brake=0.0, flac=True, opus=False, touchfx=False):
     """tools/deck_session.py options for a Mods-page selection (the cable
@@ -1633,9 +1788,9 @@ Mod Studio > Mod > File on your USB stick) and loads those mods. A stick
 without that file = a completely stock deck.
 
 FLASHING CAN BRICK A DECK. Mains power, do not touch the deck or the stick
-until the update says it is complete. The way back to stock: flash the
-official XDJ700.UPD v1.15 the same way -- keep that file to hand (the
-same stick will do once you swap it back in).
+until the update says it is complete. The way back to stock is the app's
+Back to stock build (a stock file numbered higher than this one): the
+official v1.15 file may be refused as an older version. Keep both to hand.
 
 If a stick ever makes the deck misbehave, power it off, take the stick out
 and start it again: it comes up stock.
@@ -1782,6 +1937,12 @@ def j_upd_build(log, prog, upd, mode, pads, versions, banner, extras=()):
     if rc or "RESULT: built" not in txt:
         if os.path.exists(out):
             os.remove(out)
+        if "does not fit the flash slot" in txt:
+            raise RuntimeError(
+                "this set of mods does not fit in the update file's free space. "
+                "Leave out the phase meter or 8 hot cues (Touch FX is the "
+                "biggest extra), or use the USB-stick route instead, where "
+                "everything fits. Nothing was written.")
         raise RuntimeError("build refused -- see log (nothing was written)")
     prog(0.35, "Boot-testing it in the emulator (about 4 minutes)", eta=260)
     os.environ.setdefault("XDJ_SHOTS", os.path.join(out_dir, "boot-test"))
@@ -1851,12 +2012,14 @@ def lib_formats(root):
     return n
 
 
-UPD_EXTRAS = ("centre", "phasemeter", "hotcue8", "stems", "keyshift", "utility")  # utility: always baked (1.0)
+UPD_EXTRAS = ("centre", "phasemeter", "hotcue8", "stems", "keyshift", "touchfx",
+              "utility")  # utility: always baked (1.0)
 UPD_EXTRA_NAMES = {"centre": "coloured centre waveform",
                    "phasemeter": "phase meter",
                    "hotcue8": "8 hot cues (HOT CUE tab paging)",
                    "stems": "live stems (STEMS tab)",
                    "keyshift": "live key shift (KEY SHIFT tab, MASTER TEMPO on)",
+                   "touchfx": "Touch FX (X/Y pad: Filter, Crush, Gate)",
                    "utility": "mod settings in UTILITY (hold MENU)"}
 
 UPD_README = """XDJ-700 MODDED UPDATE FILE (firmware {banner}) -- READ BEFORE FLASHING
@@ -1874,7 +2037,8 @@ RISKS
 
 BEFORE YOU FLASH
 1. Keep the OFFICIAL v1.15 file (XDJ700.UPD from Pioneer DJ's support
-   page) on a second USB stick. That is your way back to stock.
+   page) somewhere safe. Do not count on it as a downgrade -- see GOING
+   BACK TO STOCK at the end of this file.
 2. Use mains power, no extension leads you might kick; no pets/kids near.
 3. Copy THIS XDJ700.UPD to the root of an empty FAT32 stick.
 4. Follow Pioneer DJ's own XDJ-700 update instructions. Do not touch the
@@ -1888,8 +2052,12 @@ WHAT IS BAKED IN ({mode} waveform)
   Themes and FLAC/Opus are too big for the space the firmware file has.
 
 GOING BACK TO STOCK
-Flash the official v1.15 file the same way (its version differs, so the
-deck accepts it).
+This file makes the deck report {banner}. The official v1.15 file is OLDER
+than that, and the deck's updater can refuse an older file. Use XDJ Mod
+Studio > Advanced > Back to stock instead: it builds a stock file numbered
+higher than the deck's current version (nothing baked in) and boot-tests it
+before you flash it. If you want to try the official file first, go ahead
+-- just do not rely on it.
 """
 
 
@@ -2039,6 +2207,11 @@ class H(BaseHTTPRequestHandler):
                                   "upd": s.get("upd", "")})
             if u.path == "/api/tracks":
                 return self.send(scan(stick_path()))
+            if u.path == "/api/cues":
+                try:
+                    return self.send(cues_read(stick_path(), q.get("path", "")))
+                except ValueError as e:
+                    return self.send({"error": str(e)}, code=400)
             if u.path == "/api/jobs":
                 with LOCK:
                     return self.send([job_view(j) for j in
@@ -2276,6 +2449,35 @@ class H(BaseHTTPRequestHandler):
                                              j_stems, b["audio"], [],
                                              b.get("quality", "opus"),
                                              b.get("replace", True) is not False)})
+            if p == "/api/filter/playlists":
+                opts = {k: str(b.get(k) or "").strip() for k in
+                        ("bpm", "key", "colour", "genre", "search", "name",
+                         "folder", "sort")}
+                presets = bool(b.get("presets"))
+                if not presets and not any(opts[k] for k in
+                                           ("bpm", "key", "colour",
+                                            "genre", "search")):
+                    return self.send({"error": "give at least one filter "
+                                               "(BPM, key, colour, genre or "
+                                               "words), or make the whole "
+                                               "set"}, code=400)
+                if presets:
+                    opts["presets"] = True
+                if b.get("rating"):
+                    opts["rating"] = int(b["rating"])
+                if b.get("limit"):
+                    opts["limit"] = int(b["limit"])
+                opts["dry_run"] = bool(b.get("dry_run"))
+                return self.send({"job": job("Filter set" if presets else
+                                             "Filtered playlist",
+                                             j_filter_playlists, opts)})
+            if p == "/api/cues":
+                try:
+                    return self.send(cues_edit(stick, b.get("path", ""),
+                                               b.get("cues") or {},
+                                               b.get("clear") or ()))
+                except (ValueError, OSError) as e:
+                    return self.send({"error": str(e)}, code=400)
             if p == "/api/x7s":
                 return self.send({"job": job(f"Deck file from sidecar: {os.path.basename(b['audio'])}",
                                              j_x7s, b["audio"])})
@@ -2295,10 +2497,17 @@ class H(BaseHTTPRequestHandler):
                 s_ = settings()
                 s_["upd"] = upd
                 save_settings(s_)
-                banner = str(b.get("banner") or "1.16")
+                banner = str(b.get("banner") or "1.16").strip()
+                if not re.fullmatch(r"\d\.\d\d", banner) or banner == "1.15":
+                    return self.send({"error": "the version number must look like 1.16 "
+                                               "(one digit, a dot, two digits) and differ "
+                                               "from 1.15 -- it has to be higher than the "
+                                               "version already on the deck"}, code=400)
                 pads = bool(b.get("pads", True))
                 extras = tuple(e for e in UPD_EXTRAS if e in (b.get("extras") or ())
-                               and (pads or e not in ("hotcue8", "stems")))
+                               and (pads or e not in ("hotcue8", "stems", "touchfx")))
+                if "touchfx" in extras:          # one DSP slot: Touch FX wins
+                    extras = tuple(e for e in extras if e != "keyshift")
                 return self.send({"job": job("Build permanent update (UPD)", j_upd_build,
                                              upd, b.get("mode", "rgb"), pads,
                                              bool(b.get("versions", True)), banner,

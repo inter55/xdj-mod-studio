@@ -17,7 +17,7 @@ W=$OUT/inst
 rm -rf "$W"; mkdir -p "$W"
 cp "$OUT/fx.bin" "$W/ks.bin"          # kshhook.S: .incbin "ks.bin"
 cd "$W"
-"$SH/sh-elf-gcc" -DPBUF=$PBUF -m4-nofpu -mdiv=call-div1 -ml -O2 -Wall -ffreestanding -fno-builtin \
+"$SH/sh-elf-gcc" -DPBUF=$PBUF -DZSTATE=0x180 -m4-nofpu -mdiv=call-div1 -ml -O2 -Wall -ffreestanding -fno-builtin \
   -ffunction-sections -fdata-sections -nostdlib -Wl,--gc-sections -Wl,-e,_ksh_entry \
   -Wl,--section-start=.entry=$BASE -Wl,-Ttext=$(printf '0x%X' $((BASE + 0x40))) \
   -Wa,-I,"$W" -o "$OUT/ksh.elf" "$ROOT/tools/keyshift_dsp/kshhook.S" "$ROOT/tools/keyshift_dsp/ksh.c" -lgcc

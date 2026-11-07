@@ -6,7 +6,7 @@ measured in the emulator the same night. No item is inferred.
 ## Confirmed working on hardware tonight
 
 - **TOUCH FX**: the tab opens on PERFORM and a finger on the pad changes
-  the sound. Built effects are Filter, Crush and Gate (`N_LIVE 3`); Echo,
+  the sound. Built effects are Filter, Crush and Gate (`FX_LIVE`); Echo,
   Pitch, Flanger, Roll and Reverb are drawn but inert ("COMING SOON") by
   design (docs/ROADMAP.md).
 - **Phase meter**: runs on hardware.

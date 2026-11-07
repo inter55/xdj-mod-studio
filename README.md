@@ -16,7 +16,10 @@ stick carries the mods and no laptop is needed at the gig. See
 [docs/USBLOADER.md](docs/USBLOADER.md).
 - **Firmware update file.** A real Pioneer update with the mods baked in, so
 they survive a power cycle. This one does write to the deck's flash and it
-can brick the deck; keep the official 1.15 file to hand as the way back.
+can brick the deck. Once a modded file is installed the deck reports a
+higher version, so the<br>official 1.15 file can be refused as a downgrade:
+the app's **Back to stock** builds a stock file numbered higher, which the
+deck will accept. Keep both to hand.
 
 > Independent community project, not affiliated with, endorsed by or
 > supported by Pioneer DJ / AlphaTheta. "Pioneer DJ", "XDJ", "CDJ" and
@@ -35,6 +38,10 @@ can brick the deck; keep the official 1.15 file to hand as the way back.
 | Live stems | PERFORM › STEMS mutes vocals / drums / bass / other, heard after ~30 s |
 | Beat jump pads | PERFORM › BEAT JUMP, tap and swipe (1–64 beats) |
 | Mod settings in UTILITY | hold MENU, end of the list: mods on/off, waveform style, vinyl brake, hot cue gate, theme (hardware-tested) |
+| Vinyl brake length | UTILITY › VINYL BRAKE LENGTH, 0.5×–15×; the stop changes to the length you pick |
+| FLAC playback | the deck's own decoder; a normal FLAC file lists, loads and plays |
+| Phase meter | this deck's beats, following the playing track; with two decks linked the master row shows too |
+| 8 hot cues | pages A–C / D–F / G–H, and you can set one from an empty pad while the track plays; page by **tapping** the HOT CUE tab (swiping across the pads does not page); the cues live on your stick, not the deck |
 
 **Working in the emulator, not yet tested on a deck.** These run against the
 deck's real firmware in the emulator, so they should work on a real deck,
@@ -43,10 +50,7 @@ but nobody has tried them on one yet:
 | Mod | Notes |
 | --- | --- |
 | Faster stem mute (beta) | rewrites the audio the deck already buffered; < 1 s in the emulator |
-| Phase meter | this deck's beats; the master row needs link data |
-| Vinyl brake length | UTILITY › VINYL BRAKE LENGTH, 0.5×–15× |
-| 8 hot cues | pages A–C / D–F / G–H, and you can set one from an empty pad while the track plays; the cues live on your stick, not the deck |
-| FLAC and Ogg Opus playback | own decoders on the deck |
+| Ogg Opus playback | own decoder on the deck (FLAC is the confirmed one; Opus uses the same layer but nobody has played an Opus file on a deck) |
 | Touch FX (beta) | PERFORM › TOUCH FX, an X/Y pad with Filter, Crush and Gate; needs MASTER TEMPO on and shares the DSP hook with live key shift, so one or the other. Echo, Pitch, Flanger, Roll and Reverb are drawn but not implemented |
 
 ## For DJs: Mod Studio
@@ -54,15 +58,14 @@ but nobody has tried them on one yet:
 1. Download Mod Studio from Releases.
    - **Mac** (Apple Silicon, macOS 14+): `XDJ-Mod-Studio.zip`. The first
      time, right-click the app and choose Open.
-   - **Windows** (64-bit Windows 10/11, beta): `XDJ-Mod-Studio-Windows.zip`.
+   - **Windows** (64-bit Windows 10/11): `XDJ-Mod-Studio-Windows.zip`.
      Unzip it and run `XDJ Mod Studio.exe` (SmartScreen: More info → Run
      anyway). Every build is checked by CI on a clean Windows
      machine (the app starts, its pages load, the emulator engine loads).
-     Running your firmware in the emulator and installing to a real deck
-     from Windows have **not been tried by a person yet** (both are proven
-     on a Mac). Emulator sound on Windows shipped 2026-10-24 (pygame
-     mixer; the Mac uses CoreAudio) -- if it is silent for you, set
-     `XDJ_DECK_SOUND=1` and please report how it goes.
+     Testers have installed the mods on real decks from Windows over USB;
+     our own hardware checks run on a Mac. Emulator sound on Windows
+     shipped 2026-10-24 (pygame mixer; the Mac uses CoreAudio) -- if it is
+     silent for you, set `XDJ_DECK_SOUND=1` and please report how it goes.
 2. **Add your firmware.** Get the official XDJ-700 firmware 1.15 update file
    from Pioneer DJ's support site and give it to Mod Studio when it asks.
    It checks the exact file, then builds everything it needs in about
@@ -74,13 +77,20 @@ but nobody has tried them on one yet:
 
 ### Stems
 
-Making stems for a WAV or AIFF **replaces the track under its own name**, so
-it keeps its cues, its waveform and its place in your playlists. The original
-stays next to it as `your track.wav.pre-stems`; rename it back to undo. MP3
-and M4A are not replaced in 1.0 — they get a stems file beside the original
-under BROWSE › FOLDER, because the deck picks its decoder from the extension
-and the stems data rides in a chunk only WAV/AIFF can carry. Replacing those
-in place is a 1.1 item, not a permanent limitation.
+Making stems **replaces the track under its own name**, so it keeps its cues,
+its waveform and its place in your playlists. The original stays next to it as
+`your track.wav.pre-stems`; rename it back to undo. WAV and AIFF are swapped as
+they are; MP3, M4A and FLAC are written as WAV and their database row, their
+hash-named analysis folder and the analysis path move with the file
+(`tools/stems_replace.py`, which prints the plan and backs up the database
+before it writes), so the deck still lists the track under ARTIST / TRACK.
+
+Do not go looking for a stems copy under BROWSE › FOLDER: on 1.15 the row is
+drawn but the knob does not open it (emulator, 2026-11-07; also reported on a
+deck), and SEARCH searches the rekordbox database only, so a file with no
+database entry can never appear there. If an earlier build left
+`Title (STEMS).wav` beside a track, either run **Make stems** again with
+replacement on, or point `tools/stems_replace.py apply` at that track.
 
 If PERFORM › STEMS shows the mix only, or the KEY SHIFT buttons do nothing:
 

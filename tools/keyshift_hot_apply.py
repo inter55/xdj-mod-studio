@@ -54,6 +54,51 @@ def syms():
     return s
 
 
+RING_TXT = "build/fx/ring.txt"      # geometry the engine was built with
+RING_OK = "build/fx/fxring_ok.txt"  # proof from tools/fxmem_probe.py --ring
+
+
+def ring_gate(ring_txt=RING_TXT, ok_txt=RING_OK):
+    """Echo/Flanger's delay line must be memory a deck survey PROVED empty.
+
+    The FX engine keeps its ring at ECHO_BASE..+ECHO_FRAMES*8 (52,000 B by
+    default, 0xC0073400). The 1.15 deck reads 13,056 of 13,056 words there
+    NON-ZERO (docs/TOUCHFX_MEMORY_SURVEY.md), so writing it would replace
+    memory the deck is using -- the one thing every tool here must never do.
+
+    So the install requires build/fx/fxring_ok.txt, written by
+    tools/fxmem_probe.py --ring only when that exact geometry read all-zero.
+    A missing file, a stale one for another build, or a power cycle (which
+    invalidates the survey) all refuse. Returns (ok, message).
+    """
+    try:
+        b, f = open(ring_txt).read().split()
+        want = (int(b, 0), int(f))
+    except (OSError, ValueError):
+        return False, (f"no {ring_txt}: rebuild the engine with "
+                       "sh tools/fx_dsp/build.sh")
+    if want[1] == 0:
+        return True, (f"{ring_txt} says this build has no delay line "
+                      "(Filter / Crush / Gate only): nothing to prove")
+    try:
+        rb, rf = open(ok_txt).read().split()[:2]
+        got = (int(rb, 0), int(rf))
+    except (OSError, ValueError):
+        return False, ("the delay line has not been proved free on this deck. "
+                       "Run tools/fxmem_probe.py --ring (read-only, about 6 s) "
+                       "on the boot you install on, then install again. Echo "
+                       "and Flanger write "
+                       f"{want[1] * 8:,} B there; the deck survey found that "
+                       "memory in use, so the engine will not touch it "
+                       "unproven.")
+    if got != want:
+        return False, (f"the survey proved {got[0]:#x}/{got[1]} frames empty "
+                       f"but this engine uses {want[0]:#x}/{want[1]}: rebuild "
+                       "the engine or re-run the survey for its geometry")
+    return True, (f"delay line {want[0]:#x}..{want[0] + want[1] * 8:#x} was "
+                  "proved empty by tools/fxmem_probe.py --ring")
+
+
 def key_word(semis):
     if semis == 0:
         return OFF
@@ -84,6 +129,14 @@ def main():
     s = syms()
     base = s["ksh_entry"]
     img = open(f"{OUT}/ksh.bin", "rb").read()
+
+    # Refuse BEFORE touching the deck: the delay line must be proved empty.
+    if a.engine == "fx" and what == "install":
+        ok, msg = ring_gate()
+        print(("  ring: " if ok else "REFUSED: ") + msg)
+        if not ok:
+            print("RESULT: nothing written, deck untouched.")
+            return 2
 
     import hid
     import fastload

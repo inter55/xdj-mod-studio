@@ -129,6 +129,47 @@ baked in the firmware as today and do not depend on the stick.
   format, which today's loader rightly refuses at the header (4 of its 6
   cases "fail" for that reason only).
 
+## 2026-11-06: pack re-recorded from tonight's stems build (emulator only)
+
+The Nov 4 pack was recorded before the bounded stem-mute rewrite, so
+`build/pack_verify.py` found 3,118 bytes of drift (the stems module and its
+pools). It has been re-recorded from the current tree:
+
+- `tools/stick_pack.py record --mode rgb --phasemeter --touchfx` (the same
+  flags `j_stick_pack` passes) against the mock deck on
+  `cache/emu_dsp_mounted6.pkl`.
+- `build/stick/XDJMODS/PACK.BIN`: **324,581 B, 1,099 entries, 1,097 runs +
+  2 one-shot calls, 308,821 B of writes**. Still under the loader's 1,200
+  run cap.
+- `build/pack_verify.py --pack PACK --after <after-install.pkl>`: table CRC
+  OK, every byte equal except 7 bytes that are the deck's own live counters
+  (phase-meter frame counter, key-shift flag/status), which it now reports
+  separately rather than counting as drift.
+- `tools/usbloader_pack2_test.py all`: PASS. good applies all 1,099
+  records; badbody stops at the corrupted entry and leaves the later caves
+  untouched; oldbyte refuses at the header (nothing written, every cave
+  still empty); truncated applies the 298 complete records and nothing
+  after.
+
+### The recorder itself was broken, and is now fixed
+
+The first attempt to re-record failed before touching the deck: `deck not
+found over USB`, from `tools/stick_pack.py record` and from
+`tools/mock/mock_install.py` alike, while running `deck_check` by hand
+found the pretend deck fine. Cause: `tools/xdj700_usb_shell.py` put
+`vendor/` (the app's real `hid` binding) at the front of `sys.path`
+whenever it existed, so the child process imported the real binding no
+matter what `PYTHONPATH` said, and with no deck plugged in that enumerates
+nothing. It now skips that insert when `XDJ_MOCK_SOCK` is set (i.e. when
+the caller is deliberately talking to the pretend deck). Real-deck runs
+never set that variable, so their behaviour is unchanged.
+
+The pack above was then recorded by the same path the app's "write the
+mods file to your stick" button uses, end to end, with no workaround.
+
+This is emulator proof only. The pack has not been replayed on a real deck
+since the stems module changed.
+
 ## The pack built for the first time, 2026-11-03 (and two caps that were too low)
 
 `tools/stick_pack.py record --mode rgb --phasemeter --touchfx` now produces

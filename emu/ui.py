@@ -836,6 +836,12 @@ class EmuApp:
             m.mem.w8(base + i, b)
         m.mem.w32(syms["hc_prev"], live)
         m.mem.w32(hook, syms["hc_entry"])
+        # 8-pad view: the touch hook sits in front of the stock hit-tester
+        # (the PERFORM pads' own ptouch now runs behind it)
+        tpool = 0x08D5278C
+        m.mem.w32(syms["hc_tprev"], m.mem.r32(tpool))
+        m.mem.w32(syms["hc_armed"], 1)
+        m.mem.w32(tpool, syms["hc_tentry"])
 
     def _install_themesw(self, m):
         """On-deck theme switching (tools/theme_switch.py, deck C): the

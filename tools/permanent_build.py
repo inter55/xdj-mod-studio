@@ -240,10 +240,14 @@ def bake_hotcue8(mem, log):
         raise SystemExit("REFUSED: 8 hot cues need the PERFORM pads")
     mem.region(base, (s.get("end", s["hc_count"] + 4) + 3) & ~3, "8 hot cues")
     live = mem.r32(FLUSH_POOL)
+    live_t = mem.r32(PP.HOOK_TOUCH)
     mem.write(base, img)
     mem.w32(s["hc_prev"], live)
+    mem.w32(s["hc_tprev"], live_t)
+    mem.w32(s["hc_armed"], 1)
     mem.w32(FLUSH_POOL, s["hc_entry"])
-    log(f"8 hot cues ({base:#x}, chains {live:#x})")
+    mem.w32(PP.HOOK_TOUCH, s["hc_tentry"])
+    log(f"8 hot cues ({base:#x}, flush chains {live:#x}, touch chains {live_t:#x})")
 
 
 STEMS_DIRECT = 0x08DDFFD4               # media API direct read slot (stems_apply)
@@ -550,10 +554,16 @@ def apply_mods(mem, mode="rgb", versions=True, pads=True, log=print,
         import perform_pads as PP
         # Only bake the tabs whose mods are in this file (the installer
         # writes the same byte over USB); 0 keeps every tab.
-        bits = PP.featbits("keyshift" not in extras, "stems" not in extras)
+        # TOUCH FX takes the KEY SHIFT slot (DSP_EXCLUSIVE), so that slot
+        # must NOT be marked hidden when touchfx is baked -- otherwise the
+        # pads believe the slot is dead while the Touch FX tab still draws
+        # and still takes taps (emu gate: "hidden tabs do nothing").
+        bits = PP.featbits("keyshift" not in extras and "touchfx" not in extras,
+                           "stems" not in extras)
         PP.install(mem, bits)
         log("PERFORM pads (BEAT JUMP"
             + (" / KEY SHIFT" if "keyshift" in extras else "")
+            + (" / TOUCH FX" if "touchfx" in extras else "")
             + (" / STEMS" if "stems" in extras else "") + " tabs)")
         # Boot logo: the opening frame draws picture record 0x08102E10
         # (600x100, offset 0xDC650 from 0x08100000 = 0x081DC650), whose top

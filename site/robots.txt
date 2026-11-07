@@ -1,0 +1,4 @@
+User-agent: *
+Allow: /
+
+Sitemap: https://inter55.github.io/xdj-mod-studio/sitemap.xml

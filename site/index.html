@@ -3,23 +3,74 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>XDJ Mod Studio: free XDJ-700 mods (RGB waveforms, key shift, stems)</title>
-<meta name="description" content="Open-source XDJ-700 mods: RGB and 3-band waveforms, live key shift, stems, 8 hot cues, beat jump pads, Touch FX and live themes. USB-stick loader, cable session or a baked firmware update file.">
-<meta property="og:title" content="XDJ Mod Studio: free XDJ-700 mods">
+<title>XDJ Mod Studio — XDJ-700 Mods, RGB Waveforms &amp; Stems</title>
+<meta name="description" content="Free, open-source XDJ-700 mods: RGB and 3-band waveforms, live key shift, stems, 8 hot cues, beat jump pads and colour themes. Installs from a USB stick.">
+<meta property="og:title" content="XDJ-700 Mods: RGB Waveforms, Key Shift &amp; Stems">
 <meta property="og:type" content="website">
 <meta property="og:url" content="https://inter55.github.io/xdj-mod-studio/">
 <meta name="keywords" content="XDJ-700 mods, XDJ Mod Studio, Pioneer XDJ-700, XDJ-700 RGB waveform, XDJ-700 key shift, XDJ-700 stems, XDJ-700 themes, XDJ-700 firmware mod">
 <link rel="canonical" href="https://inter55.github.io/xdj-mod-studio/">
 <script type="application/ld+json">
-{"@context":"https://schema.org","@type":"SoftwareApplication","name":"XDJ Mod Studio",
- "description":"Free, open-source mods for the Pioneer DJ XDJ-700: RGB and 3-band waveforms, live key shift, stems, 8 hot cues, beat jump pads, Touch FX and themes.",
- "applicationCategory":"MultimediaApplication","operatingSystem":"macOS, Windows",
- "url":"https://inter55.github.io/xdj-mod-studio/","downloadUrl":"https://github.com/inter55/xdj-mod-studio/releases/latest",
- "codeRepository":"https://github.com/inter55/xdj-mod-studio","license":"https://opensource.org/licenses/MIT",
- "offers":{"@type":"Offer","price":"0","priceCurrency":"USD"}}
+{
+ "@context": "https://schema.org",
+ "@graph": [
+  {
+   "@type": "WebSite",
+   "@id": "https://inter55.github.io/xdj-mod-studio/#website",
+   "url": "https://inter55.github.io/xdj-mod-studio/",
+   "name": "XDJ Mod Studio",
+   "alternateName": "XDJ-700 Mods",
+   "description": "Free, open-source mods for the Pioneer DJ XDJ-700.",
+   "inLanguage": "en"
+  },
+  {
+   "@type": "SoftwareApplication",
+   "@id": "https://inter55.github.io/xdj-mod-studio/#app",
+   "name": "XDJ Mod Studio",
+   "description": "Free, open-source mods for the Pioneer DJ XDJ-700: RGB and 3-band waveforms, live key shift, stems, 8 hot cues, beat jump pads and colour themes.",
+   "applicationCategory": "MultimediaApplication",
+   "operatingSystem": "macOS, Windows",
+   "url": "https://inter55.github.io/xdj-mod-studio/",
+   "downloadUrl": "https://github.com/inter55/xdj-mod-studio/releases/latest",
+   "codeRepository": "https://github.com/inter55/xdj-mod-studio",
+   "license": "https://opensource.org/licenses/MIT",
+   "isPartOf": {
+    "@id": "https://inter55.github.io/xdj-mod-studio/#website"
+   },
+   "sameAs": [
+    "https://github.com/inter55/xdj-mod-studio"
+   ],
+   "screenshot": "https://inter55.github.io/xdj-mod-studio/shots/app.jpg",
+   "featureList": [
+    "RGB and 3-band waveforms",
+    "Live key shift",
+    "Stems with live mute",
+    "8 hot cues",
+    "Beat jump pads",
+    "Live colour themes"
+   ],
+   "offers": {
+    "@type": "Offer",
+    "price": "0",
+    "priceCurrency": "USD"
+   }
+  }
+ ]
+}
 </script>
-<meta property="og:description" content="RGB and 3-band waveforms, live key shift, stems, 8 hot cues and live themes for the XDJ-700. Stick loader, cable session or a baked firmware update file.">
+<meta property="og:description" content="Free, open-source XDJ-700 mods: RGB waveforms, live key shift, stems, 8 hot cues and colour themes. Installs from a USB stick.">
 <meta name="theme-color" content="#0e0f12">
+<meta name="robots" content="index,follow,max-image-preview:large,max-snippet:-1">
+<meta property="og:site_name" content="XDJ Mod Studio">
+<meta property="og:locale" content="en_GB">
+<meta property="og:image" content="https://inter55.github.io/xdj-mod-studio/shots/app.jpg">
+<meta property="og:image:width" content="1280">
+<meta property="og:image:height" content="720">
+<meta property="og:image:alt" content="XDJ-700 with an RGB waveform and the mods menu">
+<meta name="twitter:card" content="summary_large_image">
+<meta name="twitter:title" content="XDJ-700 Mods: RGB Waveforms, Key Shift &amp; Stems">
+<meta name="twitter:description" content="Free, open-source XDJ-700 mods: RGB waveforms, key shift, stems, 8 hot cues and colour themes. Installs from a USB stick.">
+<meta name="twitter:image" content="https://inter55.github.io/xdj-mod-studio/shots/app.jpg">
 <link rel="icon" href="favicon.svg" type="image/svg+xml">
 <style>
 :root {
@@ -83,6 +134,11 @@ h2 { font-size: clamp(26px, 3.4vw, 36px); margin: 0 0 10px; letter-spacing: -.5p
 .card p { margin: 0; color: var(--dim); font-size: 14.5px; }
 .ico { width: 38px; height: 38px; border-radius: 10px; display: grid; place-items: center; background: var(--bg2); border: 1px solid var(--line); }
 .two { display: grid; grid-template-columns: 1fr 1fr; gap: 28px; align-items: start; }
+.shots { display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 16px; }
+.shot { margin: 0; background: var(--card); border: 1px solid var(--line); border-radius: var(--radius); overflow: hidden; }
+.shot img { display: block; width: 100%; height: auto; }
+.shot figcaption { padding: 10px 14px 12px; font-size: 13.5px; line-height: 1.5; color: var(--dim); }
+.shot figcaption b { color: var(--text); font-weight: 600; }
 .steps { counter-reset: s; list-style: none; padding: 0; margin: 0; }
 .steps li { counter-increment: s; position: relative; padding: 0 0 22px 48px; color: var(--dim); }
 .steps li b { color: var(--text); display: block; margin-bottom: 2px; }
@@ -141,6 +197,7 @@ footer p { margin: 6px 0; max-width: 820px; }
     </a>
     <nav>
       <a href="#features">Features</a>
+      <a href="#shots">Screenshots</a>
       <a href="#safety">Safety</a>
       <a href="#start">Get started</a>
       <a href="#faq">FAQ</a>
@@ -153,8 +210,8 @@ footer p { margin: 6px 0; max-width: 820px; }
 <div class="wrap hero">
   <div>
     <div class="eyebrow">Open source · Cable, stick or update file · XDJ-700 firmware 1.15</div>
-    <h1>Give your <span class="grad">XDJ-700</span> the features it never got.</h1>
-    <p class="lead">RGB and 3-band waveforms, live key shift, stems, 8 hot cues, beat jump pads and live colour themes. The recommended route is the USB-stick loader: one firmware update installs it, and after that the mods travel on your stick and survive a power cycle. Cable mode installs nothing — it sends the mods into the deck's memory for the session, and a power cycle puts it back to stock.</p>
+    <h1>Free <span class="grad">XDJ-700</span> mods: the features your deck never got.</h1>
+    <p class="lead">XDJ-700 mods that add RGB and 3-band waveforms, live key shift, stems, 8 hot cues, beat jump pads and colour themes to the deck you already own. The recommended route is the USB-stick loader: one firmware update installs it, and after that the mods travel on your stick and survive a power cycle. Cable mode installs nothing — it sends the mods into the deck's memory for the session, and a power cycle puts it back to stock.</p>
     <div class="cta">
       <a class="btn primary" href="https://github.com/inter55/xdj-mod-studio/releases">Download Mod Studio</a>
       <a class="btn" href="#safety">How it stays safe</a>
@@ -198,12 +255,12 @@ footer p { margin: 6px 0; max-width: 820px; }
       <div class="card">
         <div class="ico"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="#ffb547" stroke-width="2.2" stroke-linecap="round"><path d="M9 18V6l10-2v12"/><circle cx="6.5" cy="18" r="2.5"/><circle cx="16.5" cy="16" r="2.5"/></svg></div>
         <h3>Stems</h3>
-        <p>Split a track into vocals, drums, bass and other on your computer, then mute them live from PERFORM › STEMS. The stems version takes the track's place under its own name, so its cues and playlists still work; your original is kept as a backup.</p>
+        <p>Split a track into vocals, drums, bass and other on your computer, then mute them live from PERFORM › STEMS. A WAV or AIFF track is replaced under its own name, so its cues and playlists still work and the original is kept as a backup. An MP3 or M4A gets a <code>Title (STEMS).wav</code> next to it, which the deck shows under BROWSE › <b>FOLDER</b> — scroll past SEARCH and <b>press the knob</b> on FOLDER to open it (the right-hand pane says EMPTY while the row is only highlighted); it is not in the Track/Artist lists. Replacing those in place too is in the next update.</p>
       </div>
       <div class="card">
         <div class="ico"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="#3d8bff" stroke-width="2.2"><rect x="3" y="3" width="8" height="8" rx="2"/><rect x="13" y="3" width="8" height="8" rx="2"/><rect x="3" y="13" width="8" height="8" rx="2"/><rect x="13" y="13" width="8" height="8" rx="2"/></svg></div>
         <h3>Beat jump pads</h3>
-        <p>A new PERFORM tab: tap to jump back or forward, swipe the row for sizes from 1 up to 64 beats. The same page carries <b>8 hot cues</b>, and pressing an empty pad while the track plays stores that point.</p>
+        <p>A new PERFORM tab: tap to jump back or forward, swipe the row for sizes from 1 up to 64 beats. The same page carries <b>8 hot cues</b>, and pressing an empty pad while the track plays stores that point. The hot cue pages (A–C, D–F, G–H) change when you <b>tap</b> the HOT CUE tab; there is no swipe paging.</p>
       </div>
       <div class="card">
         <div class="ico"><svg width="22" height="22" viewBox="0 0 24 24"><circle cx="8" cy="9" r="4" fill="#3d8bff"/><circle cx="16" cy="9" r="4" fill="#3ecf8e" fill-opacity=".85"/><circle cx="12" cy="15.5" r="4" fill="#ff5d5d" fill-opacity=".8"/></svg></div>
@@ -215,6 +272,47 @@ footer p { margin: 6px 0; max-width: 820px; }
         <h3>Mod Studio + emulator</h3>
         <p>A Mac and Windows app that prepares tracks, designs themes and installs mods. It also runs your own deck firmware in an emulator, so you can try everything before touching the hardware.</p>
       </div>
+    </div>
+  </div>
+</section>
+
+<section id="shots">
+  <div class="wrap">
+    <h2>What it actually looks like</h2>
+    <p class="sub">Every picture below is the deck's own screen, captured from the emulator running your deck's firmware — not a mockup and not a drawing. Same pixels the XDJ-700 shows, with the mods switched on: the waveform colours, the themes, the PERFORM tabs and the extra settings all come from the same firmware you install.</p>
+    <div class="shots">
+      <figure class="shot">
+        <img src="shots/centre_rgb.png" alt="Make Your Move loaded on the XDJ-700 with a full-colour RGB waveform" width="800" height="480" loading="lazy">
+        <figcaption><b>RGB waveform.</b> Make Your Move in full colour — the waveform is drawn from the colour data rekordbox already exports.</figcaption>
+      </figure>
+      <figure class="shot">
+        <img src="shots/centre_3band.png" alt="The same track as a 3-band waveform in orange, blue and cream" width="800" height="480" loading="lazy">
+        <figcaption><b>3-band waveform.</b> The same track split into low, mid and high colours; switch styles on the deck in UTILITY › WAVE FORM COLOR.</figcaption>
+      </figure>
+      <figure class="shot">
+        <img src="shots/theme_hot_pink.png" alt="The deck with the Hot Pink theme and the RGB waveform strip" width="800" height="480" loading="lazy">
+        <figcaption><b>Hot Pink.</b> The interface follows the theme; the waveform keeps its own colours — the theme and the RGB waveform are separate mods.</figcaption>
+      </figure>
+      <figure class="shot">
+        <img src="shots/perform_pads_hotcue.png" alt="The PERFORM page with the mod's tabs and hot cue pads" width="800" height="480" loading="lazy">
+        <figcaption><b>PERFORM page.</b> The mod's own tabs down the left, with the pads that belong to each one.</figcaption>
+      </figure>
+      <figure class="shot">
+        <img src="shots/perform_keyshift.png" alt="PERFORM page showing KEY SHIFT with target key and MASTER TEMPO" width="800" height="480" loading="lazy">
+        <figcaption><b>Live key shift.</b> The key you are shifting to, and a reminder that it needs MASTER TEMPO on.</figcaption>
+      </figure>
+      <figure class="shot">
+        <img src="shots/perform_stems_allon.png" alt="PERFORM page showing the four stem buttons" width="800" height="480" loading="lazy">
+        <figcaption><b>Stems.</b> Vocals, drums, bass and other — tap one to drop it out while the track plays.</figcaption>
+      </figure>
+      <figure class="shot">
+        <img src="shots/mods_menu.png" alt="The deck's own MY SETTINGS list showing THEME, MODS, WAVEFORM, VINYL BRAKE and HOT CUE rows" width="800" height="480" loading="lazy">
+        <figcaption><b>The mods' own settings.</b> THEME, MODS, WAVEFORM, VINYL BRAKE and HOT CUE sit in the deck's own UTILITY list — hold MENU and scroll to the end.</figcaption>
+      </figure>
+      <figure class="shot">
+        <img src="shots/app.jpg" alt="Mod Studio on the Mac: choose the mods and install" width="1280" height="720" loading="lazy">
+        <figcaption><b>Mod Studio.</b> Tick the mods, then install; the emulator is there to try them first.</figcaption>
+      </figure>
     </div>
   </div>
 </section>
@@ -272,9 +370,9 @@ footer p { margin: 6px 0; max-width: 820px; }
       <p style="margin-bottom:12px">Mod Studio's Track Builder can:</p>
       <ul style="color:var(--dim);margin:0;padding-left:18px">
         <li>add 3-band waveform data to tracks rekordbox didn't analyse that way,</li>
-        <li>split stems on your computer (Demucs) and replace a track with a version you can mute live on the deck.</li>
+        <li>split stems on your computer (Demucs) and replace a WAV or AIFF track with a version you can mute live on the deck; MP3 and M4A keep the original and get a <code>(STEMS)</code> file next to it, under BROWSE › FOLDER.</li>
       </ul>
-      <p style="margin-top:12px">A stems file is still a normal WAV or AIFF, so it plays on any deck and in rekordbox. The original stays beside it as <code>.pre-stems</code>, so undoing it is a rename.</p>
+      <p style="margin-top:12px">A stems file is still a normal WAV or AIFF, so it plays on any deck and in rekordbox. Where the track was replaced, the original stays beside it as <code>.pre-stems</code>, so undoing it is a rename.</p>
     </div>
   </div>
 </section>

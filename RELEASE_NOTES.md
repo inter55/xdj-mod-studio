@@ -23,12 +23,13 @@ App-only: nothing on the deck changes, nothing needs re-flashing.
 - **"Make the whole set" and the OneLibrary converter** used the same
   package, so they hit the same error in 1.0.1. Both are fixed by the same
   change.
-- **Stop looking in BROWSE › FOLDER.** The deck's FOLDER row is drawn but
-  pressing the knob never opens it (measured on the deck's firmware in the
-  emulator, and consistent with reports from a deck), and SEARCH only
-  searches the rekordbox database, so a file that exists only beside a
-  track can never be found by name. Every place in the app that told you to
-  look there says so correctly now.
+- **BROWSE › FOLDER: corrected on hardware.** The knob does open FOLDER on a
+  real deck (checked 2026-11-07) and lists the folders at the root of the
+  stick; our emulator said it did not, and the emulator was wrong. It does
+  not list `Contents`, where the tracks — and any `Title (STEMS).wav` beside
+  them — live, and SEARCH searches the rekordbox database only, so a file
+  that exists only beside a track still cannot be found there. Every place
+  in the app tells you that now.
 - **Honest limit:** replacing an MP3 in place keeps the cues and waveform in
   the database, but nobody has played a replaced MP3 on a deck yet. The
   original is kept as `…pre-stems`, so undo is a rename — check the track
@@ -150,11 +151,12 @@ the Windows zip). First launch: right-click the app → Open.
   older file format only, so it stayed empty even after a successful
   build; it now lists your `Title (STEMS).wav` files with their size.
   And to be clear about the deck: stems files are **not** in the
-  rekordbox export, and there is no browsing route to them either — on
-  1.15 the BROWSE › FOLDER row is drawn but the knob does not open it
-  (emulator 2026-11-07, also reported on a deck), and SEARCH only covers
-  the database. Replacement is the supported way: the track itself becomes
-  the stems version and stays under ARTIST / TRACK with its cues.
+  rekordbox export. BROWSE › FOLDER does open on a deck (hardware,
+  2026-11-07 — the emulator said otherwise and was wrong), but it lists
+  only folders at the root of the stick, not `Contents` where a sidecar
+  sits, and SEARCH only covers the database. Replacement is the supported
+  way: the track itself becomes the stems version and stays under
+  ARTIST / TRACK with its cues.
   PERFORM › STEMS mutes vocals / drums / bass / other.
 - **Light mode.** In the app (Settings › Appearance: System, Light, Dark)
   and on the deck (UTILITY › THEME › LIGHT). The deck light theme is an

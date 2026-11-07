@@ -85,12 +85,14 @@ hash-named analysis folder and the analysis path move with the file
 (`tools/stems_replace.py`, which prints the plan and backs up the database
 before it writes), so the deck still lists the track under ARTIST / TRACK.
 
-Do not go looking for a stems copy under BROWSE › FOLDER: on 1.15 the row is
-drawn but the knob does not open it (emulator, 2026-11-07; also reported on a
-deck), and SEARCH searches the rekordbox database only, so a file with no
-database entry can never appear there. If an earlier build left
-`Title (STEMS).wav` beside a track, either run **Make stems** again with
-replacement on, or point `tools/stems_replace.py apply` at that track.
+BROWSE › FOLDER does open on a real deck — checked on hardware 2026-11-07;
+the emulator said it did not, and the emulator was wrong — but it lists only
+folders you put at the root of the stick. `Contents`, where your tracks and
+any `Title (STEMS).wav` beside them live, is not one of them, and SEARCH reads
+the rekordbox database only, so a file with no database entry can never appear
+there. If an earlier build left `Title (STEMS).wav` beside a track, either run
+**Make stems** again with replacement on, or point `tools/stems_replace.py
+apply` at that track.
 
 If PERFORM › STEMS shows the mix only, or the KEY SHIFT buttons do nothing:
 

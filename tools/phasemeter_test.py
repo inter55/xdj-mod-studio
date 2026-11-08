@@ -32,6 +32,9 @@ from emu import panl
 from ghosttap_emu import fb_png
 
 OUT = "build/phasemeter"
+# PM_BIN: run this gate against a SAVED pm.bin instead of the tree's (A/B a
+# fix against the binary it replaced: same symbols, same test, one flag).
+BIN = os.environ.get("PM_BIN") or f"{OUT}/pm.bin"
 HOOK = 0x08C92E20
 POSL = 0x0C0E6D18    # 150/s track position (deck-read 2026-10-25), what pm.c reads
 SH_POS = 0x09D246E0  # 75/s; a write > 1 s off seeks the HLE play clock
@@ -47,6 +50,8 @@ def build():
     it silently tests whatever binary is on disk: a run of the mirror legs
     passed against the pre-fix binary until the module was rebuilt by hand.
     """
+    if os.environ.get("PM_BIN"):
+        return                      # A/B run: never rebuild over the subject
     srcs = ["tools/phasemeter/pm.c", "tools/phasemeter/pmhook.S",
             "tools/phasemeter/build.sh"]
     out = f"{OUT}/pm.bin"
@@ -120,7 +125,7 @@ def main():
     build()
     s = syms()
     base = s["pm_entry"]
-    img = open(f"{OUT}/pm.bin", "rb").read()
+    img = open(BIN, "rb").read()
     m = Machine.load("cache/emu_track_loaded.pkl")
     mem, c = m.mem, m.cpu
     end = s["pm_mode"] + 4
@@ -212,6 +217,27 @@ def main():
     rec = mem.r32(s["pm_n"]) == good_n
     print(f"recovered: beats {mem.r32(s['pm_n'])} (want {good_n})")
     ok &= rec
+    # 2026-11-08 deck, BOTH decks on 1.0.4 and LINKED: the orange MASTER
+    # CLOCK row came in on the linked deck but ITS OWN blue row stayed a
+    # flat line. A track served over LINK carries its overview long before
+    # its analysis, and the meter used to record the track as settled on the
+    # first look, so the blue row stayed empty for the whole track. That is
+    # this leg: a NEW track (new overview hash), PQTZ present with 0 beats,
+    # then the grid lands WITHOUT the hash changing again. The old code
+    # stored the hash on the first look and never asked again -> 0 beats
+    # forever (this leg FAILS on it; verified as a positive control).
+    mem.w32(q + 0x14, 0)                    # PQTZ, no beats yet
+    mem.w32(q + 0x18, 0)
+    mem.w32(PREVIEW, mem.r32(PREVIEW) ^ (0x7 << 8))    # the overview lands
+    m.cpu.run(limit=20_000_000)
+    n_wait = mem.r32(s["pm_n"])
+    mem.w32(q + 0x18, good_ptr)             # the analysis lands, late
+    mem.w32(q + 0x14, good_n)
+    m.cpu.run(limit=20_000_000)
+    n_late = mem.r32(s["pm_n"])
+    print(f"late grid (LINK-style load): {n_wait} beats while it waits, "
+          f"{n_late} once it arrives (want 0 then {good_n})")
+    ok &= n_wait == 0 and n_late == good_n
     # PERFORM screen (2026-10-25 tester: the PERFORM screen showed the stock
     # 4-beat boxes): the same meter 103 px higher, at the same POSL
     mem.dev.panel_frame = panl.build_frame(touch=(705, 37))

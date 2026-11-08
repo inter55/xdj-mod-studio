@@ -75,15 +75,21 @@ for d in tools mods emu studio vendor; do cp -R "$d" "$REPO/"; done
 # ImportError in the released app. tools/app_bundle_check.py fails a build that
 # drops it again.
 # our own compiled deck code (no firmware bytes): Type 1 phase meter
-if [ -f build/phasemeter/pm.bin ]; then
-  mkdir -p "$REPO/build/phasemeter"
-  cp build/phasemeter/pm.bin build/phasemeter/pm.syms "$REPO/build/phasemeter/"
-fi
+# BUILT here, like xflac/utility/hotcue8 below. It used to be copied from
+# build/phasemeter/pm.bin if one happened to exist, and the meter's own gate
+# also never rebuilt -- so a source fix could miss a release and the gate
+# would keep passing against the old binary.
+sh tools/phasemeter/build.sh >/dev/null
+mkdir -p "$REPO/build/phasemeter"
+cp build/phasemeter/pm.bin build/phasemeter/pm.syms "$REPO/build/phasemeter/"
 # FLAC-only decoder build (Studio installs it unless the stick has .opus)
 VF_OPUS=0 VF_OUT="$PWD/build/xflac_flac" sh tools/xflac/build_vfile.sh >/dev/null
 mkdir -p "$REPO/build/xflac_flac"
 cp build/xflac_flac/vfile.bin build/xflac_flac/vfile.syms "$REPO/build/xflac_flac/"
-# UTILITY mod rows (our C)
+# UTILITY mod rows (our C). utility/build.sh reads build/lighttext/lt.syms
+# (the THEME row's LIGHT entry), so light-text is built FIRST: a clean
+# checkout has no build/ and failed here (found building 1.0.5).
+sh tools/lighttext/build.sh >/dev/null
 sh tools/utility/build.sh >/dev/null
 mkdir -p "$REPO/build/utility"
 cp build/utility/ut.bin build/utility/ut.syms "$REPO/build/utility/"
@@ -109,11 +115,27 @@ else
   cp build/themesw/ts.bin build/themesw/ts.syms build/themesw/tables.bin build/themesw/layout.txt "$REPO/build/themesw/"
 fi
 # FLAC + Opus virtual-WAV layer (our C): the tester app plays FLAC/Opus on
-# sticks like WAV (emu app install = deck step 5h bytes)
+# sticks like WAV (emu app install = deck step 5h bytes). Built, not copied:
+# build/xflac/vfile.bin is what the deck loads, and a prebuilt copy here once
+# let the source move on without the shipped module following it.
+sh tools/xflac/build_vfile.sh >/dev/null
 mkdir -p "$REPO/build/xflac"
 cp build/xflac/vfile.bin build/xflac/vfile.syms "$REPO/build/xflac/"
 # live stems mixer + live key shift (our C; the deck installers read these)
-# -- 2026-10-18: were missing, so Studio's stems/key-shift deck steps failed
+# -- 2026-10-18: were missing, so Studio's stems/key-shift deck steps failed.
+# sm.bin needs PMASK (the PERFORM pad mask), same value the emu test passes.
+PMASK=$(.venv/bin/python -c "import sys;sys.path[:0]=['tools'];import perform_pads as P;print(hex(P.PMASK))")
+PMASK=$PMASK sh tools/stems/build.sh >/dev/null
+# DSP-side modules need the C6x toolchain (here: work/tic6x-tools). A machine
+# without it falls through to the freshness guard below, which refuses a stale
+# copy instead of shipping it.
+#   ks.bin  key-shift engine -- build_ksh.sh embeds its ks.syms, so it must be
+#           built FIRST or the installer cave is linked against an old engine
+#   fx.bin  TOUCH FX engine (this one was found stale on 2026-11-08)
+if [ -d work/tic6x-tools/bin ]; then
+  sh tools/keyshift_dsp/build_ksr.sh >/dev/null
+  sh tools/fx_dsp/build.sh >/dev/null
+fi
 sh tools/keyshift_dsp/build_ksh.sh >/dev/null
 mkdir -p "$REPO/build/stems" "$REPO/build/keyshift"
 cp build/stems/sm.bin build/stems/sm.syms "$REPO/build/stems/"
@@ -128,7 +150,12 @@ mkdir -p "$REPO/build/centre"
 cp build/centre/cw.bin build/centre/cw.syms "$REPO/build/centre/"
 # light-mode text add-on, TOUCH FX screen + its DSP engine cave (our C;
 # 2026-11-01: never shipped, so deck steps 5l / 5x failed in the apps --
-# the same packaging gap Reddit hit for build/centre in 0.9.x)
+# the same packaging gap Reddit hit for build/centre in 0.9.x). Built here
+# too; until now these were only checked for existence, so a source fix
+# could sit unwrapped in a release forever.
+sh tools/lighttext/build.sh >/dev/null
+sh tools/touchfx/build.sh >/dev/null
+sh tools/usbloader/build.sh >/dev/null
 for f in lighttext/lt.bin lighttext/lt.syms touchfx/tfx.bin touchfx/tfx.syms \
          fx/ksh.bin fx/ksh.syms fx/fx.bin fx/fx.syms \
          usbloader/ld.bin usbloader/ld.syms; do
@@ -136,6 +163,49 @@ for f in lighttext/lt.bin lighttext/lt.syms touchfx/tfx.bin touchfx/tfx.syms \
   mkdir -p "$REPO/build/$(dirname "$f")"
   cp "build/$f" "$REPO/build/$f"
 done
+# Nothing stale ships. Every deck module above is loaded at a fixed address
+# and is expected to match the C it came from: a prebuilt pm.bin once shipped
+# while pm.c had moved on, and the meter's own gate kept passing because it
+# installs the binary from disk. Builds that need a toolchain this script does
+# not drive (keyshift's DSP ks.bin -- tools/keyshift_dsp/build_ksr.sh, C6x)
+# are still checked here, so they fail loudly instead of shipping.
+stale() {   # stale <shipped file> <source file or dir> [source...]
+  _b=$1; shift
+  [ -f "$_b" ] || { echo "ERROR: $_b missing"; return 1; }
+  for _d in "$@"; do
+    if [ -f "$_d" ]; then
+      _list=$_d                      # one named source: no globbing
+    else
+      _list=$(find "$_d" -maxdepth 1 \( -name '*.c' -o -name '*.S' \
+              -o -name '*.h' \) 2>/dev/null)
+    fi
+    for _s in $_list; do
+      if [ "$_s" -nt "$_b" ]; then
+        echo "ERROR: $_b is older than $_s -- rebuild it before packaging"
+        return 1
+      fi
+    done
+  done
+}
+_stale=0
+stale build/phasemeter/pm.bin          tools/phasemeter     || _stale=1
+stale build/hotcue8/hc.bin             tools/hotcue8        || _stale=1
+stale build/utility/ut.bin             tools/utility        || _stale=1
+stale build/stems/sm.bin               tools/stems          || _stale=1
+stale build/xflac/vfile.bin            tools/xflac          || _stale=1
+stale build/centre/cw.bin              tools/centre         || _stale=1
+stale build/keyshift/ksh.bin           tools/keyshift_dsp   || _stale=1
+stale build/keyshift/ks.bin            tools/keyshift_dsp/ks.c || _stale=1
+stale build/lighttext/lt.bin           tools/lighttext      || _stale=1
+stale build/touchfx/tfx.bin            tools/touchfx        || _stale=1
+# fx.bin is the DSP-side engine (tools/fx_dsp/build.sh, C6x toolchain),
+# not the SH panel built from tools/touchfx.
+stale build/fx/fx.bin                  tools/fx_dsp         || _stale=1
+stale build/usbloader/ld.bin           tools/usbloader      || _stale=1
+if [ "$_stale" != 0 ]; then
+  echo "REFUSING to package: a deck module above does not match its sources."
+  exit 1
+fi
 cp TESTER_README.md "$REPO/" 2>/dev/null || true
 if [ "$PUBLIC" != 1 ]; then   # private tester build: firmware baked in
   cp work/MAIN.img "$REPO/work/"
@@ -189,6 +259,14 @@ Private tester app content. Contains files derived from Pioneer firmware
 for ONE tester only. Do not publish, re-upload, or share.
 EOF
 cp tools/Studio-Info.plist "$APPDIR/Contents/Info.plist"
+# Finder > Get Info showed "Version 1" because the template carries no
+# CFBundleShortVersionString: stamp the app's own number in
+_VER=$(sed -n 's/^APP_VERSION = "\([^"]*\)"$/\1/p' studio/app.py)
+[ -n "$_VER" ] || { echo "ERROR: no APP_VERSION in studio/app.py"; exit 1; }
+/usr/libexec/PlistBuddy -c "Set :CFBundleShortVersionString $_VER" \
+  "$APPDIR/Contents/Info.plist" 2>/dev/null \
+  || /usr/libexec/PlistBuddy -c "Add :CFBundleShortVersionString string $_VER" \
+     "$APPDIR/Contents/Info.plist"
 if [ -f emu/icon.icns ]; then cp emu/icon.icns "$APPDIR/Contents/Resources/AppIcon.icns"; fi
 # pip install records hold the build Mac's folder path: not needed at runtime
 find "$APPDIR" -name direct_url.json -path "*dist-info*" -delete 2>/dev/null || true

@@ -9,7 +9,6 @@ mock_install.py does for deck_session. Saves the machine afterwards
 """
 import os
 import shlex
-import socket
 import subprocess
 import sys
 import tempfile
@@ -38,8 +37,9 @@ def main():
         print(f"$ {c}", flush=True)
         rc = subprocess.call([PY] + shlex.split(c), cwd=ROOT, env=env)
         print(f"  (exit {rc}, {time.time() - t:.0f}s)", flush=True)
-    s = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
-    s.connect(sock)
+    sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+    import mocksock
+    s = mocksock.connect(sock)
     f = s.makefile("rwb")
     out = os.environ.get("MOCK_SAVE", os.path.join(td, "after_run.pkl"))
     f.write(f"#SAVE {out}\n".encode()); f.flush(); f.readline()

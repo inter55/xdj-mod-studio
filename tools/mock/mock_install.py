@@ -33,9 +33,9 @@ def main():
                                                os.path.join(td, "surveys.json")))
     t0 = time.time()
     rc = subprocess.call(PYCMD + ["tools/deck_session.py"] + sys.argv[1:], cwd=ROOT, env=env)
-    import socket
-    s = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
-    s.connect(sock)
+    sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+    import mocksock
+    s = mocksock.connect(sock)
     f = s.makefile("rwb")
     f.write(b"#STATS\n"); f.flush()
     stats = f.readline().decode().strip()

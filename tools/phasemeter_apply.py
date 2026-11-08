@@ -39,6 +39,13 @@ def main():
     base = s["pm_entry"]
     img = open(f"{OUT}/pm.bin", "rb").read()
     end = max(s["pm_mode"], s["pm_n"], s["pm_layer"]) + 4
+    # REFUSE to touch a deck if any symbol we own falls outside the region
+    # this tool reserves and the survey proves zero. pm_dy sat 4 bytes past
+    # it until 2026-11-08 (declared after pm_mode, i.e. last in the bss).
+    outside = sorted((v, k) for k, v in s.items() if v >= end)
+    if outside:
+        sys.exit(f"REFUSED: {outside[0][1]} at {outside[0][0]:#x} is outside "
+                 f"the cave end {end:#x} -- move it into the state block")
     ok_file = os.path.expanduser(f"~/.xdj700_pm_survey_ok.{base:08x}")  # never in the app
     import hid
     from xdj700_usb_shell import PIONEER_VID, open_deck, drain

@@ -1048,12 +1048,13 @@ $('#stickarm').onclick = async e => {
 };
 $('#stickload').onclick = async () => {
   const ok = await ask('Build the loader update?',
-    'This builds the official 1.15 firmware plus the stick loader, and boot-tests it in the emulator. Flashing it is your decision, at your own risk: it can brick the deck. Nothing is flashed by the app.',
+    'This builds the official 1.15 firmware plus the stick loader, and boot-tests it in the emulator. Its version number is the one in the Version number field: the deck only takes a file numbered higher than what UTILITY shows, so build with 1.17 if it already reports 1.16. Flashing it is your decision, at your own risk: it can brick the deck. Nothing is flashed by the app.',
     'Build the file');
   if (!ok) return;
   const on = $$('.stickack').every(c => c.checked);
   const ack = {brick: on, recovery: on, power: on};
-  api('/api/stick/loader', {path: $('#stickupd').value.trim(), ack}).then(r => r && (toast('Building + boot-testing — about 6 minutes.'), watch()));
+  api('/api/stick/loader', {path: $('#stickupd').value.trim(), ack,
+    banner: ($('#updver').value || '1.16').trim()}).then(r => r && (toast('Building + boot-testing — about 6 minutes.'), watch()));
 };
 $('#deckgo').onclick = async () => {
   const {mode: wave, pads, themes, liveks, touchfx, stems, phase, flac, opus} = modSel();

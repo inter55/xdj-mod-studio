@@ -379,21 +379,21 @@ static void *fh;
 static const u16 PACKPATH[] = {'C', ':', '/', 'X', 'D', 'J', 'M', 'O', 'D',
     'S', '/', 'P', 'A', 'C', 'K', '.', 'B', 'I', 'N', 0};
 
-static void cache_range(u32 a, u32 n, int purge)
-{
-    u32 p;
-    for (p = a & ~31u; p < a + n; p += 32) {
-        if (purge) __asm__ volatile("ocbp @%0" : : "r"(p) : "memory");
-        else __asm__ volatile("ocbi @%0" : : "r"(p) : "memory");
-    }
-}
-
+/* No cache maintenance around fread (2026-11-08). The old code purged the
+ * buffer before and INVALIDATED it after the read (ocbi = drop the lines
+ * WITHOUT writing them back). That is only right if fread fills the buffer
+ * by DMA. When the deck's FAT driver copies a sector out of its own cache
+ * with the CPU -- partial sectors, cluster ends -- the fresh bytes sit in
+ * dirty cache lines and ocbi threw them away: the parser then saw stale
+ * RAM (table CRC fail = "refused", or a bad body). The emulator has no
+ * operand cache, so every test passed either way. fread returns data that
+ * plain cached CPU reads see correctly: live stems (sm.c) and the FLAC
+ * layer (vfile.c) read the stick through this same fread into ordinary
+ * cached buffers, and stems is hardware-proven (CLAUDE.md 94). */
 static int stick_refill(void)
 {
     int got;
-    cache_range((u32)chunk, CHUNK, 1);
     got = STOCK_FREAD(chunk, 1, (int)CHUNK, fh);
-    cache_range((u32)chunk, CHUNK, 0);
     if (got <= 0 || got > (int)CHUNK) return 0;
     cb = chunk; clen = (u32)got;
     return got;

@@ -1,3 +1,92 @@
+# XDJ Mod Studio v1.0.5
+
+This one carries deck code, so the phase-meter fix only reaches a deck after
+you install again (cable session, USB-stick pack, or a flash).
+
+- **Phase meter, Type 1: the bottom row works on a linked deck.** On the
+  second player of a Link pair it drew the orange MASTER CLOCK row and left
+  its own blue beat row a flat line. The meter asked the deck for the beat
+  grid once, when the track's overview appeared; a track served over Pro DJ
+  Link gets its analysis later than that, so the single look found nothing
+  and the row stayed empty for the whole track (the master row kept working
+  because it only needs the Link bars and the clock, which is why the two
+  rows disagreed). It now asks again until a grid exists. Proven in the
+  emulator both ways: the old one-shot code reads 0 beats before and 0 after
+  the grid lands; the fixed code reads 0 then 1000. Not yet confirmed on a
+  real deck.
+- **Hot cues D–H from a real rekordbox export** (GitHub #6). On 1.0.4 the
+  8-pad view showed D–H empty, and on pages 2/3 the pads played A–C again.
+  The cause is most likely the export layout: the nexus 2 players added an
+  extended cue list (in the `.EXT` file) because the old list in the `.DAT`
+  file was made for three hot cues, so D–H can sit only in the extended
+  one. That matches the report exactly, but no real export with D–H was
+  available to check. The deck loads both lists into memory; our pads only
+  looked in the old one. They now fall back to the extended list. Our
+  emulator test had put all eight cues into the `.DAT` file, which is why it
+  passed. Proven in the emulator with a rekordbox-style track (A–C in `.DAT`,
+  A–H in `.EXT`): the 1.0.4 code fails it exactly as reported (D plays cue
+  A), the fixed code passes, and the old all-in-`.DAT` layout still passes.
+  Lexicon and VirtualDJ exports should behave the same if they follow
+  rekordbox's layout; not checked. Not yet confirmed on a real deck. Deck
+  code: install the mods again.
+- **Track Builder's hot-cue editor no longer deletes D–H.** It read cues
+  from the old list only, then rewrote both lists from what it read, so
+  setting or clearing any cue on a real export wiped D–H (and B, C) from the
+  `.EXT` file. It now reads both, and it keeps rekordbox's own entries (cue
+  colours, comments) for every cue you do not change. The **A–H** tag in the
+  track list counts the extended list too, so it now shows on real exports.
+- **The loader update takes the version number you type.** The one-time
+  loader update for the USB-stick method was stamped 1.16 whatever the
+  field said, so on a deck already reporting 1.16 the updater had nothing
+  newer to install: the loader never landed, and the stick's
+  `XDJMODS/PACK.BIN` was then never read. It now uses the Version number
+  field like the full build. The deck only accepts a number higher than the
+  one it shows; stock is 1.15 and every modded flash so far reports 1.16.
+- **Windows: writing the mods file to a USB stick works** (GitHub issue #9).
+  It stopped at about 2 % with `module 'socket' has no attribute
+  'AF_UNIX'`: the app records the install on an emulated deck and talked to
+  it over a Unix socket, which Python on Windows does not have. On Windows
+  it now uses a local loopback connection instead (nothing outside your PC
+  can reach it); macOS is unchanged. The Windows path was checked on a Mac
+  by forcing it: the file it records leaves exactly the same bytes in the
+  deck as the normal one (the only differences are 4-byte self-test writes
+  of zero into memory that is already zero).
+- **Windows: the emulator starts on more PCs** (GitHub issue #10, QEMU exit
+  code 3221225501 with both firmware choices). That code is "illegal
+  instruction": the Windows build compiled the emulated audio chip for the
+  build server's own processor, so it used instructions many desktop CPUs
+  do not have. It is now built for any x86-64 PC from roughly 2009 on.
+  This fix is in the Windows build only and has not been run on the
+  reporter's PC yet.
+- **USB-stick loader: reads the mods file safely on the real deck.** After
+  every 2 KB read from the stick the loader threw away the processor's
+  cache lines for that buffer. If the deck's file system copies part of a
+  read with the CPU instead of by DMA, that discarded the data it had just
+  read, and the file looked damaged ("refused") or stopped part-way. The
+  emulator has no such cache, so every test passed regardless. The loader
+  now reads the stick exactly like live stems does, which is proven on a
+  real deck. **The loader is in the flash, so this needs the loader update
+  built again from 1.0.5** (or the loader sent over the cable again).
+- **`ld_probe.py` reports a flashed loader correctly.** It looked up the
+  loader's state at the address of the copy this computer last built, and
+  checked the wrong word to decide whether the loader was armed, so on a deck
+  carrying an older loader it could say "never ran" or "not armed" when both
+  were fine. It now reads both from the loader on the deck, and says which
+  of "damaged file", "not a mods file" or "deck not stock" stopped it.
+- **Windows: UTILITY › PHASE METER TYPE writes to the right place again.**
+  The UTILITY rows carry the phase meter's memory addresses, and the Windows
+  copy had not been rebuilt since 1.0 while the meter moved in 1.0.4, so that
+  row changed a byte inside the meter's working area instead of its mode.
+  1.0.5 ships UTILITY rebuilt against its own meter, the same bytes on Mac
+  and Windows.
+- **Settings still reset when the deck is switched off** (unchanged):
+  `[MODS]`, `[WAVEFORM]`, `[THEME]`, `[HOT CUE]` and `[VINYL BRAKE]` are live
+  switches in deck memory. Bake the defaults you want into the flash, or set
+  them again after power-on.
+- Also here: packaging refuses a deck module that is older than its source
+  (one had silently shipped stale), and the phase-meter installer refuses to
+  run if any of its globals would sit outside the memory region it reserves.
+
 # Confirmed on a real deck (2026-11-06)
 
 No update needed for any of this — it is the build you already have, now

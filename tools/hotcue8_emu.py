@@ -61,9 +61,15 @@ def rewrite(path, kind):
         sec = d[p:p + lt]
         typ = struct.unpack(">I", sec[12:16])[0] if tag in (b"PCOB", b"PCO2") else None
         if tag == b"PCOB" and typ == 1:
-            ents = b"".join(pcpt(i + 1, t) for i, t in enumerate(TIMES))
+            # HC_LAYOUT=rekordbox: the real export split (GitHub #6) --
+            # .DAT PCOB A-C only, .EXT PCOB empty, A-H only in .EXT PCO2.
+            # Default: all eight in every list (the original test stick).
+            times = TIMES
+            if os.environ.get("HC_LAYOUT") == "rekordbox":
+                times = TIMES[:3] if kind == "dat" else []
+            ents = b"".join(pcpt(i + 1, t) for i, t in enumerate(times))
             sec = (b"PCOB" + struct.pack(">II", 0x18, 0x18 + len(ents)) +
-                   struct.pack(">IHHI", 1, 0, len(TIMES), 0xFFFFFFFF) + ents)
+                   struct.pack(">IHHI", 1, 0, len(times), 0xFFFFFFFF) + ents)
         elif tag == b"PCO2" and typ == 1:
             ents = b"".join(pcp2(i + 1, t) for i, t in enumerate(TIMES))
             sec = (b"PCO2" + struct.pack(">II", 0x14, 0x14 + len(ents)) +
@@ -137,6 +143,22 @@ def find_cue(m, n):
     return 0
 
 
+def find_cue2(m, n):
+    """the deck's EXTENDED list (.EXT PCO2, ctx +0x136C; hc.c find_in):
+    entry address for cue n or 0"""
+    mem = m.mem
+    p = mem.r32(CTX_TAB) + 0x136C
+    if mem.r32(p) != 0x324F4350 or mem.r16(p + 0x0E) != 1:
+        return 0
+    cnt, e = mem.r32(p + 0x1C), mem.r32(p + 0x20)
+    if not 0 < cnt <= 64 or not 0x08000000 <= e < 0x10000000:
+        return 0
+    for k in range(cnt):
+        if mem.r16(e + k * 0x38 + 0x0E) == n:
+            return e + k * 0x38
+    return 0
+
+
 def main():
     from emu.machine import Machine
     from emu import panl
@@ -176,7 +198,7 @@ def main():
     # GATE (2026-10-21): refuse to save a cue-less snapshot -- the ctx
     # list must carry A..H and the live slots A-C, or every paging check
     # that consumes this state is vacuous.
-    cues = [find_cue(m, i) for i in range(1, 9)]
+    cues = [find_cue(m, i) or find_cue2(m, i) for i in range(1, 9)]
     n = sum(1 for c in cues if c)
     live = []
     for k in range(3):
@@ -206,8 +228,10 @@ def main():
                           f"{n2} of 8 cues in a row")
     print("cues found anywhere (unit, fmt): count of A..H present ->",
           {k: sorted(v) for k, v in found.items() if len(v) >= 3})
-    m.save(os.path.join(os.path.dirname(stick), "hotcue8_loaded.pkl"))
-    print("saved hotcue8_loaded.pkl")
+    name = ("hc_rb_loaded.pkl" if os.environ.get("HC_LAYOUT") == "rekordbox"
+            else "hotcue8_loaded.pkl")
+    m.save(os.path.join(os.path.dirname(stick), name))
+    print("saved", name)
     return 0
 
 

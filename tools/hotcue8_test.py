@@ -3,6 +3,9 @@
 
 Needs the snapshot tools/hotcue8_emu.py saves (mini stick, track with hot
 cues A-H at 5,13,..61 s loaded): $TMPDIR/hotcue8_loaded.pkl or argv[1].
+Run it on BOTH layouts: HC_LAYOUT=rekordbox tools/hotcue8_emu.py saves
+$TMPDIR/hc_rb_loaded.pkl (A-C in .DAT, A-H only in .EXT PCO2 -- the real
+export split, GitHub #6; the 1.0.4 code fails it, D plays A).
 Installs the PERFORM pads + the hotcue8 C module exactly like the deck
 installers would, then with REAL touches:
   TAP the HOT CUE tab (in HOT CUE mode) -> the 8-pad view: all eight cues

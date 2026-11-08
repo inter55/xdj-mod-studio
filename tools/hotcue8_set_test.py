@@ -96,10 +96,24 @@ def main():
         if not e:
             sys.exit(f"snapshot has no cue {n} - rerun tools/hotcue8_emu.py")
         mem.w16(e + 0x0E, 0)
+        # ... and in the deck's EXTENDED list (.EXT PCO2, ctx +0x136C),
+        # which the pads also read since GitHub #6: this snapshot's stick
+        # carries A-H in both lists
+        ctx = mem.r32(H.CTX_TAB)
+        p2 = ctx + 0x136C
+        if mem.r32(p2) == 0x324F4350:                # "PCO2"
+            ent = mem.r32(p2 + 0x20)
+            for k in range(min(mem.r32(p2 + 0x1C), 64)):
+                if mem.r16(ent + k * 0x38 + 0x0E) == n:
+                    mem.w16(ent + k * 0x38 + 0x0E, 0)
 
     def slot(k):
         s = SLOT + k * 0x40
         return (mem.r16(s + 0x08), mem.r16(s + 0x0A), mem.r32(s + 0x0C))
+
+    def model(base, k):                        # the pads read these, not the
+        r = base + k * 0x38                    # live player slots
+        return (mem.r16(r), mem.r16(r + 2), mem.r32(r + 4))
 
     tabx, taby = PP.TAB_X + PP.TAB_W // 2, PP.TAB_Y[0] + PP.TAB_H // 2
     disk = getattr(dev, "usb_disk", None)
@@ -117,17 +131,29 @@ def main():
     # at the press frame: within a few 1/150 s units of the pre-press read
     lo, hi = before * 20 // 3, (before + 8) * 20 // 3
     chk(f"cue D ms {slot(0)[2]} at the playhead ({lo}..{hi})", lo <= slot(0)[2] <= hi)
+    # 2026-11-08: the deck's pads read the two 8-record models, so a deck-set
+    # cue that only reached the live slot would draw but not recall.
+    chk(f"pad A wrote both pad models: {model(0x0BA28800, 0)} "
+        f"{model(0x0BA2A52C, 0)}",
+        model(0x0BA28800, 0) == (6, 4, slot(0)[2]) and
+        model(0x0BA2A52C, 0) == (6, 4, slot(0)[2]))
 
     for _ in range(3):                              # 2 -> 3 -> 1 -> 2
         tap(tabx, taby, after=25_000_000)
     chk(f"back on page 2 ({mem.r8(PP.HCPAGE)})", mem.r8(PP.HCPAGE) == 1)
     chk(f"cue D survived paging ({slot(0)})", slot(0)[0] == 6 and slot(0)[1] == 4)
+    chk("deck-set cue D survived in the pad models too",
+        model(0x0BA28800, 0) == (6, 4, slot(0)[2]) and
+        model(0x0BA2A52C, 0) == (6, 4, slot(0)[2]))
 
     tap(281, 263)                                  # pad B: set cue E
     chk(f"pad B set cue E ({slot(1)}), hc_sets "
         f"{mem.r32(syms['hc_sets'])}", slot(1)[0] == 6 and slot(1)[1] == 5
         and mem.r32(syms["hc_sets"]) == 2)
     chk("slot 0 untouched by pad B", slot(0)[1] == 4)
+    chk("pad B wrote both pad models",
+        model(0x0BA28800, 1) == (6, 5, slot(1)[2]) and
+        model(0x0BA2A52C, 1) == (6, 5, slot(1)[2]))
 
     for _ in range(2):                              # 2 -> 3 -> 1
         tap(tabx, taby, after=25_000_000)

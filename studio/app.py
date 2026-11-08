@@ -95,7 +95,7 @@ UIHTML = os.path.join(BUNDLE, "studio", "ui.html") if FROZEN else os.path.join(H
 
 APP_SUPPORT = app_support_dir()
 # the app's own release number (GitHub release tag v<APP_VERSION>)
-APP_VERSION = "1.0.4"
+APP_VERSION = "1.0.5"
 RELEASES_API = "https://api.github.com/repos/inter55/xdj-mod-studio/releases/latest"
 RELEASES_PAGE = "https://github.com/inter55/xdj-mod-studio/releases/latest"
 SETTINGS = os.path.join(APP_SUPPORT, "studio.json")
@@ -843,11 +843,17 @@ def cues_of(*anlz_bytes):
             tag, ln = b[p:p + 4], int.from_bytes(b[p + 8:p + 12], "big")
             if ln == 0 or p + ln > len(b):
                 break
-            if tag == b"PCOB" and p + 16 <= len(b) \
+            # PCOB (legacy list, A-C on a real rekordbox export) and PCO2
+            # (the .EXT's extended list, the only place D-H are written;
+            # the deck pads read both, GitHub #6). Both entries carry the
+            # cue number as u32 at +0x0C.
+            if tag in (b"PCOB", b"PCO2") and p + 16 <= len(b) \
                     and int.from_bytes(b[p + 12:p + 16], "big") == 1:
-                q, end = p + 16, p + ln
+                # entries start after the section's own header (0x18 PCOB,
+                # 0x14 PCO2)
+                q, end = p + int.from_bytes(b[p + 4:p + 8], "big"), p + ln
                 while q + 16 <= end:
-                    if b[q:q + 4] == b"PCPT":
+                    if b[q:q + 4] in (b"PCPT", b"PCP2"):
                         step = int.from_bytes(b[q + 8:q + 12], "big") or 0x38
                         num = int.from_bytes(b[q + 14:q + 16], "big")
                         if 1 <= num <= 8 or 0x41 <= num <= 0x48:
@@ -1723,7 +1729,7 @@ def j_stick_pack(log, prog, sel):
     prog(1.0, "Mods file written to your stick")
 
 
-def j_stick_loader(log, prog, upd):
+def j_stick_loader(log, prog, upd, banner="1.16"):
     """The one-time update for the USB-stick method: STOCK firmware + the
     stick loader only (permanent_build.py --stick-loader), boot-tested in
     the emulator -- with the stick's pack when there is one."""
@@ -1732,7 +1738,7 @@ def j_stick_loader(log, prog, upd):
     out = os.path.join(out_dir, "XDJ700.UPD")
     prog(0.0, "Building the loader update", eta=90)
     rc, txt = run_tool(log, ["tools/permanent_build.py", upd, out, "--stick-loader",
-                             "--banner", "1.16", "--i-know-flashing-can-brick"])
+                             "--banner", banner, "--i-know-flashing-can-brick"])
     if rc or "RESULT: built" not in txt:
         if os.path.exists(out):
             os.remove(out)
@@ -1751,8 +1757,9 @@ def j_stick_loader(log, prog, upd):
         raise RuntimeError("the emulator boot test FAILED -- do NOT flash it "
                            f"(kept as {bad} for inspection)")
     with open(os.path.join(out_dir, "READ ME FIRST.txt"), "w") as f:
-        f.write(STICK_README)
-    log(f"ready: {out} -- stock 1.15 + the stick reader only; no mods baked in")
+        f.write(STICK_README.replace("{banner}", banner))
+    log(f"ready: {out} -- reports firmware {banner}; the deck accepts it as "
+        "an update. Read the warnings before flashing.")
     prog(1.0, "Built + boot-tested. Read the warnings before flashing.")
 
 
@@ -1781,7 +1788,7 @@ def j_stick_arm(log, prog):
     prog(1.0, "Done -- unplug the cable and insert your stick")
 
 
-STICK_README = """XDJ-700 -- USB-stick mods loader (version shows 1.16 in UTILITY)
+STICK_README = """XDJ-700 -- USB-stick mods loader (version shows {banner} in UTILITY)
 
 This update is the OFFICIAL v1.15 firmware plus one small addition: when a
 USB stick goes in, the deck looks for XDJMODS/PACK.BIN on it (made by XDJ
@@ -1916,6 +1923,23 @@ def j_deck_install(log, prog, mode, pads=True,
 
 
 UPD_ACKS = ("brick", "recovery", "power")
+BANNER_ERR = ("the version number must look like 1.16 (one digit, a dot, two "
+              "digits) and differ from 1.15 -- it has to be higher than the "
+              "version already on the deck")
+
+
+def upd_banner(raw):
+    """The version the built file will report, or None if unusable.
+
+    The deck's updater refuses a file that is not NEWER than the one it runs,
+    and every modded flash reports 1.16 -- so a second flash, or going back to
+    stock afterwards, needs 1.17 or higher. This used to be hardcoded to 1.16
+    in the stick-loader build, which made that file un-installable on a deck
+    already at 1.16."""
+    b = str(raw or "1.16").strip()
+    if not re.fullmatch(r"\d\.\d\d", b) or b == "1.15":
+        return None
+    return b
 
 
 def j_upd_build(log, prog, upd, mode, pads, versions, banner, extras=()):
@@ -1961,7 +1985,8 @@ def j_upd_build(log, prog, upd, mode, pads, versions, banner, extras=()):
                            for n in names) or "- (no extras ticked)\n",
             usb=", ".join([n for e, n in UPD_EXTRA_NAMES.items() if e not in extras]
                           + ["theme switching", "FLAC & Opus"])))
-    log(f"ready: {out} -- stock 1.15 + the stick reader only; no mods baked in")
+    log(f"ready: {out} -- firmware {banner}; read READ ME FIRST.txt before "
+        "flashing")
     prog(1.0, "Built + boot-tested. Read the warnings before flashing.")
 
 
@@ -2571,12 +2596,9 @@ class H(BaseHTTPRequestHandler):
                 s_ = settings()
                 s_["upd"] = upd
                 save_settings(s_)
-                banner = str(b.get("banner") or "1.16").strip()
-                if not re.fullmatch(r"\d\.\d\d", banner) or banner == "1.15":
-                    return self.send({"error": "the version number must look like 1.16 "
-                                               "(one digit, a dot, two digits) and differ "
-                                               "from 1.15 -- it has to be higher than the "
-                                               "version already on the deck"}, code=400)
+                banner = upd_banner(b.get("banner"))
+                if not banner:
+                    return self.send({"error": BANNER_ERR}, code=400)
                 pads = bool(b.get("pads", True))
                 extras = tuple(e for e in UPD_EXTRAS if e in (b.get("extras") or ())
                                and (pads or e not in ("hotcue8", "stems", "touchfx")))
@@ -2599,8 +2621,11 @@ class H(BaseHTTPRequestHandler):
                 if not os.path.isfile(upd):
                     return self.send({"error": "pick your official XDJ700.UPD (v1.15) file"},
                                      code=400)
+                banner = upd_banner(b.get("banner"))
+                if not banner:
+                    return self.send({"error": BANNER_ERR}, code=400)
                 return self.send({"job": job("Build the USB-stick loader update",
-                                             j_stick_loader, upd)})
+                                             j_stick_loader, upd, banner)})
             if p == "/api/stick/arm":
                 return self.send({"job": job("Send the stick loader to the deck "
                                              "(no flash)", j_stick_arm)})

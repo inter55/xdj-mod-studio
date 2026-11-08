@@ -1,8 +1,8 @@
-098993a8 B _end
-09891300 B _lc_applied
-09891320 B _lc_bad
-09891324 B _lc_seen
-0989131c B _lc_why
+09899348 B _end
+098912a0 B _lc_applied
+098912c0 B _lc_bad
+098912c4 B _lc_seen
+098912bc B _lc_why
 09890000 T _ld_head
-098902ec T _ld_open
-09890a68 D _ld_state
+0989029c T _ld_open
+09890a18 D _ld_state

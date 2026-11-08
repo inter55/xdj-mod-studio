@@ -13,6 +13,17 @@
  * frame. Each mirror is tapped separately now and the row follows whichever
  * one is actually beating.
  *
+ * 2026-11-08 deck report 2 (BOTH decks on 1.0.4, linked): the orange MASTER
+ * CLOCK row came in fine on the linked deck but ITS OWN blue row stayed a
+ * flat line. The orange row needs only the link bars + SYS_MS; the blue row
+ * needs this deck's beat grid, and snapshot_grid() called "no grid yet" a
+ * FINAL answer, so the call site stored the track hash and never looked
+ * again. On a track served over LINK the overview lands long before the
+ * analysis does, so the one snapshot that ran found no grid and the row
+ * stayed empty for the whole track. "Not there yet" is now a RETRY (the
+ * hash is only stored once a grid is actually published), and the early
+ * outs are three word reads, so an unanalysed track costs nothing extra.
+ *
  * Called from pmhook.S on every 2DG flush (FUN_08E7D278(r4 dev, r5 req)).
  * Draws only when:
  *   - the request is the full-screen UI quad (same test as perform_pads),
@@ -68,7 +79,12 @@ typedef unsigned int u32;
  * 103 px higher (same x, same box sizes -- 2026-10-25, tester: "PERFORM
  * shows the 4-beat boxes instead of the phase meter") -> pm_dy */
 #define PERFORM_DY (-103)
-static int pm_dy;
+/* pm_dy is declared in the STATE block below, not here: declared here the
+ * linker put it at the very end of the bss, 4 bytes PAST
+ * max(pm_mode, pm_n, pm_layer) + 4 -- the region phasemeter_apply.py and
+ * permanent_build.py reserve, zero-fill and survey -- so the last word of
+ * the cave sat outside its own map (found 2026-11-08). Harmless only
+ * because it is written before it is read. */
 #define OY (124 + pm_dy)         /* orange (master) line */
 #define BY (150 + pm_dy)         /* blue (this deck) line */
 #define TOPY (116 + pm_dy)
@@ -98,6 +114,10 @@ static u32 pm_ms[MAXBEATS];
 static u8 pm_bar[MAXBEATS];      /* beat-in-bar 1..4 */
 u32 pm_draws;                    /* frames drawn (test/diagnostic) */
 u32 pm_layer;                    /* layer drawn last (test: buffers alternate) */
+int pm_dy;                       /* 0 main screen, -103 on PERFORM: kept in
+                                  * this block so the installer's cave end
+                                  * covers every byte we own (see the
+                                  * geometry block) */
 
 /* ---- master (linked deck) tap ----
  * The link-state RAM carries a beat-in-bar byte per player: 0x0A8D042E and
@@ -239,8 +259,9 @@ static u32 hash_preview(void)
  * be mid-rewrite (or point anywhere) when we copy it. Every pointer and
  * length is range-checked before a single read, the header is read again
  * after the copy (changed = discard, retry next frame), and the beat times
- * must rise. Returns 1 when the snapshot is final (good or no grid), 0 to
- * retry on a later frame. */
+ * must rise. Returns 1 only when a grid was published, 0 to retry on a
+ * later frame -- including "the analysis has not arrived yet", which is the
+ * normal state for the first frames of a LINK-loaded track (2026-11-08). */
 #define RAM_LO 0x08000000u
 #define RAM_HI 0x10000000u
 static int in_ram(u32 a, u32 len)
@@ -254,14 +275,17 @@ static int snapshot_grid(void)
 {
     u32 ctx = R32(CTX_TAB);
     pm_n = 0;
+    /* NOT "final": a track that just started loading has no context yet, and
+     * a LINK-served one gets its analysis well after its overview. Returning
+     * 1 here is what kept the blue row empty for a whole track. */
     if (!in_ram(ctx, PQTZ_OFF + 0x1C) || (ctx & 3))
-        return 1;                    /* no track context: nothing to show */
+        return 0;                    /* no track context yet */
     u32 q = ctx + PQTZ_OFF;
     if (R32(q) != TAG_PQTZ || R32(q + 0x10) != 8)
-        return 1;
+        return 0;                    /* no PQTZ header yet */
     u32 n = R32(q + 0x14), ep = R32(q + 0x18);
     if (n < 2)
-        return 1;
+        return 0;                    /* header there, beats not yet */
     if (n > MAXBEATS) n = MAXBEATS;
     if (!in_ram(ep, 8 * n)) {
         pm_rejects++;
@@ -597,6 +621,8 @@ void pm_hook(u32 dev, u32 req)
         return;
     }
     u32 h = hash_preview();
+    /* the hash marks "this track is now settled" only once a grid exists, so
+     * a track whose grid arrives late (LINK) keeps being asked about */
     if (h != pm_hash && snapshot_grid()) pm_hash = h;   /* 0 = retry */
     pm_draw(lay, stride);
     pm_layer = w[14];

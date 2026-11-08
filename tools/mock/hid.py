@@ -1,7 +1,8 @@
 """Stand-in for the `hid` package: talks to mockdeck_server.py instead of
 USB. Put tools/mock first on PYTHONPATH and set XDJ_MOCK_SOCK."""
 import os
-import socket
+
+import mocksock  # noqa: E402 (tools/mock is on the path with this file)
 
 PIONEER_VID = 0x2B73
 _SOCK = os.environ.get("XDJ_MOCK_SOCK", "/tmp/xdj_mockdeck.sock")
@@ -15,8 +16,7 @@ def enumerate(vid=0, pid=0):
 
 class Device:
     def __init__(self, vid=None, pid=None, path=None):
-        self.s = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
-        self.s.connect(_SOCK)
+        self.s = mocksock.connect(_SOCK)
         self.f = self.s.makefile("rwb")
         self.buf = bytearray()
         self.nonblocking = True

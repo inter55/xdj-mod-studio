@@ -32,27 +32,65 @@ def sections(b):
     return b[:hl], out
 
 
+def _entries(sec):
+    """[(n, ms, raw entry bytes)] of one PCOB/PCO2 section. Entries start
+    after the section's own header (0x18 PCOB, 0x14 PCO2); each carries
+    its length at +8 and the cue number as u32 at +0x0C (letters 'A'..'H'
+    seen too). Time: +0x20 in PCPT, +0x14 in PCP2."""
+    out = []
+    q, end = struct.unpack(">I", sec[4:8])[0], len(sec)
+    while q + 16 <= end:
+        t = sec[q:q + 4]
+        if t in (b"PCPT", b"PCP2"):
+            step = struct.unpack(">I", sec[q + 8:q + 12])[0] or 0x38
+            num = struct.unpack(">H", sec[q + 14:q + 16])[0]
+            if 0x41 <= num <= 0x48:
+                num -= 0x40
+            at = q + (0x20 if t == b"PCPT" else 0x14)
+            if 1 <= num <= 8 and at + 4 <= end:
+                out.append((num, struct.unpack(">I", sec[at:at + 4])[0],
+                            bytes(sec[q:q + step])))
+            q += step
+        else:
+            q += 4
+    return out
+
+
 def read_cues(b):
-    """{cue number 1..8: time ms} from the PCOB (type 1) section"""
+    """{cue number 1..8: time ms} from the hot-cue (type 1) PCOB AND PCO2
+    sections. rekordbox writes only A-C into PCOB (pre-nxs2 players had
+    three hot cues) and A-H into the .EXT's PCO2, so reading PCOB alone
+    lost D-H -- and write_cues/clear_cues, which rewrite every list from
+    what this returns, then DELETED D-H from the file (GitHub #6). PCOB
+    wins where both carry a number."""
     _, secs = sections(b)
     cues = {}
-    for tag, sec, typ in secs:
-        if tag != b"PCOB" or typ != 1:
-            continue
-        q, end = 16, len(sec)
-        while q + 16 <= end:
-            if sec[q:q + 4] == b"PCPT":
-                step = struct.unpack(">I", sec[q + 8:q + 12])[0] or 0x38
-                num = struct.unpack(">H", sec[q + 14:q + 16])[0]
-                if 0x41 <= num <= 0x48:
-                    num -= 0x40
-                ms = struct.unpack(">I", sec[q + 0x20:q + 0x24])[0]
-                if 1 <= num <= 8:
-                    cues[num] = ms
-                q += step
-            else:
-                q += 8
+    for want in (b"PCOB", b"PCO2"):
+        for tag, sec, typ in secs:
+            if tag == want and typ == 1:
+                for num, ms, _ in _entries(sec):
+                    cues.setdefault(num, ms)
     return cues
+
+
+def _pco2_raw(b):
+    """{n: raw PCP2 entry} so a rewrite keeps rekordbox's colours and
+    comments for the cues it does not change"""
+    _, secs = sections(b)
+    out = {}
+    for tag, sec, typ in secs:
+        if tag == b"PCO2" and typ == 1:
+            for num, _, raw in _entries(sec):
+                out.setdefault(num, raw)
+    return out
+
+
+def _p2(n, ms, raw):
+    """a PCP2 entry for cue n at ms: rekordbox's own bytes (colour, comment)
+    with the time patched when there is one, else a fresh entry"""
+    if raw is not None and len(raw) >= 0x18:
+        return raw[:0x14] + struct.pack(">I", ms) + raw[0x18:]
+    return pcp2(n, ms)
 
 
 def pcpt(n, ms):
@@ -74,6 +112,7 @@ def write_cues(path, cues):
     b = open(path, "rb").read()
     head, secs = sections(b)
     have = read_cues(b)
+    raw2 = _pco2_raw(b)
     have.update({int(k): int(v) for k, v in cues.items() if v is not None})
     out = bytearray(head)
     touched = 0
@@ -84,7 +123,7 @@ def write_cues(path, cues):
                 sec = (b"PCOB" + struct.pack(">II", 0x18, 0x18 + len(ents)) +
                        struct.pack(">IHHI", 1, 0, len(have), 0xFFFFFFFF) + ents)
             else:
-                ents = b"".join(pcp2(n, have[n]) for n in sorted(have))
+                ents = b"".join(_p2(n, have[n], raw2.get(n)) for n in sorted(have))
                 sec = (b"PCO2" + struct.pack(">II", 0x14, 0x14 + len(ents)) +
                        struct.pack(">IHH", 1, len(have), 0) + ents)
             touched += 1
@@ -109,13 +148,13 @@ def write_cues(path, cues):
     return have
 
 
-def _cue_section(tag, cues):
+def _cue_section(tag, cues, raw2=None):
     """The PCOB (DAT) / PCO2 (EXT) section holding {n: ms}."""
     if tag == b"PCOB":
         ents = b"".join(pcpt(n, cues[n]) for n in sorted(cues))
         return (b"PCOB" + struct.pack(">II", 0x18, 0x18 + len(ents)) +
                 struct.pack(">IHHI", 1, 0, len(cues), 0xFFFFFFFF) + ents)
-    ents = b"".join(pcp2(n, cues[n]) for n in sorted(cues))
+    ents = b"".join(_p2(n, cues[n], (raw2 or {}).get(n)) for n in sorted(cues))
     return (b"PCO2" + struct.pack(">II", 0x14, 0x14 + len(ents)) +
             struct.pack(">IHH", 1, len(cues), 0) + ents)
 
@@ -131,7 +170,7 @@ def clear_cues(path, nums):
     touched = 0
     for tag, sec, typ in secs:
         if tag in TAGS and typ == 1:
-            out += _cue_section(tag, keep)
+            out += _cue_section(tag, keep, _pco2_raw(b))
             touched += 1
         else:
             out += sec

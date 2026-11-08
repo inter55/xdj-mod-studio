@@ -30,7 +30,12 @@ OUT = "build/usbloader"
 
 def build():
     """build ld.bin if it is missing; return (image, symbols)"""
-    if not os.path.exists(f"{OUT}/ld.bin") or not os.path.exists(f"{OUT}/ld.syms"):
+    srcs = [f"tools/usbloader/{n}" for n in ("lc.c", "ldentry.S", "build.sh")]
+    have = [f"{OUT}/ld.bin", f"{OUT}/ld.syms"]
+    stale = (not all(os.path.exists(p) for p in have) or
+             (all(os.path.exists(p) for p in srcs) and
+              max(os.path.getmtime(p) for p in srcs) > min(os.path.getmtime(p) for p in have)))
+    if stale:                       # missing, or older than its source
         import shbuild
         shbuild.build("tools/usbloader/build.sh", [], {})
     s = {}

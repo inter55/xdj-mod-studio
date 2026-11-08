@@ -272,8 +272,17 @@ def run(case):
     extra = ""
     if case == "good" and de is not None:
         cw = de.bus.read(0xC0008D64, 4)
-        extra = f" DSP call word {cw:#010x} (key shift live: {cw == 0x00ACEC10})"
-        ok &= cw == 0x00ACEC10
+        # only a pack that CARRIES the one-shot (recorded with live key
+        # shift / TOUCH FX: an F_CALL entry) patches the DSP; one recorded
+        # without it must leave the call word stock
+        pk = open(PACK, "rb").read()
+        npk = struct.unpack_from("<H", pk, 10)[0]
+        calls = any(struct.unpack_from("<H", pk, 0x10 + i * SP.ESZ + 16)[0] & SP.F_CALL
+                    for i in range(npk))
+        want = 0x00ACEC10 if calls else 0x0027D290
+        extra = (f" DSP call word {cw:#010x} (pack has the key-shift step: {calls}, "
+                 f"want {want:#010x})")
+        ok &= cw == want
     print(f"[{case}] screen changed after Browse: {fb0 != fb1}{extra}  "
           f"dsp err {getattr(de, 'error', None)}")
     ok &= fb0 != fb1

@@ -91,6 +91,18 @@ jobs:
         run: |
           git -C qemu-ref apply ../qemu/0001-xdj700-knob-and-jog16.patch
           git -C qemu-ref apply ../qemu/0002-c66x-arm64-rounding.patch
+      - name: Portable CPU target (no -march=native)
+        # Issue #10: the reference builds the audio-chip core into
+        # qemu-system-sh4.exe with -march=native, i.e. for THIS runner's
+        # CPU (AVX-512 Xeon). On a desktop CPU without those instructions
+        # QEMU dies at start with 0xC000001D (3221225501, illegal
+        # instruction) -- for every firmware choice. x86-64-v2 (SSE4.2,
+        # POPCNT: every x86-64 PC since ~2009) keeps the float semantics
+        # (-ffp-contract=off -frounding-math are unchanged).
+        run: |
+          grep -rl -- '-march=native' qemu-ref/scripts qemu-ref/packaging qemu-ref/hw/cdj/c6x/tools \
+            | xargs sed -i 's/-march=native/-march=x86-64-v2/g'
+          ! grep -rn -- '-march=native' qemu-ref/scripts qemu-ref/packaging qemu-ref/hw/cdj/c6x/tools
       - name: Prerequisites
         working-directory: qemu-ref
         run: |
@@ -101,7 +113,7 @@ jobs:
           path: |
             qemu-ref/qemu-src
             ${{ runner.temp }}/build
-          key: qemu-win-${{ hashFiles('qemu/*.patch') }}-63a5186
+          key: qemu-win-${{ hashFiles('qemu/*.patch') }}-63a5186-v2portable
       - name: Build and package
         working-directory: qemu-ref
         run: |

@@ -19,6 +19,7 @@ import sys
 sys.path[:0] = [os.path.join(os.path.dirname(__file__), "..", ".."),
                 os.path.join(os.path.dirname(__file__), "..")]
 from emu.machine import Machine          # noqa: E402
+import mocksock                           # noqa: E402 (this folder)
 
 RAM_LO, RAM_HI = 0x08000000, 0x10000000
 SLICE = int(os.environ.get("MOCK_SLICE", "0"))           # per write
@@ -79,11 +80,7 @@ def handle(m, line):
 def main():
     ckpt, sock = sys.argv[1], sys.argv[2]
     m = Machine.load(ckpt)
-    if os.path.exists(sock):
-        os.unlink(sock)
-    srv = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
-    srv.bind(sock)
-    srv.listen(4)
+    srv = mocksock.listen(sock)      # Unix socket, or loopback TCP on Windows
     print("mock deck ready", flush=True)
     # real-deck time model (measured 2026-10-04/05): BR round ~66 ms,
     # write ~4 ms with reply wait, open+handshake ~2 s, 30 s cool-down

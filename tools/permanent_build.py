@@ -220,6 +220,8 @@ def bake_phasemeter(mem, log):
     img = _blob("build/phasemeter/pm.bin")
     base = s["pm_entry"]
     end = (max(s["pm_mode"], s["pm_n"], s["pm_layer"]) + 4 + 3) & ~3
+    for k, v in s.items():   # every byte we own must be inside the cave
+        assert v < end, f"phase-meter symbol {k} at {v:#x} is past {end:#x}"
     mem.region(base, end, "phase meter")
     live = mem.r32(FLUSH_POOL)
     assert live in (PP.ORIG_BLIT, PP.hooks()[1][2]), hex(live)
@@ -432,6 +434,14 @@ LD_POOL, LD_STOCK_OPEN = 0x08DE39A4, 0x08DDF53C
 
 
 def bake_stickloader(mem, log):
+    # dev tree: never flash a loader older than its source (the app bundle
+    # ships a fresh build and no source, so this check is skipped there)
+    here = os.path.dirname(os.path.abspath(__file__))
+    srcs = [os.path.join(here, "usbloader", n) for n in ("lc.c", "ldentry.S")]
+    bin_ = _path("build/usbloader/ld.bin")
+    if all(os.path.exists(p) for p in srcs + [bin_]):
+        assert max(map(os.path.getmtime, srcs)) <= os.path.getmtime(bin_), \
+            "build/usbloader/ld.bin is older than its source: run tools/usbloader/build.sh"
     s = _syms("build/usbloader/ld.syms")
     img = _blob("build/usbloader/ld.bin")
     base = s["ld_head"]

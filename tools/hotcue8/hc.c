@@ -1,7 +1,9 @@
 /* hc.c -- 8 hot cues on the XDJ-700 PERFORM screen (deck C, RAM only).
  *
- * The deck parses ALL of a track's hot cues (A-H) into the ANLZ ctx
- * (ctx [0x09826BE4] + 0xFC0: PCOB header, count u16 @+0x12, then
+ * The deck parses a track's hot cues into the ANLZ ctx -- the legacy list
+ * (ctx [0x09826BE4] + 0xFC0) AND the extended .EXT list (+0x136C, see
+ * PCO2_OFF: on a real export the only place D-H are). Legacy list:
+ * (+0xFC0: PCOB header, count u16 @+0x12, then
  * {u32 n, u32 ptr} groups @+0x20; entries 64 B: number u16 @+0x0E,
  * time ms u32 @+0x20, loop ms u32 @+0x24) but loads only A-C into the
  * player's three live slots (0x0B6C4118 + k*0x40: +0x08 u16 state (6 =
@@ -58,6 +60,18 @@ typedef unsigned int u32;
 #define CTX_TAB  0x09826BE4u
 #define PCOB_OFF 0xFC0u
 #define TAG_PCOB 0x424F4350u     /* "PCOB" as stored */
+/* The EXTENDED (nxs2) cue list from the .EXT file, parsed by the deck too
+ * (2026-11-08, GitHub #6). rekordbox writes only A-C into the legacy PCOB
+ * list (players before nxs2 had three hot cues) and A-H into PCO2, so on a
+ * real export D-H exist ONLY here. Measured in the emulator with that split
+ * (.DAT PCOB A-C, .EXT PCO2 A-H): the deck's ctx +0xFC0 list held 3 cues,
+ * +0x136C held all 8. Header: tag, u16 type @+0x0E (1 = hot cues), u32
+ * count @+0x10, {u32 n, u32 ptr} groups from +0x1C. Entries 0x38 B: tag
+ * "PCP2", number u16 @+0x0E, ms u32 @+0x14, loop ms u32 @+0x18 (-1 = none).
+ * Legacy PCPT entries (0x40 B) keep ms @+0x20, loop @+0x24. */
+#define PCO2_OFF 0x136Cu
+#define TAG_PCO2 0x324F4350u     /* "PCO2" */
+#define TAG_PCP2 0x32504350u     /* "PCP2" */
 #define SLOTS    0x0B6C4118u
 /* The deck keeps each pad's cue TWICE more, in two 8-record models of its
  * own (0x38 bytes per record: +0x00 u16 state (6 = set), +0x02 u16
@@ -146,19 +160,18 @@ static u32 hash_preview(void)
  * bounded and every pointer is checked to be aligned RAM -- the ctx list
  * is shared with the Pro DJ Link server (a linked deck loading a track
  * from this deck's stick). */
-static u32 find_cue(u32 n)
+/* one ctx cue list: hdr = list header, cnt_at/grp_at = where its count and
+ * first {n, ptr} group sit, esz = entry stride */
+static u32 find_in(u32 hdr, u32 tag, u32 total, u32 grp, u32 esz, u32 n)
 {
-    u32 ctx = R32(CTX_TAB);
-    if ((ctx & 3) || ctx < 0x08000000u || ctx >= 0x0FFF0000u)
+    if (R32(hdr) != tag || R16(hdr + 0x0E) != 1)
         return 0;
-    if (R32(ctx + PCOB_OFF) != TAG_PCOB || R16(ctx + PCOB_OFF + 0x0E) != 1)
-        return 0;
-    u32 total = R16(ctx + PCOB_OFF + 0x12), seen = 0;
+    u32 seen = 0;
     if (total > 64) total = 64;
-    for (u32 g = ctx + PCOB_OFF + 0x20; seen < total && g < ctx + PCOB_OFF + 0x60; g += 8) {
+    for (u32 g = grp; seen < total && g < grp + 0x40; g += 8) {
         u32 cnt = R32(g), e = R32(g + 4);
-        if (!cnt || cnt > 64 || (e & 1) || e < 0x08000000u || e + cnt * 0x40 > 0x10000000u) break;
-        for (u32 k = 0; k < cnt; k++, e += 0x40) {
+        if (!cnt || cnt > 64 || (e & 3) || e < 0x08000000u || e + cnt * esz > 0x10000000u) break;
+        for (u32 k = 0; k < cnt; k++, e += esz) {
             u32 num = R16(e + 0x0E);
             if (num >= 'A' && num <= 'H') num -= 'A' - 1;   /* letter code */
             if (num == n) return e;
@@ -166,6 +179,33 @@ static u32 find_cue(u32 n)
         seen += cnt;
     }
     return 0;
+}
+
+/* entry for hot cue n (1..8) or 0: the legacy list first (it is what the
+ * deck itself loads A-C from), then the extended one. Every pointer is
+ * checked to be aligned RAM -- the ctx lists are shared with the Pro DJ
+ * Link server (a linked deck loading a track from this deck's stick).
+ * Read an entry's fields only through cue_e_ms()/cue_e_loop(). */
+static u32 find_cue(u32 n)
+{
+    u32 ctx = R32(CTX_TAB);
+    if ((ctx & 3) || ctx < 0x08000000u || ctx >= 0x0FFF0000u)
+        return 0;
+    u32 a = ctx + PCOB_OFF, b = ctx + PCO2_OFF;
+    u32 e = find_in(a, TAG_PCOB, R16(a + 0x12), a + 0x20, 0x40, n);
+    if (!e)
+        e = find_in(b, TAG_PCO2, R32(b + 0x10), b + 0x1C, 0x38, n);
+    return e;
+}
+
+static u32 cue_e_ms(u32 e)
+{
+    return R32(e) == TAG_PCP2 ? R32(e + 0x14) : R32(e + 0x20);
+}
+
+static u32 cue_e_loop(u32 e)
+{
+    return R32(e) == TAG_PCP2 ? R32(e + 0x18) : R32(e + 0x24);
 }
 
 static u32 cue_count(void)
@@ -184,7 +224,7 @@ static u32 cue_ms(u32 n)
 {
     if (n < 1 || n > 8) return 0;              /* page 3 slot 3 has no cue */
     u32 e = find_cue(n);
-    if (e) return R32(e + 0x20);
+    if (e) return cue_e_ms(e);
     return hc_ram_set[n - 1] ? hc_ram_ms[n - 1] : 0;
 }
 
@@ -212,7 +252,7 @@ static void load_page(u32 page)
     for (u32 k = 0; k < 3; k++) {
         u32 s = SLOTS + k * 0x40, n = 3 * page + k + 1, e = find_cue(n);
         u32 have = (u32)have_cue(n), ms = cue_ms(n);
-        u32 loop = e ? R32(e + 0x24) : 0;
+        u32 loop = e ? cue_e_loop(e) : 0;
         if (have) {
             R16(s + 0x08) = 6;
             R16(s + 0x0A) = (u16)n;
@@ -352,7 +392,7 @@ u32 hc_touch(u32 down, u32 x, u32 y)
             hc_savedm[1][j] = R32(MODEL_B + k * MODEL_S + 4 * j);
         }
         hc_borrow = 1;
-        u32 ms = cue_ms(n), e = find_cue(n), loop = e ? R32(e + 0x24) : 0;
+        u32 ms = cue_ms(n), e = find_cue(n), loop = e ? cue_e_loop(e) : 0;
         R16(s + 0x08) = 6;
         R16(s + 0x0A) = (u16)n;
         R32(s + 0x0C) = ms;

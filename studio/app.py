@@ -2152,6 +2152,72 @@ def emu_cmd(b):
     return {"ok": True}
 
 
+# ------------------------------------------------------ native choosers ---
+# The Mac app's window has its own chooser (tools/studio-shell.swift). The
+# Windows app (and a source run in a browser) has no such window: the page
+# is in Edge/Chrome, so the Choose buttons only said "type the path"
+# (GitHub #8). The server runs on the same computer, so it opens the
+# system's own dialog instead. The prompt rides an environment variable so
+# quotes in it cannot break the command.
+_PS_FOLDER = r"""
+Add-Type -AssemblyName System.Windows.Forms
+[Console]::OutputEncoding = [Text.Encoding]::UTF8
+$o = New-Object System.Windows.Forms.Form -Property @{TopMost = $true}
+$d = New-Object System.Windows.Forms.FolderBrowserDialog
+$d.Description = $env:XDJ_PICK_PROMPT
+$d.ShowNewFolderButton = $false
+if ($d.ShowDialog($o) -eq [System.Windows.Forms.DialogResult]::OK) { [Console]::Out.Write($d.SelectedPath) }
+"""
+_PS_FILE = r"""
+Add-Type -AssemblyName System.Windows.Forms
+[Console]::OutputEncoding = [Text.Encoding]::UTF8
+$o = New-Object System.Windows.Forms.Form -Property @{TopMost = $true}
+$d = New-Object System.Windows.Forms.OpenFileDialog
+$d.Title = $env:XDJ_PICK_PROMPT
+$d.Filter = "Update file (*.UPD)|*.UPD;*.upd|All files (*.*)|*.*"
+if ($d.ShowDialog($o) -eq [System.Windows.Forms.DialogResult]::OK) { [Console]::Out.Write($d.FileName) }
+"""
+
+
+def native_pick(kind, prompt):
+    """{"path": str} chosen, {"path": None} cancelled, {"unsupported": True}
+    when this computer has no dialog we can open (the page then falls back
+    to typing the path)."""
+    folder = kind != "file"
+    env = dict(os.environ, XDJ_PICK_PROMPT=prompt[:200])
+    try:
+        if WINDOWS:
+            import base64              # -EncodedCommand: no quoting of a multi-line script
+            enc = base64.b64encode((_PS_FOLDER if folder else _PS_FILE)
+                                   .encode("utf-16-le")).decode("ascii")
+            cmd = ["powershell", "-NoProfile", "-STA", "-ExecutionPolicy", "Bypass",
+                   "-EncodedCommand", enc]
+            flags = getattr(subprocess, "CREATE_NO_WINDOW", 0)
+            r = subprocess.run(cmd, capture_output=True, env=env, timeout=1800,
+                               creationflags=flags)
+            out = r.stdout.decode("utf-8", "replace").strip().lstrip("﻿")
+        elif sys.platform == "darwin":
+            what = "folder" if folder else "file"
+            script = (f'set p to POSIX path of (choose {what} with prompt '
+                      f'(system attribute "XDJ_PICK_PROMPT"))\nreturn p')
+            r = subprocess.run(["osascript", "-e", script], capture_output=True,
+                               env=env, timeout=1800)
+            out = r.stdout.decode("utf-8", "replace").strip()
+        elif shutil.which("zenity"):
+            cmd = ["zenity", "--file-selection", "--title", prompt[:200]]
+            if folder:
+                cmd.append("--directory")
+            r = subprocess.run(cmd, capture_output=True, timeout=1800)
+            out = r.stdout.decode("utf-8", "replace").strip()
+        else:
+            return {"unsupported": True}
+    except (OSError, subprocess.SubprocessError) as e:
+        return {"unsupported": True, "detail": str(e)}   # not "error": the page would toast it
+    if folder and out.endswith(("/", "\\")) and len(out) > 3:
+        out = out.rstrip("/\\")
+    return {"path": out or None}
+
+
 # ----------------------------------------------------------------- http ---
 class H(BaseHTTPRequestHandler):
     protocol_version = "HTTP/1.1"          # keep-alive: input events are small
@@ -2405,6 +2471,13 @@ class H(BaseHTTPRequestHandler):
                                      lit=q.get("lit") or None), "image/png")
 
     def do_POST(self):
+        if self.path == "/api/pick":               # blocks while the dialog is open
+            n = int(self.headers.get("Content-Length") or 0)
+            try:
+                b = json.loads(self.rfile.read(n) or b"{}")
+            except ValueError:
+                return self.send({"error": "bad request"}, code=400)
+            return self.send(native_pick(b.get("kind"), b.get("prompt") or ""))
         n = int(self.headers.get("Content-Length") or 0)
         try:
             b = json.loads(self.rfile.read(n) or b"{}")

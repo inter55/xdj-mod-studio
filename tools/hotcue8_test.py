@@ -81,6 +81,10 @@ def main():
         return [(mem.r16(SLOT + k * 0x40 + 0x0A), mem.r32(SLOT + k * 0x40 + 0x0C),
                  mem.r32(SLOT + k * 0x40 + 0x08)) for k in range(3)]
 
+    def model(base, k):                        # the pads read these, not
+        r = base + k * 0x38                    # the live player slots
+        return (mem.r16(r), mem.r16(r + 2), mem.r32(r + 4))
+
     ok = True
 
     def chk(label, cond):
@@ -129,12 +133,18 @@ def main():
     run(12_000_000)
     chk("grid: E held borrows slot 1 -> cue 5",
         (mem.r16(SLOT + 0x40 + 0x0A), mem.r32(SLOT + 0x40 + 0x0C)) == (5, TIMES[4]))
+    chk("grid: E held borrows the pad models too",
+        model(0x0BA28800, 1) == (6, 5, TIMES[4]) and
+        model(0x0BA2A52C, 1) == (6, 5, TIMES[4]))
     chk("grid: E sets no stock zone (hit-tester untouched)",
         mem.r32(0x0C0E75BC) == 0x1E)
     fb_png(m, f"{OUT}/grid8_held_E.png")
     dev.panel_frame = panl.build_frame()
     run(40_000_000)
     chk("grid: E released restores slot 1", slots() == page1)
+    chk("grid: E released restores the pad models",
+        model(0x0BA28800, 1) == (6, 2, TIMES[1]) and
+        model(0x0BA2A52C, 1) == (6, 2, TIMES[1]))
     dev.panel_frame = panl.build_frame(touch=(padx[7], pady))   # pad H = old REC
     run(12_000_000)
     chk("grid: H (old REC spot) borrows -> cue 8",
@@ -174,6 +184,10 @@ def main():
     print("page", mem.r8(PP.HCPAGE), "slots", s, "count", mem.r32(syms["hc_count"]))
     chk("page 2 = D E F", mem.r8(PP.HCPAGE) == 1 and
         [x[0] for x in s] == [4, 5, 6] and [x[1] for x in s] == TIMES[3:6])
+    want = [(6, 4, TIMES[3]), (6, 5, TIMES[4]), (6, 6, TIMES[5])]
+    chk("page 2 pad models = D E F",
+        [model(0x0BA28800, k) for k in range(3)] == want and
+        [model(0x0BA2A52C, k) for k in range(3)] == want)
 
     run(30_000_000)
     fb_png(m, f"{OUT}/page2.png")
@@ -189,12 +203,24 @@ def main():
     print("page", mem.r8(PP.HCPAGE), "slots", s)
     chk("page 3 = G H -", mem.r8(PP.HCPAGE) == 2 and [x[0] for x in s[:2]] == [7, 8]
         and [x[1] for x in s[:2]] == TIMES[6:8] and s[2][2] == 0xFFFFFFFF)
+    # measured stock empty record (build/hc_model_probe.py): state 0, number
+    # 0, ms 0, pos 0 -- loop 0xFFFFFFFF in model A but 0 in model B
+    chk("page 3 empty pad = stock empty patterns (A -1 / B 0)",
+        mem.r16(0x0BA28800 + 2 * 0x38) == 0 and
+        mem.r32(0x0BA28800 + 2 * 0x38 + 4) == 0 and
+        mem.r32(0x0BA28800 + 2 * 0x38 + 8) == 0xFFFFFFFF and
+        mem.r16(0x0BA2A52C + 2 * 0x38) == 0 and
+        mem.r32(0x0BA2A52C + 2 * 0x38 + 4) == 0 and
+        mem.r32(0x0BA2A52C + 2 * 0x38 + 8) == 0)
     run(30_000_000)
     fb_png(m, f"{OUT}/page3.png")
     swipe(100, 30)                                # left from page 3 wraps -> page 1
     s = slots()
     chk("page 1 = A B C again", mem.r8(PP.HCPAGE) == 0 and
         [x[0] for x in s] == [1, 2, 3] and [x[1] for x in s] == TIMES[0:3])
+    chk("pad models back to A B C",
+        [model(0x0BA28800, k)[1] for k in range(3)] == [1, 2, 3] and
+        [model(0x0BA2A52C, k)[1] for k in range(3)] == [1, 2, 3])
     swipe(30, 100)                                # right from page 1 wraps -> page 3
     chk("swipe right wraps: page 3", mem.r8(PP.HCPAGE) == 2 and slots()[0][0] == 7)
     swipe(100, 30)                                # left -> page 1

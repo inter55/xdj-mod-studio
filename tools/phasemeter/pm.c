@@ -3,9 +3,15 @@
  * Replaces the stock 4-box meter rows above the centre waveform with two
  * scrolling beat rulers: orange = master (the LINKED deck, from the
  * link-state bar bytes tapped every frame -- 2026-10-31 deck probes:
- * 0x0A8D042E / 0x0A8BE662 cycle 1..4 in lockstep while this deck is
- * paused), blue = this deck. Grey ticks = beats, red = downbeats, +-4 beats
- * around a fixed white "now" line at the waveform playhead (x 366).
+ * 0x0A8D042E / 0x0A8BE662, "one own / one linked-deck"), blue = this deck.
+ * Grey ticks = beats, red = downbeats, +-4 beats around a fixed white "now"
+ * line at the waveform playhead (x 366).
+ *
+ * 2026-11-08 deck report: on the linked deck that is NOT the master only the
+ * blue half drew -- the two mirrors are per-player slots, so on a slave deck
+ * they do NOT agree and the old "mirrors must agree" test rejected every
+ * frame. Each mirror is tapped separately now and the row follows whichever
+ * one is actually beating.
  *
  * Called from pmhook.S on every 2DG flush (FUN_08E7D278(r4 dev, r5 req)).
  * Draws only when:
@@ -94,14 +100,18 @@ u32 pm_draws;                    /* frames drawn (test/diagnostic) */
 u32 pm_layer;                    /* layer drawn last (test: buffers alternate) */
 
 /* ---- master (linked deck) tap ----
- * The link-state RAM carries the master's beat-in-bar in two byte
- * mirrors (2026-10-31, docs/DECK_SESSION_2026-10-31.md: link_beat_search
- * with THIS deck paused found both cycling 1..4; they agreed every
- * snapshot). tap_master runs from pm_draw each frame: it timestamps bar
- * changes with the firmware's 1 ms system clock (SYS_MS), keeps an EMA
- * of the inter-beat period, and pm_draw scrolls the orange row's ticks
- * from it. Paused master (no changes for > 1 period): the ruler freezes
- * at the last known beat instead of extrapolating into the void. */
+ * The link-state RAM carries a beat-in-bar byte per player: 0x0A8D042E and
+ * 0x0A8BE662 (2026-10-31, docs/DECK_SESSION_2026-10-31.md: link_beat_search
+ * with THIS deck paused found both cycling 1..4 -- "one own / one linked
+ * deck"). They only agree while the two players sit on the same bar, so the
+ * first build's `a != b -> return` left the orange row empty on the deck
+ * that was not the master (user report 2026-11-08: "only the bottom half of
+ * the phase meter, nothing on the upper half from deck 1"). Both mirrors are
+ * tapped independently now: a change is accepted only when it steps the bar
+ * 1..4 by exactly one (junk filter) and its period is plausible, and the row
+ * follows the tap that beat most recently. Paused master (nothing fresh for
+ * 4 periods): the ruler freezes at the last known beat instead of
+ * extrapolating into the void. */
 #define MST_BAR    0x0A8D042Eu
 #define MST_BAR2   0x0A8BE662u
 #define MST_MAXP   3000u              /* ms: slower than ~20 BPM = noise */
@@ -117,44 +127,68 @@ u32 pm_layer;                    /* layer drawn last (test: buffers alternate) *
 
 static void vline(u16 *lay, int stride, int x, int y0, int y1, u16 c);
 
-static u32 m_prev;               /* last raw bar (0 = not seen yet) */
-static u32 m_bar;                /* bar at the last accepted change (1..4) */
-static u32 m_pos;                /* monotonic beat count (per change) */
-static u32 m_t;                  /* SYS_MS of the last accepted change */
-static u32 m_p;                  /* smoothed period (ms); 0 = unknown */
-u32 pm_mtap;                     /* accepted changes (test/diagnostic) */
+typedef struct {
+    u32 prev;                    /* last raw bar (0 = not seen yet) */
+    u32 bar;                     /* bar at the last accepted change (1..4) */
+    u32 pos;                     /* monotonic beat count (per change) */
+    u32 t;                       /* SYS_MS of the last accepted change */
+    u32 p;                       /* smoothed period (ms); 0 = unknown */
+} mtap;
+static mtap mt[2];               /* one tap per link mirror */
+static u32 m_sel;                /* the mirror the orange row follows */
+u32 pm_mtap;                     /* accepted changes, both taps (diag) */
+u32 pm_msel;                     /* the tap the row follows (diag) */
+
+static void tap_one(mtap *m, u32 v, u32 ms)
+{
+    if (v < 1 || v > 4) return;                  /* mid-write / not live */
+    if (!m->prev) {                              /* first sighting */
+        m->prev = m->bar = v;
+        m->t = ms;
+        return;
+    }
+    if (v == m->prev) return;
+    if (v != (m->prev % 4) + 1) return;          /* not a 1..4 beat step */
+    u32 d = ms - m->t;
+    m->prev = m->bar = v;                        /* exactly one beat */
+    m->t = ms;
+    m->pos++;
+    pm_mtap++;
+    if (d > 150 && d < MST_MAXP)                 /* one plausible period */
+        m->p = m->p ? (m->p * 3 + d) / 4 : d;    /* EMA, ~4 beats settle */
+}
+
+/* a tap that changed within the last 4 periods is the one that is playing */
+static int fresh(const mtap *m, u32 ms)
+{
+    return m->p && (int)(ms - m->t) < (int)(4 * m->p + 500);
+}
 
 static void tap_master(u32 ms)
 {
-    u32 a = R8(UNCACHED(MST_BAR)), b = R8(UNCACHED(MST_BAR2));
-    if (a != b || a < 1 || a > 4) return;        /* mid-write / not live */
-    if (!m_prev) {                               /* first sighting */
-        m_prev = m_bar = a;
-        m_t = ms;
-        return;
-    }
-    if (a == m_prev) return;
-    m_prev = m_bar = a;                          /* exactly one beat happened */
-    u32 d = ms - m_t;
-    m_t = ms;
-    m_pos++;
-    pm_mtap++;
-    if (d > 150 && d < MST_MAXP)                 /* one plausible period */
-        m_p = m_p ? (m_p * 3 + d) / 4 : d;       /* EMA, ~4 beats to settle */
+    tap_one(&mt[0], R8(UNCACHED(MST_BAR)), ms);
+    tap_one(&mt[1], R8(UNCACHED(MST_BAR2)), ms);
+    int f0 = fresh(&mt[0], ms), f1 = fresh(&mt[1], ms);
+    if (f0 && f1)
+        m_sel = (int)(mt[0].t - mt[1].t) >= 0 ? 0 : 1;
+    else if (f0) m_sel = 0;
+    else if (f1) m_sel = 1;                      /* neither: hold, freeze */
+    pm_msel = m_sel;
 }
 
 static void draw_master(u16 *lay, int stride, int ms, u16 tick)
 {
-    if (!m_p) return;
+    const mtap *m = &mt[m_sel];
+    if (!m->p) return;
     /* frozen when the master stopped (byte quiet > 1 period): read "now"
      * as last-change + 1 period so the ruler holds its position */
     int now = ms;
-    int lim = (int)(m_t + m_p + m_p / 2);
+    int lim = (int)(m->t + m->p + m->p / 2);
     if (now > lim) now = lim;
     for (int k = -4; k <= 4; k++) {
-        int t = (int)(m_t + (u32)(k * (int)m_p));
-        int x = CX + (t - now) * (int)(X1 - X0) / (8 * (int)m_p);
-        int bi = (int)(m_bar - 1) + k;
+        int t = (int)(m->t + (u32)(k * (int)m->p));
+        int x = CX + (t - now) * (int)(X1 - X0) / (8 * (int)m->p);
+        int bi = (int)(m->bar - 1) + k;
         bi %= 4;
         if (bi < 0) bi += 4;
         if (bi == 0) {                           /* downbeat: red, crosses */

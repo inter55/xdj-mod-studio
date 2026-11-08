@@ -751,15 +751,31 @@ function ask(title, body, yes = 'OK', extra = '') {
 // native folder chooser when running inside the Mac app
 const picks = {};
 window.__xdjPicked = (id, path) => { if (picks[id]) picks[id](path || null); delete picks[id]; };
-function pickFolder(prompt) {
+// Windows app / browser: no native window, so the local server opens the
+// system's own dialog (/api/pick); typing the path is the last resort.
+async function serverPick(kind, prompt) {
+  const r = await api('/api/pick', {kind, prompt});
+  if (!r) return {done: true, path: null};
+  if (r.unsupported) return {done: false};
+  return {done: true, path: r.path || null};
+}
+async function pickFolder(prompt) {
   const h = window.webkit && window.webkit.messageHandlers && window.webkit.messageHandlers.xdj;
-  if (!h) { toast('Type the folder path, then press “Use this folder”.'); return Promise.resolve(null); }
+  if (!h) {
+    const r = await serverPick('folder', prompt);
+    if (r.done) return r.path;
+    toast('Type the folder path, then press “Use this folder”.'); return null;
+  }
   return new Promise(res => { const id = String(Math.random()); picks[id] = res; h.postMessage({type: 'pickFolder', id, prompt}); });
 }
 
-function pickFile(prompt) {
+async function pickFile(prompt) {
   const h = window.webkit && window.webkit.messageHandlers && window.webkit.messageHandlers.xdj;
-  if (!h) return Promise.resolve(prompt && window.prompt(prompt + ' (full path)') || null);
+  if (!h) {
+    const r = await serverPick('file', prompt);
+    if (r.done) return r.path;
+    return prompt && window.prompt(prompt + ' (full path)') || null;
+  }
   return new Promise(res => { const id = String(Math.random()); picks[id] = res; h.postMessage({type: 'pickFile', id, prompt}); });
 }
 

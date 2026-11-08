@@ -11,9 +11,10 @@ checked on hardware:
 - **Vinyl brake length and FLAC playback** were confirmed the same day (the
   brake really does change the stop, and a FLAC file lists, loads and plays).
 
-# XDJ Mod Studio v1.0.4 (app update)
+# XDJ Mod Studio v1.0.4
 
-App-only: nothing on the deck changes, nothing needs re-flashing.
+Nothing needs re-flashing. The phase meter and hot cue fixes are deck code:
+install the mods again (cable or USB stick) to get them.
 
 - **Make stems works again on MP3, M4A and FLAC tracks.** Since 1.0.2 it
   separated the track and then failed with "stick has exportLibrary.db".
@@ -28,6 +29,21 @@ App-only: nothing on the deck changes, nothing needs re-flashing.
   tracks were not affected.
 - If something goes wrong partway, both databases, the analysis folder and
   the audio file are put back exactly as they were.
+- **Phase meter on linked decks: the upper (master) row draws again.**
+  On the deck that is not the master, only the lower row showed. The meter
+  only drew the master row when both decks' beat counters agreed, and on
+  that deck they never do. It now follows each deck's beat on its own.
+  Reinstall the mods to get it (this one is deck code, not just the app).
+- **Hot cues D–H play D–H.** On pages 2 and 3, pressing D played A (E
+  played B, and so on). The pads play from two tables inside the deck that
+  paging didn't update; it does now. The paged pads also no longer show
+  half of the old letter and loop icon underneath. Reinstall the mods to
+  get it.
+- **Windows: the Choose buttons open a folder or file dialog.** Before,
+  they only asked you to type the path.
+
+Checked in the emulator; the two deck fixes have not been tried on a real
+deck yet.
 
 # XDJ Mod Studio v1.0.3 (app update)
 

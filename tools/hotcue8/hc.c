@@ -6,7 +6,13 @@
  * time ms u32 @+0x20, loop ms u32 @+0x24) but loads only A-C into the
  * player's three live slots (0x0B6C4118 + k*0x40: +0x08 u16 state (6 =
  * set, 0xFFFFFFFF word = empty), +0x0A number, +0x0C ms, +0x10 loop,
- * +0x14 time in 1/150 s). Re-tapping the HOT CUE tab pages the live
+ * +0x14 time in 1/150 s). The word is little-endian, so cue A reads
+ * 0x0001_0006: 6 at +0x08 (state), 1 at +0x0A (number).
+ *
+ * 2026-11-08: a paged slot (state 6, number 4, D's ms) stays untouched
+ * for 30M emu steps (build/hc_page_probe.py), yet the deck still played
+ * A-C -- so playback does not take its cue from these slots. See
+ * docs/HOTCUE8_GRID.md section 6. Re-tapping the HOT CUE tab pages the live
  * slots A-C -> D-F -> G-H (hc_next); the flush hook letters the pads of
  * pages 2/3 and resets to page 1 on a new track. All three pages always
  * exist: a track exported with no cues still gets empty D-H pads. HCPAGE (a byte in the
@@ -53,6 +59,16 @@ typedef unsigned int u32;
 #define PCOB_OFF 0xFC0u
 #define TAG_PCOB 0x424F4350u     /* "PCOB" as stored */
 #define SLOTS    0x0B6C4118u
+/* The deck keeps each pad's cue TWICE more, in two 8-record models of its
+ * own (0x38 bytes per record: +0x00 u16 state (6 = set), +0x02 u16
+ * number, +0x04 ms, +0x08 loop (-1 = none), +0x0C time in 1/150 s).
+ * Rewriting the three live slots alone does NOT move them: measured
+ * 2026-11-08 (build/hc_page_probe.py), after a page the slots held D/E/F
+ * while both models still held A/B/C for 30M steps -- and the deck went
+ * on playing A/B/C. These models are what the pads read. */
+#define MODEL_A  0x0BA28800u
+#define MODEL_B  0x0BA2A52Cu
+#define MODEL_S  0x38u
 #define PREVIEW  0x0BA3BCCCu
 #define KEYB     0x0B6C7A28u     /* panel key bitmap (zone handlers set it) */
 #define POS150   0x0C0E6D18u     /* live position, 1/150 s (deck 2026-10-25) */
@@ -114,6 +130,7 @@ static u32 hc_bslot;             /* live slot the held pad borrows */
 static u32 hc_borrow;            /* 1 = hc_bslot holds borrowed bytes */
 static u32 hc_restore;           /* flushes left until the restore */
 static u32 hc_saved[16];         /* the borrowed slot's 64 bytes */
+static u32 hc_savedm[2][14];     /* ... and its two pad-model records */
 u32 hc_count;                    /* cues in the loaded track (test/diag) */
 
 static u32 hash_preview(void)
@@ -171,16 +188,36 @@ static u32 cue_ms(u32 n)
     return hc_ram_set[n - 1] ? hc_ram_ms[n - 1] : 0;
 }
 
+/* write one record of a pad model. Measured 2026-11-08
+ * (build/hc_model_probe.py, dump of all 8 records of both models): a record
+ * uses ONLY +0x00..+0x0D, the tail +0x10..+0x37 is zero on every stock
+ * record, and an unused pad is state 0 / number 0 / ms 0 / pos 0 -- with
+ * loop 0xFFFFFFFF in model A but loop 0 in model B, so the empty loop is a
+ * per-model constant and not one value for both. */
+#define EMPTY_LOOP_A 0xFFFFFFFFu
+#define EMPTY_LOOP_B 0u
+static void model_set(u32 base, u32 k, u32 n, u32 have, u32 ms, u32 loop,
+                      u32 eloop)
+{
+    u32 r = base + k * MODEL_S;
+    R16(r + 0x00) = have ? 6 : 0;
+    R16(r + 0x02) = have ? (u16)n : 0;
+    R32(r + 0x04) = have ? ms : 0;
+    R32(r + 0x08) = have ? loop : eloop;
+    R32(r + 0x0C) = have ? ms * 3u / 20u : 0;
+}
+
 static void load_page(u32 page)
 {
     for (u32 k = 0; k < 3; k++) {
         u32 s = SLOTS + k * 0x40, n = 3 * page + k + 1, e = find_cue(n);
-        if (have_cue(n)) {
-            u32 ms = cue_ms(n);
+        u32 have = (u32)have_cue(n), ms = cue_ms(n);
+        u32 loop = e ? R32(e + 0x24) : 0;
+        if (have) {
             R16(s + 0x08) = 6;
             R16(s + 0x0A) = (u16)n;
             R32(s + 0x0C) = ms;
-            R32(s + 0x10) = e ? R32(e + 0x24) : 0;
+            R32(s + 0x10) = loop;
             R32(s + 0x14) = ms * 3u / 20u;          /* ms -> 1/150 s */
         } else {
             R32(s + 0x08) = 0xFFFFFFFFu;
@@ -188,6 +225,8 @@ static void load_page(u32 page)
             R32(s + 0x10) = 0;
             R32(s + 0x14) = 0;
         }
+        model_set(MODEL_A, k, n, have, ms, loop, EMPTY_LOOP_A);
+        model_set(MODEL_B, k, n, have, ms, loop, EMPTY_LOOP_B);
     }
     R8(HCPAGE) = (u8)page;
 }
@@ -221,6 +260,11 @@ static void scan_pads(void)
         R32(s + 0x0C) = ms;
         R32(s + 0x10) = 0;
         R32(s + 0x14) = pos;
+        /* the pads read the two models, not this slot: without these the
+         * freshly set cue would draw (hc_ram_set) but not recall until the
+         * page was reloaded */
+        model_set(MODEL_A, k, n, 1, ms, 0, EMPTY_LOOP_A);
+        model_set(MODEL_B, k, n, 1, ms, 0, EMPTY_LOOP_B);
         hc_sets++;
     }
 }
@@ -238,6 +282,10 @@ static void restore_slot(void)
     if (hc_borrow) {
         u32 s = SLOTS + hc_bslot * 0x40;
         for (int i = 0; i < 16; i++) R32(s + 4 * i) = hc_saved[i];
+        for (u32 j = 0; j < 14; j++) {
+            R32(MODEL_A + hc_bslot * MODEL_S + 4 * j) = hc_savedm[0][j];
+            R32(MODEL_B + hc_bslot * MODEL_S + 4 * j) = hc_savedm[1][j];
+        }
         hc_borrow = 0;
         hc_restores++;
     }
@@ -299,13 +347,19 @@ u32 hc_touch(u32 down, u32 x, u32 y)
     u32 k = (n - 1) % 3, s = SLOTS + k * 0x40;
     if (n > 3) {
         for (int j = 0; j < 16; j++) hc_saved[j] = R32(s + 4 * j);
+        for (u32 j = 0; j < 14; j++) {
+            hc_savedm[0][j] = R32(MODEL_A + k * MODEL_S + 4 * j);
+            hc_savedm[1][j] = R32(MODEL_B + k * MODEL_S + 4 * j);
+        }
         hc_borrow = 1;
-        u32 ms = cue_ms(n), e = find_cue(n);
+        u32 ms = cue_ms(n), e = find_cue(n), loop = e ? R32(e + 0x24) : 0;
         R16(s + 0x08) = 6;
         R16(s + 0x0A) = (u16)n;
         R32(s + 0x0C) = ms;
-        R32(s + 0x10) = e ? R32(e + 0x24) : 0;
+        R32(s + 0x10) = loop;
         R32(s + 0x14) = ms * 3u / 20u;     /* ms -> 1/150 s */
+        model_set(MODEL_A, k, n, 1, ms, loop, EMPTY_LOOP_A);
+        model_set(MODEL_B, k, n, 1, ms, loop, EMPTY_LOOP_B);
     }
     hc_bslot = k;
     hc_held = 1 + i;
@@ -327,7 +381,9 @@ void hc_toggle(void)
         hc_next();
         return;
     }
-    if (hc_restore) restore_slot();
+    if (hc_borrow) restore_slot();     /* a held press has no hc_restore yet:
+                                        * checking hc_restore alone would
+                                        * leave the borrowed bytes behind */
     drop_press();
     hc_view = hc_view ? 0 : 1;
     load_page(0);
@@ -338,7 +394,7 @@ void hc_toggle(void)
 void hc_next(void)
 {
     if (R8(MSOFF)) return;
-    if (hc_restore) restore_slot();
+    if (hc_borrow) restore_slot();
     drop_press();
     hc_view = 0;                             /* paging uses the stock row */
     hc_count = cue_count();
@@ -352,7 +408,7 @@ void hc_next(void)
 void hc_prev_page(void)
 {
     if (R8(MSOFF)) return;
-    if (hc_restore) restore_slot();
+    if (hc_borrow) restore_slot();
     drop_press();
     hc_view = 0;
     hc_count = cue_count();
@@ -371,10 +427,13 @@ static u16 mix(u16 bg, u16 fg, int a)          /* a 0..32 */
 static void letter(u16 *lay, int stride, int k, int idx, int have)
 {
     int px = PAD_X[k], cx = px + PAD_W / 2, cy = PAD_Y + PAD_H / 2;
-    int x0 = cx - 13, y0 = cy - 11;
-    for (int y = y0; y < y0 + 22; y++) {           /* cover the stock letter */
-        u16 bg = lay[y * stride + px + 8];
-        for (int x = x0; x < x0 + 26; x++) lay[y * stride + x] = bg;
+    /* Repaint the whole pad face. A 26x22 box over the middle left the
+     * stock letter and its loop badge half visible on the paged pads
+     * ("loop icon only partially rendering", reported 2026-11-08). The
+     * sample column is just inside the stock edge, where no art sits. */
+    for (int y = PAD_Y + 2; y < PAD_Y + PAD_H - 2; y++) {
+        u16 bg = lay[y * stride + px + 3];
+        for (int x = px + 3; x < px + PAD_W - 3; x++) lay[y * stride + x] = bg;
     }
     if (idx < 0 || idx > 7) return;
     u16 fg = have ? 0xFFFF : 0x6B4D;              /* white / dim grey */
@@ -449,6 +508,11 @@ void hc_hook(u32 dev, u32 req)
         hc_count = cue_count();
     }
     scan_pads();
+    if (R8(HCPAGE) >= HCPAGES) {        /* uninitialised page byte: never
+                                         * letter the pads off a bad page */
+        R8(HCPAGE) = 0;
+        return;
+    }
     /* the borrowed slot goes back HC_HOLDOFF flushes after the release (the
      * engine may still be reading the slot on the release frame) */
     if (hc_restore && !hc_held && --hc_restore == 0) restore_slot();

@@ -46,6 +46,7 @@ def row(path):
 
 
 def main():
+    PT.build()
     s = PT.syms()
     base = s["pm_entry"]
     img = open(f"{PT.OUT}/pm.bin", "rb").read()
@@ -85,8 +86,8 @@ def main():
     taps = mem.r32(s["pm_mtap"]) - tap0
     frozen = mem.r32(PT.POSL) == posl0
     print(f"this deck paused (POSL frozen): {frozen}; master taps {taps} "
-          f"(want {beats - 1}: the first sighting only arms)")
-    ok &= frozen and taps == beats - 1
+          f"(want {2 * (beats - 1)}: each beat on BOTH mirrors)")
+    ok &= frozen and taps == 2 * (beats - 1)
     # mid-beat: two shots 150 ms apart -> ticks move left
     setbar(bar)
     t0 = mem.r32(SYS_MS)
@@ -117,6 +118,37 @@ def main():
     held = (rc, tc) == (rd, td) and bool(rc + tc)
     print(f"master stopped -> ruler frozen: {held}")
     ok &= held
+    # 2026-11-08 DECK REPORT: on the deck that is NOT the master the two link
+    # mirrors are two different players' bars, so they disagree -- the old
+    # "mirrors must agree" test then rejected every frame and only the blue
+    # half of the meter drew. Model exactly that: one mirror cycles, the
+    # other sits on a DIFFERENT value. Each mirror is tapped separately now.
+    # (mirror 1 keeps a DIFFERENT player's bar for the whole leg)
+    t0 = mem.r32(SYS_MS)
+    tap0 = mem.r32(s["pm_mtap"])
+    bar, beats = mem.r8(MST[0]) % 4 + 1, 8      # start on a valid step
+    mem.w8(MST[1], bar % 4 + 1)                 # the other player's bar
+    lost = 0
+    for k in range(beats):                       # 120 BPM on mirror 0 only
+        mem.w8(MST[0], bar)
+        bar = bar % 4 + 1
+        t0 += 500
+        until(t0)
+        lost += mem.r8(MST[0]) != (bar + 2) % 4 + 1
+    disagree = mem.r32(s["pm_mtap"]) - tap0
+    until(t0 + 120)
+    fb_png(m, SHOT.format("e"))
+    re_, te = row(SHOT.format("e"))
+    until(t0 + 300)
+    fb_png(m, SHOT.format("f"))
+    rf, tf = row(SHOT.format("f"))
+    scroll = bool(re_) and bool(rf) and rf[0] < re_[0]
+    print(f"mirrors disagree: taps {disagree} (want ~{beats - 1}, one mirror "
+          f"only), followed tap {mem.r32(s['pm_msel'])}, bytes rewritten under "
+          f"us {lost}, orange row red {re_} tick {te}, "
+          f"scrolls {scroll} ({re_[:1]} -> {rf[:1]})")
+    ok &= beats - 2 <= disagree <= beats and mem.r32(s["pm_msel"]) == 0 \
+        and lost == 0 and scroll
     print("RESULT:", "PASS" if ok else "FAIL")
     return 0 if ok else 1
 

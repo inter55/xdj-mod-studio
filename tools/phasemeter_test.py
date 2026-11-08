@@ -24,6 +24,7 @@ os.environ.setdefault("XDJ_HLE_DSP", "1")   # before emu.machine import: the
                                             # model that advances POSL while
                                             # the emulated deck plays
 import struct
+import subprocess
 import sys
 sys.path[:0] = [".", "tools"]
 from emu.machine import Machine
@@ -37,6 +38,24 @@ SH_POS = 0x09D246E0  # 75/s; a write > 1 s off seeks the HLE play clock
 MODE = 0x0B6C4264    # 5 = playing, 3 = paused (HLE play clock gate)
 PREVIEW = 0x0BA3BCCC  # pm snapshots the grid when this changes
 X0, X1, CX, BY = 260, 471, 366, 150
+
+
+def build():
+    """Rebuild pm.bin when any source is newer than it.
+
+    The gate installs build/phasemeter/pm.bin byte for byte, so without this
+    it silently tests whatever binary is on disk: a run of the mirror legs
+    passed against the pre-fix binary until the module was rebuilt by hand.
+    """
+    srcs = ["tools/phasemeter/pm.c", "tools/phasemeter/pmhook.S",
+            "tools/phasemeter/build.sh"]
+    out = f"{OUT}/pm.bin"
+    if os.path.exists(out) and all(
+            os.path.getmtime(s) <= os.path.getmtime(out) for s in srcs):
+        return
+    print(f"{out} older than its sources -> {OUT}/build.sh")
+    subprocess.run(["sh", "tools/phasemeter/build.sh"], check=True,
+                   stdout=subprocess.DEVNULL)
 
 
 def syms():
@@ -98,6 +117,7 @@ def install_grid(mem, bpm=128.0, n=1000):
 
 
 def main():
+    build()
     s = syms()
     base = s["pm_entry"]
     img = open(f"{OUT}/pm.bin", "rb").read()

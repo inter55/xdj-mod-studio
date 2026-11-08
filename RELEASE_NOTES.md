@@ -11,6 +11,21 @@ checked on hardware:
 - **Vinyl brake length and FLAC playback** were confirmed the same day (the
   brake really does change the stop, and a FLAC file lists, loads and plays).
 
+# XDJ Mod Studio v1.0.3 (app update)
+
+App-only: nothing on the deck changes, nothing needs re-flashing.
+
+- **Windows: the emulator starts and the cable install gets past "Perform
+  Pads" again.** Both could stop with "index 0 is out of bounds for axis 0
+  with size 0" (with or without mods ticked). First-run setup could save a
+  PERFORM screen with no pad numbers on it, and building the PERFORM pad
+  font from that screen crashed. The font now falls back to a system font
+  in that case, so you don't need to run setup again, and setup now taps
+  PERFORM again until the pads are really on screen.
+- **Stems wording corrected:** BROWSE › FOLDER does open on a real deck, but
+  it doesn't show the `Contents` folder where a stems copy sits, so the
+  advice is unchanged: let **Make stems** replace the track.
+
 # XDJ Mod Studio v1.0.2 (app update)
 
 App-only: nothing on the deck changes, nothing needs re-flashing.

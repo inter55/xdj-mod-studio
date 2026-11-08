@@ -75,6 +75,8 @@ def _alpha_from_pad(pad, y0=19, y1=33):
 
 def _cols(al):
     xs = np.nonzero(al.max(axis=0) > 0.08)[0]
+    if len(xs) == 0:
+        return []
     # split into glyphs on empty columns
     groups, cur = [], [xs[0]]
     for x in xs[1:]:
@@ -126,12 +128,36 @@ def _triangle(w, h, left, pad_top, H):
     return np.array(im.resize((w, H), Image.LANCZOS), float) / 255.0
 
 
+def _stock_digits():
+    """The firmware's own 1 2 4 6 8, or None when the captured pads hold no
+    digits (a first-run capture that missed the PERFORM screen -- seen on
+    Windows 2026-11: every PERFORM install and the emulator crashed with
+    'index 0 is out of bounds for axis 0 with size 0')."""
+    try:
+        z = np.load(_stock())
+        g = {}
+        one_six = _cols(_alpha_from_pad(z["16"]))
+        if len(one_six) < 2:
+            return None
+        g["1"], g["6"] = one_six[:2]
+        for d in "248":
+            cols = _cols(_alpha_from_pad(z[d]))
+            if not cols:
+                return None
+            g[d] = cols[0]
+        if len({g[d].shape[0] for d in "12468"}) != 1 or g["2"].shape[1] < 3:
+            return None
+        return g
+    except Exception as e:                # missing/broken file: same answer
+        print("aafont: stock pad digits unusable (%s); drawing our own" % e)
+        return None
+
+
 def pad_glyphs():
-    z = np.load(_stock())
-    g = {}
-    g["1"], g["6"] = _cols(_alpha_from_pad(z["16"]))[:2]
-    for d in "248":
-        g[d] = _cols(_alpha_from_pad(z[d]))[0]
+    g = _stock_digits()
+    if g is None:                        # same 9x14 box, system face
+        g = {d: _render(d, NEUE, 10, 14, 9) for d in "2468"}
+        g["1"] = _render("1", NEUE, 10, 14)
     H = g["2"].shape[0]
     W = g["2"].shape[1]
     for d in "03579":

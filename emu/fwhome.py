@@ -185,8 +185,29 @@ def setup(upd, progress=lambda f, note: None, steps=None):
         m.cpu.run(limit=hold)
         dev.panel_frame = P.build_frame()
         m.cpu.run(limit=after)
-    tap(PERFORM_TAP)
-    perf_fb = _fb(m)
+    def has_digits(fb):                      # BEAT LOOP pads drawn?
+        crop = fb[DIGIT_Y + 19:DIGIT_Y + 33, DIGITS["2"] + 10:DIGITS["2"] + 69]
+        c = crop.astype(np.uint32)
+        lum = ((c >> 11) & 31) * 8 + ((c >> 5) & 63) * 4 + (c & 31) * 8
+        return int(lum.max()) - int(np.median(lum)) > 40
+    # A tap that lands while the deck is busy can be missed (a Windows
+    # first run captured a PERFORM screen with no pads -> every PERFORM
+    # build failed). Re-tap with longer holds until the pads show.
+    for hold, after in ((12_000_000, 40_000_000), (30_000_000, 120_000_000),
+                        (60_000_000, 250_000_000), (60_000_000, 500_000_000)):
+        tap(PERFORM_TAP, hold, after)
+        perf_fb = _fb(m)
+        if has_digits(perf_fb):
+            break
+        if not np.array_equal(perf_fb, main_fb):   # opened, still drawing
+            m.cpu.run(limit=after)
+            perf_fb = _fb(m)
+            if has_digits(perf_fb):
+                break
+            tap(PERFORM_TAP, hold, after)         # it toggled: close again
+    else:
+        print("fwhome: PERFORM pads never showed; pad font falls back to "
+              "a system face")
     np.savez_compressed(os.path.join(d, "screens.npz"), main=main_fb, perform=perf_fb)
     y0, y1 = EDGE_ROWS
     edges = np.hstack([perf_fb[y0:y1, a:b] for a, b in EDGE_COLS])

@@ -42,7 +42,8 @@ NATIVES = os.environ.get("XDJ_WIN_NATIVES", os.path.join("build", "win-natives")
 hidapi_dylib = None if WIN else _bundle_hidapi()
 
 datas, binaries, hidden = [], [], []
-for pkg in ("pygame", "numpy", "PIL"):
+# sqlcipher3: OneLibrary (exportLibrary.db) for Make stems / filter / convert
+for pkg in ("pygame", "numpy", "PIL", "sqlcipher3"):
     d, b, h = collect_all(pkg)
     datas += d; binaries += b; hidden += h
 if hidapi_dylib:

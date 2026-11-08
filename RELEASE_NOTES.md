@@ -11,6 +11,24 @@ checked on hardware:
 - **Vinyl brake length and FLAC playback** were confirmed the same day (the
   brake really does change the stop, and a FLAC file lists, loads and plays).
 
+# XDJ Mod Studio v1.0.4 (app update)
+
+App-only: nothing on the deck changes, nothing needs re-flashing.
+
+- **Make stems works again on MP3, M4A and FLAC tracks.** Since 1.0.2 it
+  separated the track and then failed with "stick has exportLibrary.db".
+  rekordbox 7.2.11 and later writes that second library database
+  (OneLibrary) next to `export.pdb`, so almost every recent stick has one,
+  and the app refused to change a stick it couldn't fully update. It now
+  updates the track in both databases (path, file name, size, type, audio
+  details and analysis folder), so the stems version shows in ARTIST /
+  TRACK on the XDJ-700 and in anything that reads OneLibrary. The original
+  file stays on the stick as `.pre-stems`, and both databases keep a
+  `.bak-pre-stems` copy from before the first replacement. WAV and AIFF
+  tracks were not affected.
+- If something goes wrong partway, both databases, the analysis folder and
+  the audio file are put back exactly as they were.
+
 # XDJ Mod Studio v1.0.3 (app update)
 
 App-only: nothing on the deck changes, nothing needs re-flashing.

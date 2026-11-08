@@ -33,8 +33,13 @@ STICK is the root of the mounted USB stick. --stems DIR holds vocals.wav,
 drums.wav, bass.wav and other.wav (what Demucs wrote); without it, apply
 looks for "<track>.stems/" next to the track.
 
-Not covered: PIONEER/rekordbox/exportLibrary.db (OneLibrary). The XDJ-700
-reads export.pdb; a stick with both databases is refused unless --allow-onelibrary.
+PIONEER/rekordbox/exportLibrary.db (OneLibrary, which rekordbox 7.2.11+
+writes next to export.pdb by default) gets the same row change: path, file
+name, size, type, audio facts and analysis path, so players and rekordbox
+that read OneLibrary find the stems file too. It needs sqlcipher3
+(sqlcipher3-wheels); without it a stick that has OneLibrary is refused
+(--allow-onelibrary replaces anyway and leaves OneLibrary pointing at the
+.pre-stems original's old name).
 """
 import argparse
 import os
@@ -66,6 +71,7 @@ TARGET_EXT = {".mp3": ".wav", ".m4a": ".wav", ".flac": ".aiff"}
 FILE_TYPE = {".wav": 0x0B, ".aiff": 0x0C, ".aif": 0x0C}
 STEMS = ("vocals", "drums", "bass", "other")
 PDB_BAK = ".bak-pre-stems"
+OL_NAME = "exportLibrary.db"
 AUDIO_BAK = ".pre-stems"
 FILE_TYPE_OFFSET = 0x5A
 
@@ -132,6 +138,70 @@ def _file_type(rel):
     if ext not in FILE_TYPE:
         raise Refuse("no file-type code for " + ext)
     return FILE_TYPE[ext]
+
+
+def _ol_connect(path):
+    """Open a OneLibrary database (SQLCipher, the publicly known key)."""
+    try:
+        import sqlcipher3.dbapi2 as sq
+    except ImportError as e:
+        raise Refuse("this stick also has %s (OneLibrary) and updating it "
+                     "needs sqlcipher3 (pip install sqlcipher3-wheels): %s"
+                     % (OL_NAME, e))
+    from onelibrary_to_pdb import ONELIBRARY_KEY
+    con = sq.connect(path)
+    con.execute("PRAGMA key = '%s'" % ONELIBRARY_KEY)
+    con.execute("select count(*) from sqlite_master").fetchone()  # bad key -> error
+    return con
+
+
+def _ol_find(con, rel):
+    ids = [r[0] for r in con.execute(
+        "select content_id from content where path = ?", (rel,))]
+    if len(ids) != 1:
+        raise Refuse("%s: %d OneLibrary rows for %s (expected 1)"
+                     % (OL_NAME, len(ids), rel))
+    return ids[0]
+
+
+def _ol_update(path, content_id, p, info):
+    """Point the track's OneLibrary row at the stems file. Works on a copy
+    that replaces the original only after the change reads back."""
+    if os.path.exists(path + "-wal") and os.path.getsize(path + "-wal"):
+        raise Refuse("%s has unsaved changes (%s-wal): close rekordbox, "
+                     "eject the stick properly and try again" % (OL_NAME, OL_NAME))
+    tmp = path + ".tmp-stems"
+    shutil.copyfile(path, tmp)
+    try:
+        con = _ol_connect(tmp)
+        vals = {"path": p["new_rel"],
+                "fileName": os.path.basename(p["new_rel"]),
+                "fileSize": info["file_size"],
+                "fileType": _file_type(p["new_rel"]),
+                "bitrate": info["bitrate"],
+                "bitDepth": info["sample_depth"],
+                "samplingRate": info["sample_rate"],
+                "length": info["duration"],
+                "analysisDataFilePath": p["new_dir"] + "/ANLZ0000.DAT"}
+        cols = list(vals)
+        con.execute("update content set %s where content_id = ?" % ", ".join(
+            c + " = ?" for c in cols), [vals[c] for c in cols] + [content_id])
+        con.commit()
+        got = con.execute("select %s from content where content_id = ?" %
+                          ", ".join(cols), (content_id,)).fetchone()
+        if list(got) != [vals[c] for c in cols]:
+            raise Refuse("%s row did not read back as written" % OL_NAME)
+        con.execute("PRAGMA wal_checkpoint(TRUNCATE)")
+        con.close()
+        for ext in ("-wal", "-shm"):
+            if os.path.exists(tmp + ext):
+                os.remove(tmp + ext)
+        os.replace(tmp, path)
+    except BaseException:
+        for f in (tmp, tmp + "-wal", tmp + "-shm"):
+            if os.path.exists(f):
+                os.remove(f)
+        raise
 
 
 def _patch_string(buf, old, new):
@@ -206,7 +276,8 @@ def plan(stick, rel, stems_dir=None):
             "old_dir": old_dir, "new_dir": new_dir, "stems": stems,
             "has_analysis": os.path.isdir(os.path.join(stick, old_dir.lstrip("/"))),
             "one_library": os.path.exists(os.path.join(
-                stick, "PIONEER", "rekordbox", "exportLibrary.db"))}
+                stick, "PIONEER", "rekordbox", OL_NAME)),
+            "ol_path": os.path.join(stick, "PIONEER", "rekordbox", OL_NAME)}
 
 
 def _show_plan(p):
@@ -223,8 +294,7 @@ def _show_plan(p):
         mark = "ok  " if os.path.exists(s) else "MISS"
         print("  stem %s %s" % (mark, s))
     if p["one_library"]:
-        print("  note: exportLibrary.db is present (OneLibrary); it is not "
-              "updated by this tool")
+        print("  OneLibrary      : %s row updated the same way" % OL_NAME)
 
 
 def apply(stick, rel, stems_dir=None, yes=False, allow_onelibrary=False):
@@ -235,9 +305,16 @@ def apply(stick, rel, stems_dir=None, yes=False, allow_onelibrary=False):
         raise Refuse("missing stem file(s): " + ", ".join(missing))
     if os.path.exists(p["target"]):
         raise Refuse("target already exists: " + p["target"])
-    if p["one_library"] and not allow_onelibrary:
-        raise Refuse("stick has exportLibrary.db; pass --allow-onelibrary "
-                         "to replace anyway (the deck reads export.pdb)")
+    ol_id = None
+    if p["one_library"]:
+        try:                       # check before anything is written
+            con = _ol_connect(p["ol_path"])
+            ol_id = _ol_find(con, p["rel"])
+            con.close()
+        except Refuse:
+            if not allow_onelibrary:
+                raise
+            print("  OneLibrary not updated (--allow-onelibrary)")
     if not yes:
         raise Refuse("nothing written: add --yes to do it")
 
@@ -271,7 +348,10 @@ def apply(stick, rel, stems_dir=None, yes=False, allow_onelibrary=False):
         bak = p["pdb"] + PDB_BAK
         if not os.path.exists(bak):
             open(bak, "wb").write(pdb_bytes)
-            undo.append(lambda: open(p["pdb"], "wb").write(pdb_bytes))
+        # always: the .bak only exists once per stick, but every run needs
+        # its own way back (a 2nd track that failed later left export.pdb
+        # pointing at a stems file that was never put in place)
+        undo.append(lambda: open(p["pdb"], "wb").write(pdb_bytes))
         ed = PdbEditor(pdb_bytes)
         for field in ("file_size", "sample_rate", "bitrate", "sample_depth",
                       "duration"):
@@ -296,6 +376,16 @@ def apply(stick, rel, stems_dir=None, yes=False, allow_onelibrary=False):
             f.write(buf)
         os.replace(p["pdb"] + ".tmp", p["pdb"])
         print("export.pdb patched (path, analysis path, file type, audio facts)")
+
+        # 1b. exportLibrary.db (OneLibrary): the same row change
+        if ol_id is not None:
+            ol_bytes = open(p["ol_path"], "rb").read()
+            ol_bak = p["ol_path"] + PDB_BAK
+            if not os.path.exists(ol_bak):
+                open(ol_bak, "wb").write(ol_bytes)
+            _ol_update(p["ol_path"], ol_id, p, info)
+            undo.append(lambda: open(p["ol_path"], "wb").write(ol_bytes))
+            print("%s patched (same fields)" % OL_NAME)
 
         # 2. analysis: PPTH must name the new file, then the folder moves
         old_dir_abs = os.path.join(stick, p["old_dir"].lstrip("/"))

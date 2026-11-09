@@ -86,11 +86,9 @@ def main():
     mem.w32(hook, syms["hc_entry"])
     mem.w8(MS.MSOFF, 0)
 
-    run(20_000_000)
-    tap(709, 37)                                   # PERFORM
-    run(20_000_000)
-
-    # blank cues D and E so page 2 has empty slots like a cue-less export
+    # blank cues D and E so page 2 has empty slots like a cue-less export.
+    # BEFORE the first flush: the pads take a track's D-H from the ctx once
+    # (2026-11-09), so blanking later would not reach them
     for n in (4, 5):
         e = H.find_cue(m, n)
         if not e:
@@ -106,6 +104,11 @@ def main():
             for k in range(min(mem.r32(p2 + 0x1C), 64)):
                 if mem.r16(ent + k * 0x38 + 0x0E) == n:
                     mem.w16(ent + k * 0x38 + 0x0E, 0)
+
+
+    run(20_000_000)
+    tap(709, 37)                                   # PERFORM
+    run(20_000_000)
 
     def slot(k):
         s = SLOT + k * 0x40

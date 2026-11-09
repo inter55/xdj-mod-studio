@@ -1,3 +1,34 @@
+# XDJ Mod Studio v1.0.6
+
+Deck code: install the mods again after updating (cable, USB-stick file or
+a flash) for this to reach your deck.
+
+- **Hot cues no longer jump to another track's cue.** With a track loaded,
+  a hot cue could play a DIFFERENT track's cue at the same letter (C on
+  track Y jumps to track X's C), and some tracks seemed to "dominate". The
+  deck keeps one buffer for a stick's track analysis, and BROWSE fills it
+  with whatever track the cursor is on when it shows that track's details.
+  The PERFORM hot-cue pages and the 8-pad view re-read that buffer every
+  time you tapped HOT CUE or changed page, so after browsing they could copy
+  the browsed track's A–C onto your pads. The "dominant" track was simply
+  the one the cursor last stopped on. That is also why the pads could show
+  A–C lit while the waveform preview only had B.
+  Now the pads keep the deck's own A–C exactly as the deck loaded them, and
+  take D–H from that buffer once per track, only after checking it belongs to
+  the loaded track. Proven in the emulator by overwriting the buffer the way
+  browsing does (`tools/hotcue8_browse_test.py`): 1.0.5 fails it exactly as
+  reported, 1.0.6 passes. Not yet confirmed on a real deck.
+- If the deck's own A–C never match that buffer for a track (for example
+  with the stock setting that carries the previous track's hot cues over),
+  that track's D–H pads stay empty rather than playing a wrong cue.
+- **Live Key Shift in the USB-stick mods file on Windows** (GitHub #11):
+  not fixed yet. The recording stops at the key-shift step on one Windows
+  PC and the same recording passes on a Mac. The installer now waits longer
+  on a slow PC and reports how long the step took, so the next log can show
+  why. Until then, untick Live Key Shift for the stick file on Windows.
+- Not in this release: D–H markers on the waveform preview (the deck draws
+  those itself and only knows three hot cues).
+
 # XDJ Mod Studio v1.0.5
 
 This one carries deck code, so the phase-meter fix only reaches a deck after

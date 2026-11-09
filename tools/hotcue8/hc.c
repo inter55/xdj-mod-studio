@@ -145,6 +145,28 @@ static u32 hc_borrow;            /* 1 = hc_bslot holds borrowed bytes */
 static u32 hc_restore;           /* flushes left until the restore */
 static u32 hc_saved[16];         /* the borrowed slot's 64 bytes */
 static u32 hc_savedm[2][14];     /* ... and its two pad-model records */
+
+/* THE LOADED TRACK'S CUES (2026-11-09, Reddit report: "C on track Y jumps to
+ * track X's C", some tracks "dominate"). The ANLZ ctx is ONE buffer per
+ * stick: BROWSE's track preview parses the track under the cursor into it
+ * (the same cache reuse that made the centre RGB waveform show other
+ * tracks' colours, CLAUDE.md 40). We used to re-read it on every page
+ * change and on the 8-pad toggle, so after browsing, load_page(0) wrote the
+ * PREVIEWED track's A-C into the live slots and pad models.
+ *   A-C: the deck loads them itself and gets them right. While page 1 is
+ *        showing we keep a copy of the deck's own slots + model records
+ *        (hc_p1*), and going back to page 1 puts exactly those bytes back.
+ *   D-H: taken from the ctx ONCE per track, and only after the ctx proves
+ *        it is the loaded track: its A-C match the deck's own A-C (set /
+ *        empty and ms). Until then D-H are unknown (empty pads, no paging
+ *        of exported cues); after that the ctx is never read again. */
+static u32 hc_cap;               /* 1 = hc_x* hold the loaded track's D-H */
+static u8 hc_xhave[8];
+static u32 hc_xms[8], hc_xloop[8];
+static u32 hc_p1ok;              /* 1 = hc_p1* hold the deck's page-1 bytes */
+static u32 hc_p1s[3][16];        /* live slots A-C */
+static u32 hc_p1m[2][3][14];     /* their pad-model records */
+u32 hc_caps;                     /* tracks captured (test/diag) */
 u32 hc_count;                    /* cues in the loaded track (test/diag) */
 
 static u32 hash_preview(void)
@@ -208,24 +230,85 @@ static u32 cue_e_loop(u32 e)
     return R32(e) == TAG_PCP2 ? R32(e + 0x18) : R32(e + 0x24);
 }
 
-static u32 cue_count(void)
+static int p1_have(u32 n)                   /* n = 1..3: the deck's own */
 {
-    u32 n = 0;
-    for (u32 i = 1; i <= 8; i++) if (find_cue(i) || hc_ram_set[i - 1]) n = i;
-    return n;
+    u32 k = n - 1;
+    if (hc_p1ok)
+        return (hc_p1s[k][2] & 0xFFFFu) == 6 && (hc_p1s[k][2] >> 16) == n;
+    u32 s = SLOTS + k * 0x40;
+    return R16(s + 0x08) == 6 && R16(s + 0x0A) == n;
 }
 
 static int have_cue(u32 n)                 /* exported, or set on the deck */
 {
-    return n >= 1 && n <= 8 && (find_cue(n) || hc_ram_set[n - 1]);
+    if (n < 1 || n > 8) return 0;
+    if (n <= 3) return p1_have(n);
+    return (hc_cap && hc_xhave[n - 1]) || hc_ram_set[n - 1];
 }
 
-static u32 cue_ms(u32 n)
+static u32 cue_count(void)
 {
-    if (n < 1 || n > 8) return 0;              /* page 3 slot 3 has no cue */
-    u32 e = find_cue(n);
-    if (e) return cue_e_ms(e);
+    u32 n = 0;
+    for (u32 i = 1; i <= 8; i++) if (have_cue(i)) n = i;
+    return n;
+}
+
+static u32 cue_ms(u32 n)                   /* D-H only */
+{
+    if (n < 4 || n > 8) return 0;              /* page 3 slot 3 has no cue */
+    if (hc_cap && hc_xhave[n - 1]) return hc_xms[n - 1];
     return hc_ram_set[n - 1] ? hc_ram_ms[n - 1] : 0;
+}
+
+static u32 cue_loop(u32 n)                 /* D-H only */
+{
+    return (n >= 4 && n <= 8 && hc_cap && hc_xhave[n - 1]) ? hc_xloop[n - 1] : 0;
+}
+
+static void p1_save(void)
+{
+    for (u32 k = 0; k < 3; k++) {
+        for (u32 j = 0; j < 16; j++) hc_p1s[k][j] = R32(SLOTS + k * 0x40 + 4 * j);
+        for (u32 j = 0; j < 14; j++) {
+            hc_p1m[0][k][j] = R32(MODEL_A + k * MODEL_S + 4 * j);
+            hc_p1m[1][k][j] = R32(MODEL_B + k * MODEL_S + 4 * j);
+        }
+    }
+    hc_p1ok = 1;
+}
+
+static void p1_restore(void)
+{
+    if (!hc_p1ok) return;                  /* never left page 1 with data */
+    for (u32 k = 0; k < 3; k++) {
+        for (u32 j = 0; j < 16; j++) R32(SLOTS + k * 0x40 + 4 * j) = hc_p1s[k][j];
+        for (u32 j = 0; j < 14; j++) {
+            R32(MODEL_A + k * MODEL_S + 4 * j) = hc_p1m[0][k][j];
+            R32(MODEL_B + k * MODEL_S + 4 * j) = hc_p1m[1][k][j];
+        }
+    }
+}
+
+/* page 1 showing, nothing borrowed: the live slots are the deck's own A-C.
+ * Take D-H from the ctx when its A-C agree with them. */
+static void capture(void)
+{
+    if (hc_cap) return;
+    for (u32 k = 0; k < 3; k++) {
+        u32 s = SLOTS + k * 0x40, n = k + 1, e = find_cue(n);
+        int set = R16(s + 0x08) == 6 && R16(s + 0x0A) == n;
+        if (set != (e != 0)) return;                 /* another track's list */
+        if (set && R32(s + 0x0C) != cue_e_ms(e)) return;
+    }
+    for (u32 n = 1; n <= 8; n++) {
+        u32 e = find_cue(n);
+        hc_xhave[n - 1] = e != 0;
+        hc_xms[n - 1] = e ? cue_e_ms(e) : 0;
+        hc_xloop[n - 1] = e ? cue_e_loop(e) : 0;
+    }
+    hc_cap = 1;
+    hc_caps++;
+    hc_count = cue_count();
 }
 
 /* write one record of a pad model. Measured 2026-11-08
@@ -249,10 +332,14 @@ static void model_set(u32 base, u32 k, u32 n, u32 have, u32 ms, u32 loop,
 
 static void load_page(u32 page)
 {
+    if (page == 0) {                       /* the deck's own A-C, as it had them */
+        p1_restore();
+        R8(HCPAGE) = 0;
+        return;
+    }
     for (u32 k = 0; k < 3; k++) {
-        u32 s = SLOTS + k * 0x40, n = 3 * page + k + 1, e = find_cue(n);
-        u32 have = (u32)have_cue(n), ms = cue_ms(n);
-        u32 loop = e ? cue_e_loop(e) : 0;
+        u32 s = SLOTS + k * 0x40, n = 3 * page + k + 1;
+        u32 have = (u32)have_cue(n), ms = cue_ms(n), loop = cue_loop(n);
         if (have) {
             R16(s + 0x08) = 6;
             R16(s + 0x0A) = (u16)n;
@@ -392,7 +479,7 @@ u32 hc_touch(u32 down, u32 x, u32 y)
             hc_savedm[1][j] = R32(MODEL_B + k * MODEL_S + 4 * j);
         }
         hc_borrow = 1;
-        u32 ms = cue_ms(n), e = find_cue(n), loop = e ? cue_e_loop(e) : 0;
+        u32 ms = cue_ms(n), loop = cue_loop(n);
         R16(s + 0x08) = 6;
         R16(s + 0x0A) = (u16)n;
         R32(s + 0x0C) = ms;
@@ -545,7 +632,15 @@ void hc_hook(u32 dev, u32 req)
         hc_restore = 0;
         hc_held = 0;
         for (u32 i = 0; i < 8; i++) hc_ram_set[i] = 0;   /* drop deck cues */
+        hc_cap = 0;                     /* D-H: prove the ctx again */
+        hc_p1ok = 0;
         hc_count = cue_count();
+    }
+    /* page 1 showing and nothing borrowed: the live slots are the deck's own
+     * A-C -- keep their bytes, and take D-H once the ctx agrees with them */
+    if (R8(HCPAGE) == 0 && !hc_borrow && !hc_held && !hc_restore) {
+        p1_save();
+        capture();
     }
     scan_pads();
     if (R8(HCPAGE) >= HCPAGES) {        /* uninitialised page byte: never

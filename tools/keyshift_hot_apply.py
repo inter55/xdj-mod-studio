@@ -230,10 +230,17 @@ def main():
         q = f"{HOOK:x},{base:x}LW".encode() + b"\r\x00"
         h.write(q + b"\x00" * (26 - len(q)))
         drain(h, 0.3)
+        # Wait 15 s AND at least 80 status reads. On the emulated deck that
+        # records the USB-stick mods file (tools/mock), time only advances
+        # per read (MOCK_RSLICE steps each), and the cave needs a screen
+        # flush. Wall time alone can give a slow PC too few reads (a
+        # suspect for GitHub #11, not confirmed). On a real deck 80 reads
+        # at 0.3 s is ~24 s worst case, only if it never answers early.
         t = time.time()
-        status = 0
-        while time.time() - t < 15:
+        status, polls = 0, 0
+        while time.time() - t < 15 or polls < 80:
             status = rd32(h, s["ksh_status"])
+            polls += 1
             if status and status != 8:
                 break
             time.sleep(0.3)
@@ -242,6 +249,7 @@ def main():
                for k in range(0, 64, 4)]
         print("  dbg", " ".join(f"{x:08x}" for x in dbg))
         hook = rd32(h, HOOK)
+        print(f"  answered after {polls} status reads, {time.time() - t:.1f} s")
         print(f"  status {status} = {MEANING.get(status, '?')}; hook back to "
               f"{'stock chain' if hook == live else hex(hook)}")
         if hook == base:                       # never ran / still retrying

@@ -95,7 +95,7 @@ UIHTML = os.path.join(BUNDLE, "studio", "ui.html") if FROZEN else os.path.join(H
 
 APP_SUPPORT = app_support_dir()
 # the app's own release number (GitHub release tag v<APP_VERSION>)
-APP_VERSION = "1.0.6"
+APP_VERSION = "1.0.7"
 RELEASES_API = "https://api.github.com/repos/inter55/xdj-mod-studio/releases/latest"
 RELEASES_PAGE = "https://github.com/inter55/xdj-mod-studio/releases/latest"
 SETTINGS = os.path.join(APP_SUPPORT, "studio.json")
@@ -1754,6 +1754,16 @@ def j_stick_loader(log, prog, upd, banner="1.16"):
     if rc or "RESULT: PASS" not in txt:
         bad = out + ".FAILED-BOOT-TEST"
         os.replace(out, bad)
+        fails = [l for l in txt.splitlines() if l.strip().startswith("FAIL")]
+        if fails and all("stick pack applied" in l for l in fails):
+            # the loader itself checked out; only the mods file already on
+            # the stick (written by this or an older app) did not apply
+            raise RuntimeError(
+                "the loader update itself boot-tested fine, but the mods file "
+                f"on your stick ({pack}) did not apply in the test -- do NOT "
+                "flash yet. Write the mods file again with this version of the "
+                "app (Mod > USB stick, step 2), then build the loader update "
+                f"again. (kept as {bad})")
         raise RuntimeError("the emulator boot test FAILED -- do NOT flash it "
                            f"(kept as {bad} for inspection)")
     with open(os.path.join(out_dir, "READ ME FIRST.txt"), "w") as f:

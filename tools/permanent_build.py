@@ -828,11 +828,24 @@ def stick_loader_check(m, dec, log=print):
         disk = open_disk(d)
         m.mem.dev.usb_disk = disk
         u.stick = MassStorage(disk)
-        for _ in range(8):
-            m.cpu.run(limit=250_000_000)
         st = s["ld_state"]
-        status, applied = mem.r32(st + 8), mem.r32(st + 16)
+        # run until the loader reports a result (3 refused / 4 done) or 6e9
+        # steps; a big pack decoding is allowed its time, and the result
+        # below says WHERE it stopped instead of a bare "status 0"
+        for _ in range(24):
+            m.cpu.run(limit=250_000_000)
+            if mem.r32(st + 8) in (3, 4):
+                break
+        (calls, status, tries, applied, bad, why, nbytes) = (
+            mem.r32(st + 4), mem.r32(st + 8), mem.r32(st + 12), mem.r32(st + 16),
+            mem.r32(st + 20), mem.r32(st + 24), mem.r32(st + 28))
         n = struct.unpack_from("<H", p, 10)[0]
+        log(f"       loader: calls {calls} tries {tries} status {status} why {why} "
+            f"bad entry {bad} bytes read {nbytes} of {len(p)}")
+        if status == 0:
+            log("       " + ("the stick's files were never opened through the loader"
+                            if not calls else
+                            "the loader started on the file and never finished it"))
         c = status == 4 and applied == n
         log(("  ok   " if c else "  FAIL ") +
             f"stick pack applied at mount: status {status} (4 = done), {applied}/{n} records")

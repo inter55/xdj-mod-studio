@@ -157,7 +157,7 @@ sh tools/lighttext/build.sh >/dev/null
 sh tools/touchfx/build.sh >/dev/null
 sh tools/usbloader/build.sh >/dev/null
 for f in lighttext/lt.bin lighttext/lt.syms touchfx/tfx.bin touchfx/tfx.syms \
-         fx/ksh.bin fx/ksh.syms fx/fx.bin fx/fx.syms \
+         fx/ksh.bin fx/ksh.syms fx/fx.bin fx/fx.syms fx/ring.txt \
          usbloader/ld.bin usbloader/ld.syms; do
   [ -f "build/$f" ] || { echo "ERROR: build/$f missing"; exit 1; }
   mkdir -p "$REPO/build/$(dirname "$f")"

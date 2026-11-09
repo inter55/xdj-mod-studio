@@ -52,6 +52,19 @@ def main():
     from rgb_overview_apply import br, read_block, send
     import perform_pads as PP
     pads_touch = PP.hooks()[0][2]
+    # The 8-hot-cue view (tools/hotcue8, since 1.0.4) hooks the touch pool
+    # too and is installed BEFORE TOUCH FX, so its entry is a normal live
+    # value here. Without it every default install (8 hot cues on) refused
+    # with "unknown touch hook 0x979003c" and TOUCH FX never went in.
+    known_touch = {STOCK_TOUCH, pads_touch}
+    try:
+        for ln in open(os.path.join(os.path.dirname(os.path.abspath(__file__)),
+                                    "..", "build", "hotcue8", "hc.syms")):
+            a_, _, n_ = ln.split()
+            if n_.lstrip("_") == "hc_tentry":
+                known_touch.add(int(a_, 16))
+    except OSError:
+        pass
     # the flush side chains in BEHIND the pads (their normal-exit literal,
     # stock blit 0x08E7D278), so the panel and its tab draw after them
     HOOK_FLUSH = PP.pbo_lit()
@@ -114,7 +127,7 @@ def main():
             lt = rd32(h, s["tfx_prev_touch"])
         if lf == base or lt == s["tfx_touch_entry"]:
             sys.exit("FAIL: hook chain points at itself - REBOOT the deck")
-        if lt not in (STOCK_TOUCH, pads_touch):
+        if lt not in known_touch:
             sys.exit(f"FAIL: unknown touch hook {lt:#x} - nothing written")
         if lf != PP.ORIG_BLIT:
             sys.exit(f"FAIL: pads exit literal {lf:#x} is not the stock blit "

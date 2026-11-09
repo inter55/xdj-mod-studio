@@ -102,6 +102,13 @@ def emu():
     m = Machine.load(ck)
     mem, c = m.mem, m.cpu
     PP.install(mem)
+    if os.environ.get("TFX_HC") == "1":
+        # the real install order: 8 hot cues hook the touch pool BEFORE
+        # TOUCH FX, so TOUCH FX chains in front of them (1.0.7 fix)
+        import hotcue8_test as HT
+        hcode, hsyms = HT.build()
+        HT.install_hc(mem, hcode, hsyms)
+        print(f"  8-hot-cue view installed (touch entry {hsyms['hc_tentry']:#x})")
     s = install(mem)
     mem.w16(NOPSITE, 0x0009)                 # what the engine installer does
     ok = True
@@ -207,8 +214,12 @@ def emu():
     st2 = (v("tfx_x"), v("tfx_y"), mem.r32(KEYWORD))
     state("drag b")
     d0 = v("tfx_draws")
-    for _ in range(40):                      # hold until two more presents
-        if v("tfx_draws") >= d0 + 2:
+    # hold until three more presents: with the 8-hot-cue view in the chain
+    # (TFX_HC=1, the real install order) the crosshair lands one present
+    # later than without it -- measured 2026-11-09: 2 without, 3 with. The
+    # control word follows the finger immediately either way.
+    for _ in range(40):
+        if v("tfx_draws") >= d0 + 3:
             break
         run(1_000_000, panl.build_frame(touch=(450, 120)))
     buf = fb_png(m, "screenshots/touchfx/2_drag_filter.png")

@@ -1,3 +1,28 @@
+# XDJ Mod Studio v1.0.7
+
+Install the mods again after updating (cable, USB-stick file or a flash).
+
+- **Touch FX installs again.** Since 1.0.2 every Touch FX install from the
+  app stopped with "the delay line has not been proved free" (or "no
+  build/fx/ring.txt"): a safety check meant for the upcoming Echo and
+  Flanger effects ran against the shipped engine too. The shipped engine
+  (Filter, Crush, Gate) never uses that memory (checked in its code), and
+  the app now ships the file that says so.
+- **Touch FX and 8 hot cues together.** With 8 hot cues installed (the
+  default), the Touch FX screen then stopped with "unknown touch hook".
+  It now chains in front of the hot-cue view. Proven in the emulator with
+  both installed: drag, effects, depth, hold and the tabs all work. The
+  panel's crosshair lands one screen frame later than without the hot-cue
+  view; the sound follows your finger immediately either way.
+- **USB-stick loader build: clearer when it fails.** The loader update
+  checks itself in the emulator, including that the mods file on your
+  stick applies at mount. That check now gives the loader up to three
+  times longer, and says exactly where it stopped. If only the mods file
+  on the stick failed, the app says so: write the mods file again with
+  this version, then build the loader update again.
+- Same deck code as 1.0.6 otherwise. Nothing here has been run on a real
+  deck yet.
+
 # XDJ Mod Studio v1.0.6
 
 Deck code: install the mods again after updating (cable, USB-stick file or

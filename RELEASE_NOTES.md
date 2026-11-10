@@ -1,3 +1,25 @@
+# XDJ Mod Studio v1.0.8
+
+Install the mods again after updating (cable, USB-stick file or a flash).
+If you use Touch FX, update: this fixes a fault that could make the deck
+put out loud noise.
+
+- **Touch FX Filter could turn into full-volume noise.** With the finger
+  at the far right of the pad (filter fully open) and the resonance low,
+  the filter went unstable: loud noise on both channels instead of music.
+  On a deck that noise goes into the part of the audio chip that handles
+  Master Tempo, and can leave the audio stuck until a restart. Every
+  earlier Touch FX version has this. The filter now stays stable over the
+  whole pad and resets itself if it ever runs away. Checked in the
+  emulator with the real audio-chip program: the old engine gives
+  full-scale noise in that corner, the new one plays at normal level;
+  Crush and Gate are unchanged.
+- **Touch FX install files are one consistent set again.** The cable
+  installer carried a slightly older copy of the effects engine than the
+  flash and USB-stick routes; all three now carry the same, fixed engine.
+- Same deck code as 1.0.7 otherwise. The fix has been tested in the
+  emulator, not yet on a real deck.
+
 # XDJ Mod Studio v1.0.7
 
 Install the mods again after updating (cable, USB-stick file or a flash).

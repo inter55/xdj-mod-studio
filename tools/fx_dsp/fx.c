@@ -252,10 +252,23 @@ static void frame(const struct par *p, struct chan *cs, float *gph, u32 *dpos,
             float f = 0.012f + p->x * p->x * 1.28f;      /* 0.012..1.29 */
             float q = 1.45f - p->y * 1.40f;              /* 1.45..0.05  */
             if (q < 0.05f) q = 0.05f;
+            /* 1.0.8: this filter form is only stable for q < 2/f - f/2.
+             * With the cutoff wide open (X >= ~230) and low resonance
+             * (Y <= ~90) it was not: the state ran to infinity and the
+             * output was full-scale noise on both channels, fed straight
+             * into the deck's stretcher. 3.1 - 1.75 f stays >= 0.06 under
+             * that limit over the whole range of f; the second check drops
+             * the state if it ever leaves any sane range (also NaN). */
+            float qm = 3.1f - 1.75f * f;
+            if (q > qm) q = qm;
             float hp = x - cs[c].lp - q * cs[c].bp;
             cs[c].bp += f * hp;
             cs[c].lp += f * cs[c].bp;
             y = cs[c].lp;
+            if (!(y * y < 4096.0f)) {      /* |y| >= 64, or NaN */
+                cs[c].lp = cs[c].bp = 0.0f;
+                y = x;
+            }
         }
         out[c] = dry * x + wet * y;
     }

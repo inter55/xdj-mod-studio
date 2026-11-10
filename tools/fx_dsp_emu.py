@@ -204,7 +204,10 @@ def main():
     tr = pos["fx"] / pos["ctl"] if pos.get("ctl") else 0.0
     bal = min(rl, rr) / max(rl, rr, 1e-9)
     cbal = min(cl, cr) / max(cl, cr, 1e-9)
-    sane = rl > 50 and rr > 50 and abs(tr - 1) < 0.03 and bal > cbal * 0.7
+    # an effect never makes the music 3x louder: full-scale garbage (the
+    # unstable filter corner fixed in 1.0.8: rms 32768/32768) used to pass
+    sane = (rl > 50 and rr > 50 and abs(tr - 1) < 0.03 and bal > cbal * 0.7
+            and rl < 3 * cl and rr < 3 * cr)
     print(f"SANITY: rms L/R ctl {cl:.0f}/{cr:.0f} fx {rl:.0f}/{rr:.0f} "
           f"(balance {cbal:.2f} -> {bal:.2f}), play position {pos.get('ctl')} -> {pos['fx']} "
           f"blocks (x{tr:.3f}) -> {'ok' if sane else 'BAD'}")

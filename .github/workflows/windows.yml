@@ -28,25 +28,27 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - name: Install MinGW-w64
-        # The hosted runner's apt mirror (azure.archive.ubuntu.com) stopped
-        # resolving on 2026-11-11: two 1.0.9 builds died here before compiling
-        # anything. Retry, and if it still will not resolve, repoint the
-        # resolver at public DNS and update again.
+        # The hosted runner's apt mirror (azure.archive.ubuntu.com, named in
+        # /etc/apt/apt-mirrors.txt) stopped resolving on 2026-11-11 and killed
+        # two 1.0.9 builds here before anything compiled. Point apt at the
+        # standard Ubuntu archive and retry.
         run: |
           set -e
-          attempt_install() {
-            sudo apt-get -o Acquire::Retries=5 -o Acquire::ForceIPv4=true update -qq
-            sudo apt-get -o Acquire::Retries=5 -o Acquire::ForceIPv4=true \
-              install -y -qq mingw-w64 >/dev/null
-          }
+          sudo sed -i -e 's|ports\.azure\.archive\.ubuntu\.com|ports.ubuntu.com|g' \
+                        -e 's|azure\.archive\.ubuntu\.com|archive.ubuntu.com|g' \
+                        /etc/apt/sources.list /etc/apt/sources.list.d/ubuntu.sources 2>/dev/null || true
+          if [ -f /etc/apt/apt-mirrors.txt ]; then
+            printf 'http://archive.ubuntu.com/ubuntu/\n' | sudo tee /etc/apt/apt-mirrors.txt >/dev/null
+          fi
           for attempt in 1 2 3; do
-            if attempt_install; then
+            sudo apt-get -o Acquire::Retries=5 -o Acquire::ForceIPv4=true update -qq || true
+            if sudo apt-get -o Acquire::Retries=5 -o Acquire::ForceIPv4=true \
+                 install -y -qq mingw-w64 >/dev/null; then
               echo "mingw-w64 installed (attempt $attempt)"
               exit 0
             fi
-            echo "apt attempt $attempt failed; repointing DNS and retrying" >&2
-            printf 'nameserver 1.1.1.1\nnameserver 8.8.8.8\n' | sudo tee /etc/resolv.conf >/dev/null
-            sleep 10
+            echo "apt attempt $attempt failed; retrying" >&2
+            sleep 15
           done
           echo "mingw-w64 could not be installed" >&2
           exit 1

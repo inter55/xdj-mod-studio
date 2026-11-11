@@ -61,10 +61,16 @@ def build():
 def main():
     ck = sys.argv[1] if len(sys.argv) > 1 else os.path.join(
         os.environ.get("TMPDIR", "/tmp"), "hotcue8_loaded.pkl")
+    if not os.path.exists(ck):
+        print(f"SKIP: {ck} missing -- build it first with "
+              "`.venv/bin/python tools/hotcue8_emu.py`")
+        return 0
     os.makedirs(OUT, exist_ok=True)
     code, syms = build()
     m = Machine.load(ck)
     mem, dev = m.mem, m.mem.dev
+    ST = mem.r16(0x0B6C4118 + 8)     # the state THIS deck uses for a set cue (6 = test
+                                      # cues with status 4, 4 = real rekordbox cues)
 
     def run(n):
         m.cpu.run(limit=n)
@@ -123,12 +129,12 @@ def main():
     w0 = getattr(disk, "writes", 0)
     tap(tabx, taby)                                # page 2
     chk("page 2 open", mem.r8(PP.HCPAGE) == 1)
-    chk("page 2 slots empty", [slot(k)[0] != 6 for k in range(3)])
+    chk("page 2 slots empty", [slot(k)[0] != ST for k in range(3)])
 
     before = mem.r32(POS150)
     tap(166, 263)                                  # pad A: set cue D
     chk(f"pad A set cue D ({slot(0)}), hc_sets "
-        f"{mem.r32(syms['hc_sets'])}", slot(0)[0] == 6 and slot(0)[1] == 4
+        f"{mem.r32(syms['hc_sets'])}", slot(0)[0] == ST and slot(0)[1] == 4
         and mem.r32(syms["hc_sets"]) == 1)
     # the playhead advances during the hold, so the stored ms is the position
     # at the press frame: within a few 1/150 s units of the pre-press read
@@ -138,25 +144,25 @@ def main():
     # cue that only reached the live slot would draw but not recall.
     chk(f"pad A wrote both pad models: {model(0x0BA28800, 0)} "
         f"{model(0x0BA2A52C, 0)}",
-        model(0x0BA28800, 0) == (6, 4, slot(0)[2]) and
-        model(0x0BA2A52C, 0) == (6, 4, slot(0)[2]))
+        model(0x0BA28800, 0) == (ST, 4, slot(0)[2]) and
+        model(0x0BA2A52C, 0) == (ST, 4, slot(0)[2]))
 
     for _ in range(3):                              # 2 -> 3 -> 1 -> 2
         tap(tabx, taby, after=25_000_000)
     chk(f"back on page 2 ({mem.r8(PP.HCPAGE)})", mem.r8(PP.HCPAGE) == 1)
-    chk(f"cue D survived paging ({slot(0)})", slot(0)[0] == 6 and slot(0)[1] == 4)
+    chk(f"cue D survived paging ({slot(0)})", slot(0)[0] == ST and slot(0)[1] == 4)
     chk("deck-set cue D survived in the pad models too",
-        model(0x0BA28800, 0) == (6, 4, slot(0)[2]) and
-        model(0x0BA2A52C, 0) == (6, 4, slot(0)[2]))
+        model(0x0BA28800, 0) == (ST, 4, slot(0)[2]) and
+        model(0x0BA2A52C, 0) == (ST, 4, slot(0)[2]))
 
     tap(281, 263)                                  # pad B: set cue E
     chk(f"pad B set cue E ({slot(1)}), hc_sets "
-        f"{mem.r32(syms['hc_sets'])}", slot(1)[0] == 6 and slot(1)[1] == 5
+        f"{mem.r32(syms['hc_sets'])}", slot(1)[0] == ST and slot(1)[1] == 5
         and mem.r32(syms["hc_sets"]) == 2)
     chk("slot 0 untouched by pad B", slot(0)[1] == 4)
     chk("pad B wrote both pad models",
-        model(0x0BA28800, 1) == (6, 5, slot(1)[2]) and
-        model(0x0BA2A52C, 1) == (6, 5, slot(1)[2]))
+        model(0x0BA28800, 1) == (ST, 5, slot(1)[2]) and
+        model(0x0BA2A52C, 1) == (ST, 5, slot(1)[2]))
 
     for _ in range(2):                              # 2 -> 3 -> 1
         tap(tabx, taby, after=25_000_000)

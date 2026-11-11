@@ -22,4 +22,11 @@ import theme_switch as TS; print(hex(TS.TS_DATA))")
 "$SH/sh-elf-size" "$OUT/pm.elf"
 N=$("$SH/sh-elf-objdump" -d "$OUT/pm.elf" | awk -F'\t' 'NF>=3{print $3}' | grep -cE '^(f[a-z.]+|frchg|fschg)\s|fpscr|fpul' || true)
 echo "FPU instructions: $N (must be 0)"; [ "$N" = 0 ]
+# POSL is written by the DSP side without invalidating the SH-4 D-cache.
+# A cached P3 read redraws the same old position forever on a real deck;
+# the emulator has no cache, so only this literal check catches a revert.
+if ! "$SH/sh-elf-objdump" -d "$OUT/pm.elf" | grep -q 'ac0e6d18'; then
+  echo "ERROR: POSL is not read through the uncached P2 alias (ac0e6d18)" >&2
+  exit 1
+fi
 cat "$OUT/pm.syms"

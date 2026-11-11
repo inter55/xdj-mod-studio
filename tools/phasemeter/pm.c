@@ -35,7 +35,7 @@
  * Data (see CLAUDE.md §65): beat grid = ANLZ ctx [0x09826BE4] + 0xD7C
  * ("PQTZ", count @+0x14, ptr @+0x18; LE {u16 beat-in-bar, u16 bpm*100,
  * u32 ms}), snapshotted when the loaded track changes (browsing reuses
- * the ctx); position = [0x0C0E6D1C] (POSL, 150 Hz -- the time digits'
+ * the ctx); position = [0x0C0E6D18] (POSL, 150 Hz -- the time digits'
  * own source, live on a real deck; the old 0x09D246E0 word freezes
  * on hardware: CLAUDE.md sec. 103/104).
  *
@@ -65,7 +65,13 @@ typedef unsigned int u32;
  * (tools/clock_hunt.py, stock deck playing at +10% tempo): THIS word counts
  * (165/s = track position in 1/150 s, follows the tempo); the 0x0C0E6D1C we
  * read before stayed 68344 (= 455 s, the track length) -> beats stood still.
- * The emulator's stand-in audio chip had been advancing 0x0C0E6D1C. */
+ * The emulator's stand-in audio chip had been advancing 0x0C0E6D1C.
+ *
+ * THE READ MUST GO THROUGH THE P2 ALIAS. POSL is written by the DSP side,
+ * which does not invalidate this CPU's cache. Reading the cacheable P3
+ * address left the ruler frozen on a real deck (2026-11-10 video) while the
+ * TIME display advanced; the emulator has no cache, so its gates cannot
+ * reproduce that. Link bytes below already use the same UNCACHED() rule. */
 #define PREVIEW    0x0BA3BCCCu   /* loaded track's overview (changes on load) */
 #ifndef MSOFF
 #define MSOFF      0x081DBDF1u   /* MY SETTINGS: 1 = MODS OFF */
@@ -347,7 +353,7 @@ void pm_draw(u16 *lay, int stride)
 {
     /* the row lines (full width), dim when the row has no data */
     int i = -1, frac = 0;
-    u32 ms = R32(POSL) * 20u / 3u;              /* 1/150 s -> ms */
+    u32 ms = R32(UNCACHED(POSL)) * 20u / 3u;    /* P2: DSP-written, cache stale */
     int L = lit();                              /* light: whites/greys flip */
     u16 bg = L ? flip(0) : (u16)0;              /* box + label clear */
     u16 tick = L ? flip(C_TICK) : C_TICK;

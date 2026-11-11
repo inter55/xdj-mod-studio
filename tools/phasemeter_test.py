@@ -8,7 +8,8 @@ chains the 2DG flush hook, snapshots the beat grid, then plays/-seeks the
 clock to a few positions and checks the drawn red/grey tick columns on
 the blue row against a Python model built from pm's OWN cave arrays.
 
-Position: pm.c reads POSL [0x0C0E6D1C] (150/s) = the time digits' source.
+Position: pm.c reads POSL [0x0C0E6D18] (150/s) = the time digits' source,
+through the uncached P2 alias (the DSP updates it without a cache flush).
 On a real deck the DSP data drives it (the elapsed clock visibly moves,
 CLAUDE.md sec. 103) while its 75 Hz twin [0x09D246E0] -- the old source,
 which made the meter stand still on hardware -- freezes at the load

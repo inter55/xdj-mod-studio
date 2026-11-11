@@ -230,13 +230,26 @@ static u32 cue_e_loop(u32 e)
     return R32(e) == TAG_PCP2 ? R32(e + 0x18) : R32(e + 0x24);
 }
 
+/* 2026-11-10 (report on 1.0.8: "A-C show and trigger, but every pad of the
+ * A-H view is empty, A-C included"). A set cue was recognised by state == 6.
+ * That is what the deck stores for the TEST cues this module was developed
+ * against (written with status 4). Every hot cue in a real rekordbox export
+ * has status 0, and the deck then stores state 4 (emulator, real firmware,
+ * tools/hotcue8_emu.py HC_STATUS=0). So on real sticks no cue ever counted
+ * as set: the A-H view drew eight empty pads and D-H were never taken from
+ * the track. "Set" is now any state that is not empty with the right cue
+ * number, and cues this module writes use the state the deck itself used
+ * for this track's A-C (hc_st; 4 until one is seen). */
+#define ST_SET(st) ((st) != 0 && (st) != 0xFFFFu)
+static u16 hc_st = 4;
+
 static int p1_have(u32 n)                   /* n = 1..3: the deck's own */
 {
     u32 k = n - 1;
     if (hc_p1ok)
-        return (hc_p1s[k][2] & 0xFFFFu) == 6 && (hc_p1s[k][2] >> 16) == n;
+        return ST_SET(hc_p1s[k][2] & 0xFFFFu) && (hc_p1s[k][2] >> 16) == n;
     u32 s = SLOTS + k * 0x40;
-    return R16(s + 0x08) == 6 && R16(s + 0x0A) == n;
+    return ST_SET(R16(s + 0x08)) && R16(s + 0x0A) == n;
 }
 
 static int have_cue(u32 n)                 /* exported, or set on the deck */
@@ -296,7 +309,8 @@ static void capture(void)
     if (hc_cap) return;
     for (u32 k = 0; k < 3; k++) {
         u32 s = SLOTS + k * 0x40, n = k + 1, e = find_cue(n);
-        int set = R16(s + 0x08) == 6 && R16(s + 0x0A) == n;
+        int set = ST_SET(R16(s + 0x08)) && R16(s + 0x0A) == n;
+        if (set) hc_st = R16(s + 0x08);              /* the deck's own value */
         if (set != (e != 0)) return;                 /* another track's list */
         if (set && R32(s + 0x0C) != cue_e_ms(e)) return;
     }
@@ -323,7 +337,7 @@ static void model_set(u32 base, u32 k, u32 n, u32 have, u32 ms, u32 loop,
                       u32 eloop)
 {
     u32 r = base + k * MODEL_S;
-    R16(r + 0x00) = have ? 6 : 0;
+    R16(r + 0x00) = have ? hc_st : 0;
     R16(r + 0x02) = have ? (u16)n : 0;
     R32(r + 0x04) = have ? ms : 0;
     R32(r + 0x08) = have ? loop : eloop;
@@ -341,7 +355,7 @@ static void load_page(u32 page)
         u32 s = SLOTS + k * 0x40, n = 3 * page + k + 1;
         u32 have = (u32)have_cue(n), ms = cue_ms(n), loop = cue_loop(n);
         if (have) {
-            R16(s + 0x08) = 6;
+            R16(s + 0x08) = hc_st;
             R16(s + 0x0A) = (u16)n;
             R32(s + 0x0C) = ms;
             R32(s + 0x10) = loop;
@@ -372,17 +386,20 @@ static void scan_pads(void)
     u32 page = R8(HCPAGE);
     if (!rise || !page || page >= HCPAGES) return;   /* page 1 is stock */
     if (R8(MSOFF) || R32(MODEW) != 7 || R8(PMODE) != 0) return;
-    u32 pos = R32(POS150);
+    /* P2: POS150 is written by the DSP side without invalidating the cache;
+     * a cached read would store this cue at a stale playhead on the deck
+     * (same hardware-only class as the phase meter's POSL read). */
+    u32 pos = R32(UNCACHED(POS150));
     if (pos == 0xFFFFFFFFu) return;                  /* no playhead yet */
     for (u32 k = 0; k < 3; k++) {
         if (!(rise & (1u << k))) continue;
         u32 s = SLOTS + k * 0x40, n = 3 * page + k + 1;
         if (n > 8) continue;
-        if (R16(s + 0x08) == 6) continue;            /* set: stock recall */
+        if (ST_SET(R16(s + 0x08))) continue;         /* set: stock recall */
         u32 ms = pos * 20u / 3u;                     /* 1/150 s -> ms */
         hc_ram_set[n - 1] = 1;
         hc_ram_ms[n - 1] = ms;
-        R16(s + 0x08) = 6;
+        R16(s + 0x08) = hc_st;
         R16(s + 0x0A) = (u16)n;
         R32(s + 0x0C) = ms;
         R32(s + 0x10) = 0;
@@ -480,7 +497,7 @@ u32 hc_touch(u32 down, u32 x, u32 y)
         }
         hc_borrow = 1;
         u32 ms = cue_ms(n), loop = cue_loop(n);
-        R16(s + 0x08) = 6;
+        R16(s + 0x08) = hc_st;
         R16(s + 0x0A) = (u16)n;
         R32(s + 0x0C) = ms;
         R32(s + 0x10) = loop;
@@ -632,7 +649,7 @@ void hc_hook(u32 dev, u32 req)
         hc_restore = 0;
         hc_held = 0;
         for (u32 i = 0; i < 8; i++) hc_ram_set[i] = 0;   /* drop deck cues */
-        hc_cap = 0;                     /* D-H: prove the ctx again */
+        hc_cap = 0; hc_st = 4;                     /* D-H: prove the ctx again */
         hc_p1ok = 0;
         hc_count = cue_count();
     }

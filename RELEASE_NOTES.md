@@ -1,3 +1,30 @@
+# XDJ Mod Studio v1.0.9
+
+Install the mods again after updating (cable, USB-stick file or a flash).
+
+- **Hot cues: the A-H view was empty on real rekordbox sticks.** Cues A-C
+  showed and worked on the normal row, but the 8-pad view drew eight empty
+  pads and D-H were never picked up from the track. The mod recognised a
+  "set" cue by a value that only its own test tracks produced; rekordbox
+  writes cues slightly differently, so on a real export no cue ever counted
+  as set. It now accepts any set cue, and cues it writes itself (pages D-F
+  and G-H, cues set on the deck) use the same value the deck used for that
+  track's A-C. Checked in the emulator with cues written the way rekordbox
+  writes them: the old code fails exactly like the reports, the new code
+  shows and recalls all eight.
+- **Phase meter: the beat ruler could stand still while the track played.**
+  The meter read the track position through the processor's cache, and on a
+  real deck that copy can go stale, so the ticks stayed in the same place
+  while the time kept running. It now reads the position directly. The same
+  correction is in the hot cue code, which uses that position when you set a
+  cue D-H on the deck.
+- New for bug reports: `tools/hotcue_probe.py` (read-only) prints how your
+  deck stores the loaded track's hot cues.
+- Both fixes are deck code and have been tested in the emulator, not yet on
+  a real deck. The phase meter fault cannot be reproduced in the emulator at
+  all (it has no cache), so that one rests on the cause being understood.
+- Same deck code as 1.0.8 otherwise.
+
 # XDJ Mod Studio v1.0.8
 
 Install the mods again after updating (cable, USB-stick file or a flash).

@@ -63,10 +63,16 @@ def install_hc(mem, code, syms):
 def main():
     ck = sys.argv[1] if len(sys.argv) > 1 else os.path.join(
         os.environ.get("TMPDIR", "/tmp"), "hotcue8_loaded.pkl")
+    if not os.path.exists(ck):
+        print(f"SKIP: {ck} missing -- build it first with "
+              "`.venv/bin/python tools/hotcue8_emu.py`")
+        return 0
     os.makedirs(OUT, exist_ok=True)
     code, syms = build()
     m = Machine.load(ck)
     mem, dev = m.mem, m.mem.dev
+    ST = mem.r16(0x0B6C4118 + 8)     # the state THIS deck uses for a set cue (6 = test
+                                      # cues with status 4, 4 = real rekordbox cues)
     PP.install(mem)
     install_hc(mem, code, syms)
     mem.w8(MS.MSOFF, 0)
@@ -137,8 +143,8 @@ def main():
     chk("grid: E held borrows slot 1 -> cue 5",
         (mem.r16(SLOT + 0x40 + 0x0A), mem.r32(SLOT + 0x40 + 0x0C)) == (5, TIMES[4]))
     chk("grid: E held borrows the pad models too",
-        model(0x0BA28800, 1) == (6, 5, TIMES[4]) and
-        model(0x0BA2A52C, 1) == (6, 5, TIMES[4]))
+        model(0x0BA28800, 1) == (ST, 5, TIMES[4]) and
+        model(0x0BA2A52C, 1) == (ST, 5, TIMES[4]))
     chk("grid: E sets no stock zone (hit-tester untouched)",
         mem.r32(0x0C0E75BC) == 0x1E)
     fb_png(m, f"{OUT}/grid8_held_E.png")
@@ -146,8 +152,8 @@ def main():
     run(40_000_000)
     chk("grid: E released restores slot 1", slots() == page1)
     chk("grid: E released restores the pad models",
-        model(0x0BA28800, 1) == (6, 2, TIMES[1]) and
-        model(0x0BA2A52C, 1) == (6, 2, TIMES[1]))
+        model(0x0BA28800, 1) == (ST, 2, TIMES[1]) and
+        model(0x0BA2A52C, 1) == (ST, 2, TIMES[1]))
     dev.panel_frame = panl.build_frame(touch=(padx[7], pady))   # pad H = old REC
     run(12_000_000)
     chk("grid: H (old REC spot) borrows -> cue 8",
@@ -187,7 +193,7 @@ def main():
     print("page", mem.r8(PP.HCPAGE), "slots", s, "count", mem.r32(syms["hc_count"]))
     chk("page 2 = D E F", mem.r8(PP.HCPAGE) == 1 and
         [x[0] for x in s] == [4, 5, 6] and [x[1] for x in s] == TIMES[3:6])
-    want = [(6, 4, TIMES[3]), (6, 5, TIMES[4]), (6, 6, TIMES[5])]
+    want = [(ST, 4, TIMES[3]), (ST, 5, TIMES[4]), (ST, 6, TIMES[5])]
     chk("page 2 pad models = D E F",
         [model(0x0BA28800, k) for k in range(3)] == want and
         [model(0x0BA2A52C, k) for k in range(3)] == want)

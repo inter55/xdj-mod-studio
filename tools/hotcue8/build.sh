@@ -19,4 +19,10 @@ cd "$ROOT/tools/hotcue8"
 "$SH/sh-elf-size" "$OUT/hc.elf"
 N=$("$SH/sh-elf-objdump" -d "$OUT/hc.elf" | awk -F'\t' 'NF>=3{print $3}' | grep -cE '^(f[a-z.]+|frchg|fschg)\s|fpscr|fpul' || true)
 echo "FPU instructions: $N (must be 0)"; [ "$N" = 0 ]
+# POS150 is DSP-written; a cached P3 literal stores deck-set cues at a
+# stale playhead. Only the literal check can catch that (no cache in emu).
+if ! "$SH/sh-elf-objdump" -d "$OUT/hc.elf" | grep -q 'ac0e6d18'; then
+  echo "ERROR: POS150 is not read through the uncached P2 alias (ac0e6d18)" >&2
+  exit 1
+fi
 cat "$OUT/hc.syms"

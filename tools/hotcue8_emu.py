@@ -33,11 +33,16 @@ ROT = 0x0B6C7B48
 # A real-DSP mounted snapshot finishes the load.
 SNAP = os.environ.get("SNAP", "cache/emu_dsp_mounted6.pkl")
 CTX_TAB, PCOB_OFF, SLOTS = 0x09826BE4, 0xFC0, 0x0B6C4118
+# 2026-11-10: every real rekordbox hot cue in the user's library has status 0
+# here (PCPT +0x10); this fixture wrote 4, and the deck's live-slot state
+# word follows it -- hc.c was only ever tested against 4. HC_STATUS=4 = the
+# old fixture.
+STATUS = int(os.environ.get("HC_STATUS", "0"))
 
 
 def pcpt(n, ms):
     return (b"PCPT" + struct.pack(">II", 0x1C, 0x38) +
-            struct.pack(">IIIHH", n, 4, 0x10000, 0xFFFF, 0xFFFF) +
+            struct.pack(">IIIHH", n, STATUS, 0x10000, 0xFFFF, 0xFFFF) +
             struct.pack(">BBHII", 1, 0, 0x3E8, ms, 0xFFFFFFFF) + bytes(16))
 
 
@@ -205,7 +210,13 @@ def main():
         s = SLOTS + k * 0x40
         live.append((mem.r16(s + 0x08), mem.r16(s + 0x0A), mem.r32(s + 0x0C)))
     print(f"ctx cues A..H: {n}/8 found; live slots (state,num,ms): {live}")
-    if n != 8 or not all(st == 6 and nm == k + 1 and ms == TIMES[k]
+    print("live slot words +0x00..+0x1C:", [[hex(mem.r32(SLOTS + k * 0x40 + 4 * j)) for j in range(8)]
+                                            for k in range(3)])
+    for nm_, base in (("A", 0x0BA28800), ("B", 0x0BA2A52C)):
+        print(f"pad model {nm_} (state, number, ms):",
+              [(mem.r16(base + k * 0x38), mem.r16(base + k * 0x38 + 2), mem.r32(base + k * 0x38 + 4))
+               for k in range(8)])
+    if n != 8 or not all(nm == k + 1 and ms == TIMES[k]
                          for k, (st, nm, ms) in enumerate(live)):
         print("RESULT: FAIL - track loaded without its cues; NOT saving")
         return 1
@@ -230,6 +241,8 @@ def main():
           {k: sorted(v) for k, v in found.items() if len(v) >= 3})
     name = ("hc_rb_loaded.pkl" if os.environ.get("HC_LAYOUT") == "rekordbox"
             else "hotcue8_loaded.pkl")
+    if STATUS != 4:
+        name = name.replace("_loaded", f"_s{STATUS}_loaded")
     m.save(os.path.join(os.path.dirname(stick), name))
     print("saved", name)
     return 0

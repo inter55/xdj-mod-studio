@@ -1,6 +1,11 @@
 # Windows build of XDJ Mod Studio (public, bring-your-own-firmware).
-#   natives  (Linux, MinGW-w64 cross): emulator C cores as DLLs, the tic6x
-#            objdump the audio-chip emulator decodes with, hidapi.dll
+#   natives  (MSYS2 MinGW-w64, built inside the qemu job): the emulator C
+#            cores as DLLs, the tic6x objdump the audio-chip emulator decodes
+#            with, hidapi.dll. It used to be a ubuntu-latest job installing
+#            mingw-w64 with apt; on 2026-11-11 the runner's apt mirror
+#            (azure.archive.ubuntu.com) and archive.ubuntu.com both stopped
+#            resolving, which killed three 1.0.9 builds before anything
+#            compiled. MSYS2 in the qemu job has a working GCC and network.
 #   app      (Windows): PyInstaller app + zip, smoke test (server starts,
 #            UI loads, /api/state answers, built-in checks pass)
 # Run by hand (Actions > Windows > Run workflow); with "release" set, the
@@ -19,82 +24,19 @@ on:
 permissions:
   contents: write
 jobs:
-  natives:
-    runs-on: ubuntu-latest
-    env:
-      BINUTILS: binutils-2.43.1
-      BINUTILS_SHA: 13f74202a3c4c51118b797a39ea4200d3f6cfbe224da6d1d95bb938480132dfd
-      HIDAPI: hidapi-0.14.0
-    steps:
-      - uses: actions/checkout@v4
-      - name: Install MinGW-w64
-        # The hosted runner's apt mirror (azure.archive.ubuntu.com, named in
-        # /etc/apt/apt-mirrors.txt) stopped resolving on 2026-11-11 and killed
-        # two 1.0.9 builds here before anything compiled. Point apt at the
-        # standard Ubuntu archive and retry.
-        run: |
-          set -e
-          sudo sed -i -e 's|ports\.azure\.archive\.ubuntu\.com|ports.ubuntu.com|g' \
-                        -e 's|azure\.archive\.ubuntu\.com|archive.ubuntu.com|g' \
-                        /etc/apt/sources.list /etc/apt/sources.list.d/ubuntu.sources 2>/dev/null || true
-          if [ -f /etc/apt/apt-mirrors.txt ]; then
-            printf 'http://archive.ubuntu.com/ubuntu/\n' | sudo tee /etc/apt/apt-mirrors.txt >/dev/null
-          fi
-          for attempt in 1 2 3; do
-            sudo apt-get -o Acquire::Retries=5 -o Acquire::ForceIPv4=true update -qq || true
-            if sudo apt-get -o Acquire::Retries=5 -o Acquire::ForceIPv4=true \
-                 install -y -qq mingw-w64 >/dev/null; then
-              echo "mingw-w64 installed (attempt $attempt)"
-              exit 0
-            fi
-            echo "apt attempt $attempt failed; retrying" >&2
-            sleep 15
-          done
-          echo "mingw-w64 could not be installed" >&2
-          exit 1
-      - name: Emulator cores (DLL)
-        run: |
-          mkdir -p out
-          CC=x86_64-w64-mingw32-gcc
-          $CC -O2 -shared -static -static-libgcc -o out/_fastcore.dll emu/fastcore.c -lm
-          $CC -O2 -shared -static -static-libgcc -o out/_c6xcore.dll emu/c6x/c6xcore.c -lm
-      - uses: actions/cache@v4
-        id: objcache
-        with:
-          path: objdump-cache
-          key: tic6x-objdump-win64-${{ env.BINUTILS }}-v1
-      - name: tic6x objdump for Windows (GNU binutils)
-        if: steps.objcache.outputs.cache-hit != 'true'
-        run: |
-          curl -sSLO https://ftp.gnu.org/gnu/binutils/$BINUTILS.tar.xz
-          echo "$BINUTILS_SHA  $BINUTILS.tar.xz" | sha256sum -c -
-          tar xf $BINUTILS.tar.xz
-          mkdir bld && cd bld
-          ../$BINUTILS/configure --host=x86_64-w64-mingw32 --target=tic6x-elf \
-            --disable-nls --disable-werror --disable-gdb --disable-gprof --disable-ld \
-            --disable-gas --disable-gold --disable-sim --without-zstd \
-            LDFLAGS="-static -static-libgcc" > cfg.log
-          make -j"$(nproc)" MAKEINFO=true all-binutils > make.log 2>&1 || { tail -50 make.log; exit 1; }
-          mkdir -p ../objdump-cache
-          cp binutils/objdump.exe ../objdump-cache/
-      - name: hidapi.dll (deck USB)
-        run: |
-          cp objdump-cache/objdump.exe out/
-          curl -sSL -o hidapi-win.zip https://github.com/libusb/hidapi/releases/download/$HIDAPI/hidapi-win.zip
-          unzip -q -o hidapi-win.zip -d hidapi
-          cp "$(find hidapi -path '*x64*' -name hidapi.dll | head -1)" out/hidapi.dll
-          ls -la out
-      - uses: actions/upload-artifact@v4
-        with:
-          name: win-natives
-          path: out/
-
   qemu:
     # The app's emulator on Windows: cdj-nxs2-qemu (GPL-2.0-or-later) at the
     # commit our patch is made against, built + packaged by its own release
     # script under MSYS2 (as its release workflow does), then the QEMU
     # folder (exe, DLLs, audio-chip library, keymaps) is kept.
+    #
+    # The app's own native pieces are built here too (out/natives), so the
+    # build needs nothing from the Ubuntu runners.
     runs-on: windows-2022
+    env:
+      BINUTILS: binutils-2.43.1
+      BINUTILS_SHA: 13f74202a3c4c51118b797a39ea4200d3f6cfbe224da6d1d95bb938480132dfd
+      HIDAPI: hidapi-0.14.0
     defaults:
       run:
         shell: msys2 {0}
@@ -131,6 +73,38 @@ jobs:
         run: |
           pkgs="$(PYTHONPATH=. python -m launcher packages)"
           [ -z "$pkgs" ] || pacman -S --needed --noconfirm $pkgs
+
+      # --- the app's native pieces (previously the ubuntu "natives" job) ---
+      - uses: actions/cache@v4
+        id: objcache
+        with:
+          path: objdump-cache
+          key: tic6x-objdump-win64-${{ env.BINUTILS }}-v2
+      - name: App natives (emulator DLLs, tic6x objdump, hidapi.dll)
+        run: |
+          set -e
+          pacman -S --needed --noconfirm make diffutils mingw-w64-x86_64-gcc
+          mkdir -p out/natives
+          gcc -O2 -shared -static -static-libgcc -o out/natives/_fastcore.dll emu/fastcore.c -lm
+          gcc -O2 -shared -static -static-libgcc -o out/natives/_c6xcore.dll emu/c6x/c6xcore.c -lm
+          if [ ! -f objdump-cache/objdump.exe ]; then
+            curl -sSLO https://ftp.gnu.org/gnu/binutils/$BINUTILS.tar.xz
+            echo "$BINUTILS_SHA  $BINUTILS.tar.xz" | sha256sum -c -
+            tar xf $BINUTILS.tar.xz
+            mkdir -p bld && cd bld
+            ../$BINUTILS/configure --target=tic6x-elf \
+              --disable-nls --disable-werror --disable-gdb --disable-gprof --disable-ld \
+              --disable-gas --disable-gold --disable-sim --without-zstd \
+              LDFLAGS="-static -static-libgcc" > cfg.log
+            make -j"$(nproc)" MAKEINFO=true all-binutils > make.log 2>&1 || { tail -50 make.log; exit 1; }
+            cd .. && mkdir -p objdump-cache && cp bld/binutils/objdump.exe objdump-cache/
+          fi
+          cp objdump-cache/objdump.exe out/natives/
+          curl -sSL -o hidapi-win.zip https://github.com/libusb/hidapi/releases/download/$HIDAPI/hidapi-win.zip
+          unzip -q -o hidapi-win.zip -d hidapi
+          cp "$(find hidapi -path '*x64*' -name hidapi.dll | head -1)" out/natives/hidapi.dll
+          ls -la out/natives
+
       - uses: actions/cache@v4
         with:
           path: |
@@ -159,11 +133,15 @@ jobs:
           ls out/qemu-bin
       - uses: actions/upload-artifact@v4
         with:
+          name: win-natives
+          path: out/natives
+      - uses: actions/upload-artifact@v4
+        with:
           name: win-qemu
-          path: out/
+          path: out/qemu-bin
 
   app:
-    needs: [natives, qemu]
+    needs: [qemu]
     runs-on: windows-latest
     steps:
       - uses: actions/checkout@v4

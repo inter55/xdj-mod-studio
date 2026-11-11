@@ -152,10 +152,12 @@ jobs:
         with:
           name: win-natives
           path: build/win-natives
+      # the win-qemu artifact holds the CONTENTS of out/qemu-bin, and
+      # build_studio_win.py copies build/win-qemu/qemu-bin into repo/qemu-bin
       - uses: actions/download-artifact@v4
         with:
           name: win-qemu
-          path: build/win-qemu
+          path: build/win-qemu/qemu-bin
       - name: Python packages
         run: python -m pip install --quiet pyinstaller numpy pillow pygame capstone sqlcipher3-wheels==0.5.7
       - name: Build the app

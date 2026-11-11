@@ -28,7 +28,28 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - name: Install MinGW-w64
-        run: sudo apt-get update -qq && sudo apt-get install -y -qq mingw-w64 >/dev/null
+        # The hosted runner's apt mirror (azure.archive.ubuntu.com) stopped
+        # resolving on 2026-11-11: two 1.0.9 builds died here before compiling
+        # anything. Retry, and if it still will not resolve, repoint the
+        # resolver at public DNS and update again.
+        run: |
+          set -e
+          attempt_install() {
+            sudo apt-get -o Acquire::Retries=5 -o Acquire::ForceIPv4=true update -qq
+            sudo apt-get -o Acquire::Retries=5 -o Acquire::ForceIPv4=true \
+              install -y -qq mingw-w64 >/dev/null
+          }
+          for attempt in 1 2 3; do
+            if attempt_install; then
+              echo "mingw-w64 installed (attempt $attempt)"
+              exit 0
+            fi
+            echo "apt attempt $attempt failed; repointing DNS and retrying" >&2
+            printf 'nameserver 1.1.1.1\nnameserver 8.8.8.8\n' | sudo tee /etc/resolv.conf >/dev/null
+            sleep 10
+          done
+          echo "mingw-w64 could not be installed" >&2
+          exit 1
       - name: Emulator cores (DLL)
         run: |
           mkdir -p out

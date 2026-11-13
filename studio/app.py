@@ -95,7 +95,7 @@ UIHTML = os.path.join(BUNDLE, "studio", "ui.html") if FROZEN else os.path.join(H
 
 APP_SUPPORT = app_support_dir()
 # the app's own release number (GitHub release tag v<APP_VERSION>)
-APP_VERSION = "1.0.9"
+APP_VERSION = "1.0.9.1"
 RELEASES_API = "https://api.github.com/repos/inter55/xdj-mod-studio/releases/latest"
 RELEASES_PAGE = "https://github.com/inter55/xdj-mod-studio/releases/latest"
 SETTINGS = os.path.join(APP_SUPPORT, "studio.json")
@@ -1717,8 +1717,33 @@ def j_stick_pack(log, prog, sel):
         raise RuntimeError("firmware setup first (Home > Firmware: Add)")
     os.environ["MOCK_CKPT"] = ckpt
     out = os.path.join(stick, "XDJMODS", "PACK.BIN")
-    prog(0.02, "Recording the install on the emulated deck", eta=300)
-    rc, txt = run_tool(log, ["tools/stick_pack.py", "record"] + install_args(**sel)
+    # 2026-11-13 (Windows, Reddit): the bar sat at 2 % with "a few seconds
+    # left" for 14+ minutes -- the recording runs the whole install on the
+    # emulated deck and only the end reported. Now the bar follows the
+    # install's own step lines (same names as the cable install), weighted by
+    # each step's measured size, with no time estimate: a slow PC simply
+    # takes longer, and the step name shows it is still moving.
+    args = install_args(**sel)
+    steps = [(pre, note, n) for pre, note, n in INSTALL_STEPS if pre != "4/5"]
+    weight = {pre: max(1, n) for pre, _, n in steps}
+    total = sum(weight.values())
+    st = {"done": 0, "cur": None}
+
+    def tlog(line):
+        log(line)
+        t = line.strip()
+        for pre, note, _ in steps:
+            if t.startswith(pre + " ") or t == pre:
+                if st["cur"]:
+                    st["done"] += weight[st["cur"]]
+                st["cur"] = pre
+                prog(0.02 + 0.93 * st["done"] / total,
+                     "Recording on the emulated deck: " + note
+                     + (" (skipped)" if "skipped" in t else ""))
+                return
+
+    prog(0.02, "Starting the emulated deck (a slow PC can take 20+ minutes in all)")
+    rc, txt = run_tool(tlog, ["tools/stick_pack.py", "record"] + args
                        + ["--out", out])
     if rc or "wrote " not in txt:
         raise RuntimeError("could not make the mods file -- see the log")

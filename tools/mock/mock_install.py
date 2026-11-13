@@ -23,8 +23,42 @@ def main():
     sock = os.path.join(td, "deck.sock")
     ckpt = os.environ.get("MOCK_CKPT", os.path.join(ROOT, "cache", "emu_mainscreen.pkl"))
     srv = subprocess.Popen(PYCMD + [os.path.join(ROOT, "tools/mock/mockdeck_server.py"), ckpt, sock],
-                           stdout=subprocess.PIPE, text=True)
-    srv.stdout.readline()
+                           stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)
+    # 2026-11-13 (Windows, Reddit): the USB-stick job sat at 2 % for 14+ min
+    # with an EMPTY log -- it was waiting here for the emulated deck's
+    # "ready" line with no time limit and nothing printed. Now it says what
+    # it is doing, passes on anything the server prints, and gives up after
+    # MOCK_READY_S with a clear reason.
+    import threading
+    print("starting the emulated deck (loading its snapshot)...", flush=True)
+    t_start, ready, lines = time.time(), threading.Event(), []
+
+    def pump():
+        for ln in srv.stdout:
+            ln = ln.rstrip()
+            lines.append(ln)
+            if ln.startswith("mock deck ready"):
+                ready.set()
+                return
+            print("  emulated deck: " + ln, flush=True)
+        ready.set()                          # it exited: let the check below report
+    threading.Thread(target=pump, daemon=True).start()
+    limit = float(os.environ.get("MOCK_READY_S", "600"))
+    while not ready.wait(30):
+        print(f"  still loading the emulated deck ({time.time() - t_start:.0f} s)...",
+              flush=True)
+        if time.time() - t_start > limit:
+            srv.kill()
+            print(f"FAIL: the emulated deck did not start within {limit:.0f} s", flush=True)
+            return 3
+    if srv.poll() is not None or not (lines and lines[-1].startswith("mock deck ready")):
+        print("FAIL: the emulated deck stopped while loading:", *lines[-12:], sep="\n  ",
+              flush=True)
+        return 3
+    print(f"emulated deck ready after {time.time() - t_start:.0f} s", flush=True)
+    # keep draining its output so it never blocks on a full pipe
+    threading.Thread(target=lambda: [print("  emulated deck: " + ln.rstrip(), flush=True)
+                                     for ln in srv.stdout], daemon=True).start()
     env = dict(os.environ, PYTHONPATH=os.path.join(ROOT, "tools/mock"),
                XDJ_MOCK_SOCK=sock, XDJ_SHELL_PACE=os.environ.get("MOCK_PACE", "0"), XDJ_SKIP_PLAYTEST="1",
                XDJ_SHELL_STAMP=os.path.join(td, "stamp"),

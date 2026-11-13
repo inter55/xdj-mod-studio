@@ -1,3 +1,24 @@
+# XDJ Mod Studio v1.0.9.1
+
+App-only update: nothing on the deck changes, and you do not need to install
+the mods again.
+
+- **"Write mods file to the USB stick" could sit at 2 % forever (Windows).**
+  The app makes the mods file by running the install on a built-in emulated
+  deck. It waited for that emulated deck to start with no time limit and
+  without saying anything, so a slow start looked exactly like a freeze. It
+  also only read the first line the emulated deck printed; on Windows the
+  rest could fill up and stop it for good. Now:
+  - the job says what it is doing ("starting the emulated deck...", then
+    every 30 s while it loads, then "ready");
+  - everything the emulated deck prints is read and shown under **Details**;
+  - it gives up after 10 minutes with the reason, instead of hanging;
+  - the progress bar moves through the install step by step and names the
+    step, instead of staying at 2 % with "a few seconds left".
+  If it still stops, open **Details** under the job in Activity and send what
+  it says.
+- Same deck code as 1.0.9.
+
 # XDJ Mod Studio v1.0.9
 
 Install the mods again after updating (cable, USB-stick file or a flash).

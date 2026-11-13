@@ -1,3 +1,22 @@
+# XDJ Mod Studio v1.0.9.2
+
+App-only update: nothing on the deck changes, and you do not need to install
+the mods again.
+
+- **"Write mods file to the USB stick" still sat at 2 % for some Windows
+  users, with nothing under Details.** We can't reproduce it on our machines
+  yet, so this version makes the job report exactly where it is: the log now
+  shows each program the app starts (with its process number), a line every
+  2 minutes if that program stays silent, and when it finishes. If your job
+  still stops, open **Details** under it in Activity and send a screenshot:
+  it will now say which step is waiting.
+- **Activity: "Details" closed again as soon as you opened it** (GitHub #13).
+  The list refreshes every second and every refresh folded it shut. Opened
+  details now stay open, at the place you scrolled to.
+- **Activity: the timer kept counting after a job had finished or failed**
+  (GitHub #14). It now stops, and a failed job says "failed after ...".
+- Same deck code as 1.0.9.
+
 # XDJ Mod Studio v1.0.9.1
 
 App-only update: nothing on the deck changes, and you do not need to install

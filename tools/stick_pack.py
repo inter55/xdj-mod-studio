@@ -230,6 +230,7 @@ def main(argv):
                    MOCK_CKPT=os.environ.get("MOCK_CKPT", os.path.join(
                        ROOT, "cache", "emu_dsp_mounted6.pkl")),
                    MOCK_RSLICE=os.environ.get("MOCK_RSLICE", "300000"))
+        print("recording: launching the install runner on the emulated deck", flush=True)
         rc = subprocess.call(([sys.executable, "--run-tool"] if getattr(sys, "frozen", False) else [sys.executable]) + [os.path.join(ROOT, "tools", "mock",
                                                            "mock_install.py")] + rest,
                              cwd=ROOT, env=env)

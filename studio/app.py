@@ -95,7 +95,7 @@ UIHTML = os.path.join(BUNDLE, "studio", "ui.html") if FROZEN else os.path.join(H
 
 APP_SUPPORT = app_support_dir()
 # the app's own release number (GitHub release tag v<APP_VERSION>)
-APP_VERSION = "1.0.9.1"
+APP_VERSION = "1.0.9.2"
 RELEASES_API = "https://api.github.com/repos/inter55/xdj-mod-studio/releases/latest"
 RELEASES_PAGE = "https://github.com/inter55/xdj-mod-studio/releases/latest"
 SETTINGS = os.path.join(APP_SUPPORT, "studio.json")
@@ -270,6 +270,7 @@ def job(title, fn, *args):
         _SCAN.clear()
         with LOCK:
             JOBS[jid]["state"] = st
+            JOBS[jid]["t1"] = time.time()      # GitHub #14: the timer stops here
     threading.Thread(target=run, daemon=True).start()
     return jid
 
@@ -278,15 +279,32 @@ def run_tool(log, args):
     """Run a project tool, streaming its output into the job log. In the
     packaged app the tool runs on the bundled interpreter (no .venv)."""
     cmd = [PY, "--run-tool"] + args if FROZEN else [PY, "-u"] + args
+    # 2026-11-13 (Windows, Reddit): a job sat 31 min with an EMPTY log, so
+    # nobody could tell whether the tool had even started. Say what runs,
+    # and say it again every 2 minutes the tool stays silent.
+    log(f"[app] starting {os.path.basename(args[0])}")
     p = subprocess.Popen(cmd, cwd=ROOT, stdout=subprocess.PIPE,
                          stderr=subprocess.STDOUT, text=True,
                          encoding="utf-8", errors="replace")
-    out = []
+    log(f"[app] {os.path.basename(args[0])} is running (process {p.pid})")
+    out, last = [], [time.time()]
+
+    def watchdog():
+        while p.poll() is None:
+            time.sleep(10)
+            quiet = time.time() - last[0]
+            if quiet >= 120 and p.poll() is None:
+                log(f"[app] no output from {os.path.basename(args[0])} for "
+                    f"{quiet / 60:.0f} min (process {p.pid} still running)")
+                last[0] = time.time()
+    threading.Thread(target=watchdog, daemon=True).start()
     for line in p.stdout:
+        last[0] = time.time()
         line = line.rstrip()
         out.append(line)
         log(line)
     p.wait()
+    log(f"[app] {os.path.basename(args[0])} finished (exit code {p.returncode})")
     return p.returncode, "\n".join(out)
 
 
@@ -484,6 +502,7 @@ def eta_left(j, now=None):
 def job_view(j):
     v = {k: j[k] for k in ("id", "title", "state", "log", "t0", "frac",
                            "note", "wait")}
+    v["t1"] = j.get("t1")
     v["left"] = eta_left(j)
     return v
 

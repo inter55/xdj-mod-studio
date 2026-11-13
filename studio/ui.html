@@ -1528,7 +1528,8 @@ $('#projbtn').onclick = () => setProject($('#project').value);
 
 /* ---- Activity: friendly build cards with progress + ETA */
 function jobCard(j) {
-  const el = Math.max(0, Date.now() / 1000 - j.t0);
+  // GitHub #14: a finished or failed job stops counting (t1 = its end)
+  const el = Math.max(0, (j.t1 || Date.now() / 1000) - j.t0);
   let bar = '', note = j.note || '', meta = `${Math.floor(el / 60)}:${String(Math.floor(el % 60)).padStart(2, '0')} so far`;
   if (j.state === 'running') {
     // time left comes from the server (studio/app.py eta_left: recent
@@ -1550,11 +1551,13 @@ function jobCard(j) {
     bar = `<div class="pb"><i style="width:100%"></i></div>`;
     note = note || 'Finished';
     meta = `took ${Math.floor(el / 60)} min ${Math.floor(el % 60)} s`;
+  } else if (j.state === 'failed') {
+    meta = `failed after ${Math.floor(el / 60)} min ${Math.floor(el % 60)} s`;
   }
   const log = (j.log || []).slice(-14).join('\n');
   return `<div class="job"><div class="t"><b>${esc(j.title)}</b><span class="s ${j.state}">${j.state}</span></div>
     ${note ? `<div class="note">${esc(note)}</div>` : ''}${bar}<div class="meta">${meta}</div>
-    ${log ? `<details><summary>Details</summary><pre>${esc(log)}</pre></details>` : ''}</div>`;
+    ${log ? `<details data-job="${j.id}"><summary>Details</summary><pre>${esc(log)}</pre></details>` : ''}</div>`;
 }
 let polling = false;
 function watch() { $('#act').classList.add('on'); if (!polling) poll(); }
@@ -1593,9 +1596,20 @@ document.addEventListener('click', e => { if (e.target.closest('.creinst')) rein
 async function poll() {
   polling = true;
   const js = await api('/api/jobs') || [];
+  // GitHub #13: the cards are rebuilt every second; keep the Details a user
+  // opened open (and where they scrolled the log to)
+  const keep = {};
+  document.querySelectorAll('#jobs details[open], #dprog details[open]').forEach(d => {
+    const pre = d.querySelector('pre');
+    keep[d.closest('#dprog') ? 'd' + d.dataset.job : d.dataset.job] = pre ? pre.scrollTop : 0;
+  });
   $('#jobs').innerHTML = js.length ? js.slice(0, 8).map(jobCard).join('') : '<div class="empty">Nothing has run yet.</div>';
   const inst = js.find(j => j.title.startsWith('Install mods'));
   $('#dprog').innerHTML = inst ? jobCard(inst) : '';
+  document.querySelectorAll('#jobs details, #dprog details').forEach(d => {
+    const k = d.closest('#dprog') ? 'd' + d.dataset.job : d.dataset.job;
+    if (k in keep) { d.open = true; const pre = d.querySelector('pre'); if (pre) pre.scrollTop = keep[k]; }
+  });
   const running = js.some(j => j.state === 'running');
   $('#actdot').hidden = !running; $('#actdot').className = 'dot run';
   if (running) setTimeout(poll, 1000); else { polling = false; if (LIB.loaded) load(); }

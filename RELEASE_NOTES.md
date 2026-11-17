@@ -59,10 +59,9 @@ being tested on the deck and is not in this release.
 ## Tested how
 
 - **On a real XDJ-700:** waveform theme colours, D–F marker labels, REC on
-  D–F, Touch FX panel and tabs.
+  D–F, Touch FX panel and tabs, Touch FX Pitch and Roll.
 - **Emulator only so far:**
   - the green "cue set" strip on D–H pads;
-  - Touch FX Pitch and Roll;
   - the USB-button corner;
   - the same-track colour check;
   - the light theme fixes.

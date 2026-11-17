@@ -98,18 +98,18 @@ project log) and docs/ROADMAP.md for the detail behind each line.
    Still to build: the app button that calls it for the loaded track (needs
    the deck's track identity over the shell) so deck-set cues survive a track
    change, and delete on the deck.
-10. **Touch FX: all 8 effects.** Filter, Crush and Gate work on the deck.
-    Echo, Pitch, Flanger, Roll and Reverb need a bigger free area in the
-    audio chip's memory (read-only deck survey first). Reverb may slip
+10. **Touch FX: all 8 effects.** Filter, Crush and Gate work on the deck;
+    Pitch is emulator-passed and in the shipping build (2026-11-10) and needs
+    one deck listen. Echo, Flanger, Roll and Reverb need a bigger free area in
+    the audio chip's memory (read-only deck survey first). Reverb may slip
     to 1.1. SURVEY DONE 2026-11-03 (static, no deck):
     docs/TOUCHFX_MEMORY_SURVEY.md. Our DSP window is 0xC005F4C0..
-    0xC0060000 = 2,880 B, already shared with live key shift; Echo needs
-    44-88 KB, Reverb 50-65 KB, Flanger 8.8 KB, Roll 44 KB (or 0 by using
+    0xC0060000 = 2,880 B, already shared with live key shift;    Echo needs 44-88 KB, Reverb 50-65 KB, Flanger 8.8 KB, Roll 44 KB (or 0 by using
     the deck's own loop engine). Pitch needs NO new memory of its own -- it is
-    the key-shift stretcher we already have -- but the CODE does not fit:
-    written 2026-11-07, it builds at 2,912 B against the 2,496 B wall
-    (`-DFX_PITCH`, refused by the build gate). 416 B of code room is the
-    blocker, not a buffer. See docs/TOUCHFX_MEMORY_SURVEY.md.
+    the key-shift stretcher we already have -- and the code now fits: the
+    Q14 table + latch compaction build at 2,480 B of the 2,496 B wall
+    (2026-11-10), and the shipping build enables it. See
+    docs/TOUCHFX_MEMORY_SURVEY.md, "Update 2026-11-10".
     MEASURED TWICE 2026-11-05 (emulator): the "~101 KB gap at 0xC0045900"
     is USED (97,308 of 105,408 bytes, through 0xC005F4A6) -- the 0x4D70
     block is a pointer table, not load addresses. The first replacement
@@ -241,8 +241,11 @@ The user's own ideas and community asks so far:
 ### Addendum 2026-11-03 (corrected the same night)
 
 An instant mute IS possible, and item 10 now means it: measured at 38 ms in
-the emulator with the real DSP core (one poll plus one 588-frame block; ~50 ms
-on the deck at its 28 polls/s). The first hardware
+the emulator with the real DSP core (one poll plus one 588-frame block). That
+projection of ~50 ms on the deck was WRONG: measured 2026-11-07 on hardware,
+the mute is still heard 27.8 s later, because the deck plays ~28 s of
+already-decoded audio that a file-level rewrite cannot reach
+(`docs/STEMS_MUTE_LATENCY.md`). The first hardware
 reading (~30 s) was a bug, not a limit: the rewrite anchored its slots by
 searching the chip's store, so it wrote muted audio into old copies nothing
 plays, and the aim came from the furthest read (rfront), so after a jump it

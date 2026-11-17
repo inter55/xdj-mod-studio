@@ -85,6 +85,10 @@ def main():
     # real-deck time model (measured 2026-10-04/05): BR round ~66 ms,
     # write ~4 ms with reply wait, open+handshake ~2 s, 30 s cool-down
     stats = {"cmds": 0, "sessions": 0, "br": 0, "wr": 0, "est": 0.0}
+    # MOCK_DROP_FIRST=N: answer the first N commands with nothing at all, the
+    # way the deck's shell goes quiet mid-install (2026-11-07). Lets the read
+    # path's re-handshake recovery be tested with no deck attached.
+    drop_left = int(os.environ.get("MOCK_DROP_FIRST", "0"))
     while True:
         c, _ = srv.accept()
         sb, sw = stats["br"], stats["wr"]
@@ -108,6 +112,10 @@ def main():
                 f.write(b"bye\n"); f.flush()
                 return
             stats["cmds"] += 1
+            if drop_left > 0:
+                drop_left -= 1
+                f.write(b"\n"); f.flush()          # silence, not an error
+                continue
             if line.strip().upper().endswith(("BR", "LR")):
                 stats["br"] += 1
                 stats["est"] += 0.066

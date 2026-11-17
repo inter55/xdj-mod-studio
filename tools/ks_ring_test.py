@@ -24,6 +24,7 @@ from emu.machine import Machine          # noqa: E402
 from keyshift_reload_emu import syms, B  # noqa: E402
 
 SNAP = sys.argv[1] if len(sys.argv) > 1 else "cache/emu_dsp_mounted6.pkl"
+MAX_SLICES = int(os.environ.get("MAX_SLICES", "200"))
 POOL_FLUSH = 0x08C92E20
 RING = 0x0C8440
 MASKED, UNMASKED = 0x4B535231, 0x4B535331
@@ -33,7 +34,8 @@ DECK_RING = [0x53FF7955, 0x7F797A79, 0xFF798A79, 0x79A7799D,
              0x79AA9F4B, 0xB379AEFF, 0xBA79B979, 0x79C9FF79]
 
 
-def quad(tag, flag, ring_words, S, blob, base, max_slices=200):
+def quad(tag, flag, ring_words, S, blob, base, max_slices=None):
+    max_slices = max_slices or MAX_SLICES
     t0 = time.time()
     m = Machine.load(SNAP)
     mem, d = m.mem, m.mem.dev.dspemu
@@ -53,7 +55,7 @@ def quad(tag, flag, ring_words, S, blob, base, max_slices=200):
         st = mem.r32(S["ksr_status"])
         if st:
             break
-        if i % 20 == 59:
+        if i % 10 == 9:
             print(f"[{tag}] +{(i+1)*10}M st={st:#x} dsp={d.cpu.pc:#x} "
                   f"hpic={d.hpic:#x} pin={d.busy_pin()} "
                   f"F4={d.bus.read(0x1183FFF4,4):#x}", flush=True)

@@ -28,7 +28,7 @@ import dsp_pitch_probe as P              # noqa: E402
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 BIN = os.environ.get("FX_BIN") or os.path.join(HERE, "fx_dsp", "fx.bin")
-ELF = os.path.join(HERE, "fx_dsp", "fx.elf")
+ELF = os.environ.get("FX_ELF") or os.path.join(HERE, "fx_dsp", "fx.elf")
 FX_BASE = 0xC005F4C0
 CALL = 0xC0008D64
 CALL_FP = 0xC0008D60
@@ -36,7 +36,7 @@ PULLER = 0xC001CBF4
 SH_STORE = 0x08D36B3A
 SH_SLOT = 0x09D24DD8
 EFF = {"filter": 0, "crush": 1, "gate": 2, "echo": 3, "flanger": 4,
-       "pitch": 5}
+       "pitch": 5, "roll": 6, "reverb": 7}
 # Same numbers as fx.c. Overridable so a short-ring build (FX_RING_BASE /
 # FX_RING_FRAMES in build.sh) can be gated without editing this file.
 ECHO_FRAMES = int(os.environ.get("FX_FRAMES", "6500"))
@@ -205,16 +205,23 @@ def main():
     bal = min(rl, rr) / max(rl, rr, 1e-9)
     cbal = min(cl, cr) / max(cl, cr, 1e-9)
     # an effect never makes the music 3x louder: full-scale garbage (the
-    # unstable filter corner fixed in 1.0.8: rms 32768/32768) used to pass
+    # unstable filter corner, 2026-11-09: rms 32768/32768) used to pass here
     sane = (rl > 50 and rr > 50 and abs(tr - 1) < 0.03 and bal > cbal * 0.7
             and rl < 3 * cl and rr < 3 * cr)
     print(f"SANITY: rms L/R ctl {cl:.0f}/{cr:.0f} fx {rl:.0f}/{rr:.0f} "
           f"(balance {cbal:.2f} -> {bal:.2f}), play position {pos.get('ctl')} -> {pos['fx']} "
           f"blocks (x{tr:.3f}) -> {'ok' if sane else 'BAD'}")
+    ok = False
     if eff == "filter":
         hc, hf = hi_ratio(c), hi_ratio(f)
-        ok = hf < hc * 0.6
-        print(f"FILTER X={xv} Y={yv}: hi-band(>4k) energy {hc:.4f} -> {hf:.4f} "
+        # X at the far right is a fully open cutoff: there is nothing left
+        # to attenuate, so the closed-filter test would always fail. The old
+        # instability showed up as full-scale noise, which `sane` catches;
+        # the open corner must instead stay close to the dry signal.
+        open_filter = xv >= 240
+        ok = hf < hc * 1.5 if open_filter else hf < hc * 0.6
+        print(f"FILTER X={xv} Y={yv}{' (open, near dry)' if open_filter else ''}: "
+              f"hi-band(>4k) energy {hc:.4f} -> {hf:.4f} "
               f"({hf/hc*100:.0f}%) -> RESULT: {'PASS' if ok and sane else 'FAIL'}")
     elif eff == "crush":
         # model: the same crush math (fx.c) on the control audio
@@ -273,13 +280,48 @@ def main():
               f"(window {base}..{base + mod}), sweep {hi - lo} frames, "
               f"corr {min(corrs):.2f}..{max(corrs):.2f} -> "
               f"RESULT: {'PASS' if ok and sane else 'FAIL'}")
+    elif eff == "roll":
+        # Roll is the echo line with feedback 1.0: the slice must come back at
+        # exactly the delay, and the repeats must NOT decay (that is the whole
+        # difference from Echo).
+        df = ECHO_MINF + int(xv / 255 * (ECHO_FRAMES - 1 - ECHO_MINF))
+        N = 1 << (2 * len(c) - 1).bit_length()
+        rc = np.fft.irfft(np.fft.rfft(f, N) * np.conj(np.fft.rfft(c, N)), N)[:len(c)]
+        rc /= np.sqrt((c * c).sum() * (f * f).sum()) + 1e-9
+        # Judge at the delay the code actually uses, NOT at the global
+        # correlation peak: with feedback ~1 the correlation has near-equal
+        # peaks at 2x and 3x the slice, and picking the largest by chance made
+        # a working Roll read as broken (2026-11-08, combined engine). A wrong
+        # delay still shows up here, because then corr at df is low.
+        peak = int(np.argmax(np.abs(rc[:min(len(c), 3 * df)])))
+        r1 = float(rc[df]) if df < len(rc) else 0.0
+        r2 = float(rc[2 * df]) if 2 * df < len(rc) else 0.0
+        hold = r2 / r1 if r1 else 0.0
+        ok = r1 > 0.3 and hold > 0.8
+        print(f"ROLL X={xv} ({df/P.FS*1000:.0f} ms slice): corr at the slice "
+              f"{r1:.2f} (peak lag {peak}), repeat level {hold:.2f} of the "
+              f"first (want >0.8 = no decay) -> "
+              f"RESULT: {'PASS' if ok and sane else 'FAIL'}")
+    elif eff == "reverb":
+        # Two combs sharing the line: the output must keep the input's spectrum
+        # while losing its waveform (that is what a room does).
+        bc, bf = bands(c), bands(f)
+        r_b = float(np.corrcoef(bf, bc)[0, 1])
+        N = 1 << (2 * len(c) - 1).bit_length()
+        rc = np.fft.irfft(np.fft.rfft(f, N) * np.conj(np.fft.rfft(c, N)), N)[:len(c)]
+        rc /= np.sqrt((c * c).sum() * (f * f).sum()) + 1e-9
+        r_t = float(np.max(np.abs(rc[:2000])))
+        ok = r_b > 0.5 and r_t < 0.45
+        print(f"REVERB X={xv} Y={yv} D={dv}: spectrum corr {r_b:.2f}, waveform "
+              f"corr {r_t:.2f} (want diffuse) -> "
+              f"RESULT: {'PASS' if ok and sane else 'FAIL'}")
     elif eff == "pitch":
         # same mapping as fx.c: X -> semitones -11..+11, k = 2^(semi/12).
         # Test: the FX spectrum must look like the control's spectrum moved
         # by 6*log2(k) of the 1/6-octave bands (bands() is 1/6 octave), and
         # better than the same comparison without the move.
         import math
-        semi = int(xv * 22 / 255) - 11
+        semi = ((xv * 23) >> 8) - 11      # fx.c: (xi * 23) >> 8, no divide
         k = 2.0 ** (semi / 12.0)
         bc, bf = bands(c), bands(f)
         idx = np.arange(len(bc))
@@ -304,6 +346,9 @@ def main():
         print(f"GATE X={xv} Y={yv}: gain envelope p10 {lo:.2f} p90 {hi:.2f} "
               f"({hi/lo:.1f}x), peak {pk:.2f} Hz (want {rate:.2f}) -> "
               f"RESULT: {'PASS' if ok and sane else 'FAIL'}")
+
+    if not (ok and sane):
+        sys.exit(1)                 # a printed FAIL is a real gate failure
 
 
 if __name__ == "__main__":

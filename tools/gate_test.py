@@ -46,11 +46,13 @@ def touch_raw(m, x, y, hold=3_000_000, after=10_000_000):
     m.cpu.run(limit=after)
 
 
-def touch_px(m, xy, hold=3_000_000, after=10_000_000):
-    dev = m.mem.dev
-    dev.panel_frame = panl.build_frame(touch=xy)
+def touch_down(m, xy, hold=3_000_000):
+    m.mem.dev.panel_frame = panl.build_frame(touch=xy)
     m.cpu.run(limit=hold)
-    dev.panel_frame = panl.build_frame()
+
+
+def touch_up(m, after=10_000_000):
+    m.mem.dev.panel_frame = panl.build_frame()
     m.cpu.run(limit=after)
 
 
@@ -72,17 +74,23 @@ def main():
     print("mode after PLAY:", hex(mode))
     ok = (mode == 5)
     mem.w8(PP.MSGATE, 1)              # arm the gate (row UI in mysettings)
-    touch_raw(m, 0x090, 0x06A)        # (ensure PERFORM; harmless if open)
-    # stock hot cue A pad, HOT CUE tab active: touch + release
-    touch_px(m, (165, 264))
-    print("latch while held:", hex(mem.r8(PP.PST + 3)),
-          "gate:", hex(mem.r8(PP.MSGATE)))
+    if mem.r32(PP.MODEW) != 7:        # PERFORM's top-right button is a TOGGLE:
+        touch_raw(m, 0x090, 0x06A)    # re-tapping it while open closes PERFORM
+    # stock hot cue A pad, HOT CUE tab active: press, then release
+    touch_down(m, (165, 264))
+    held = mem.r8(PP.PST + 3)
+    print("latch while held:", hex(held), "gate:", hex(mem.r8(PP.MSGATE)))
     fb_png(m, f"{OUT}/held.png")
+    touch_up(m)
     m.cpu.run(limit=50_000_000)
-    print("latch after release:", hex(mem.r8(PP.PST + 3)),
-          "mode:", hex(mem.r32(MODEW)))
+    released = mem.r8(PP.PST + 3)
+    print("latch after release:", hex(released),
+          "mode:", hex(mem.r32(MODEW)),
+          "PAY16:", hex(mem.r8(PP.PAY16)),
+          "PLAYPP:", hex(mem.r8(PP.PLAYPP)))
     fb_png(m, f"{OUT}/released.png")
-    ok &= mem.r8(PP.PST + 3) == 0
+    ok &= held == 1
+    ok &= released == 0
     ok &= mem.r32(MODEW) == 3
     print("RESULT:", "PASS" if ok else "FAIL")
     return 0 if ok else 1

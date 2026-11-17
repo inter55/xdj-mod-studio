@@ -7,12 +7,50 @@ for several masks, must equal stems4.expected() inside the sample data,
 the plain file outside it, and leave the file position where a plain read
 would."""
 import random
+import os
 import subprocess
 import sys
 sys.path[:0] = [".", "tools"]
 import stems4 as S4                                    # noqa: E402
 
 F = sys.argv[1] if len(sys.argv) > 1 else "dist/deck-tests/Get Lucky ESQUIRE (STEMS).wav"
+SM_NAT = "build/stems/sm_native"
+
+
+def build_native():
+    """Rebuild when missing or older than its sources: a stale binary made this
+    gate pass while the code under it had already changed (found 2026-11-12)."""
+    src = ["tools/stems/sm.c", "tools/stems/sm_native_test.c"]
+    stale = (not os.path.exists(SM_NAT) or
+             max(os.path.getmtime(p) for p in src) > os.path.getmtime(SM_NAT))
+    if stale:
+        r = subprocess.run(["cc", "-O2", "-DSM_NATIVE", "-o", SM_NAT] + src,
+                           capture_output=True, text=True)
+        if r.returncode:
+            print("native build failed:\n" + (r.stderr or "")[-800:])
+            return False
+        print("native built from source")
+    return os.path.exists(SM_NAT)
+
+
+if not build_native():
+    print("RESULT: FAIL")
+    sys.exit(1)
+
+# the masked-section gate: sections must tile the block, longest == DR_PIECE
+pc = subprocess.run([SM_NAT, "pieces"], capture_output=True, text=True)
+print("  " + (pc.stdout.strip() or pc.stderr.strip()))
+if pc.returncode:
+    print("RESULT: FAIL (masked-section size drifted)")
+    sys.exit(1)
+
+# the short read-ahead's hold/pass decision (2026-11-16: run rule)
+tc = subprocess.run([SM_NAT, "thr"], capture_output=True, text=True)
+print("  " + (tc.stdout.strip() or tc.stderr.strip()))
+if tc.returncode:
+    print("RESULT: FAIL (short read-ahead decision)")
+    sys.exit(1)
+
 raw = open(F, "rb").read()
 d_off, d_len, big, st, mix = S4.read(F)
 rnd = random.Random(5)

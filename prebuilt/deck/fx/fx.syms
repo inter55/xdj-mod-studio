@@ -1,3 +1,4 @@
-c005fbe0 T FX
-c005f820 t frame.isra.0
+c005fe70 R FX
+c005fa80 t frame.constprop.0
 c005f4c0 T fx_pull
+c005fe40 r pktab

@@ -13,6 +13,9 @@
  *   +32 u8 cur  +33 u8 target  +34 u8 busy  +35 pad  +36 u32 nswitch
  *   +40 hash_off  +44 chunk (pixels per fingerprint)  +48 nskipped
  *   +52 tbits_off (1 bit per chunk: chunk holds theme colours)
+ *   +56 info_addr +60 info_n +64 light_idx (light-only stock INFO card)
+ *   +68 wave_off: u32 n, m, addr[n]; u16 rows[nt + 1][m] waveform colours
+ *       (theme_switch.py wave_section; addr bit 0 = 32-bit literal)
  *   regions {u32 addr, u32 pixels}, S u16[ns] ascending,
  *   D u16[nt][ns] (S order), names char[nt][16] (UPPER, NUL-padded),
  *   chunk bitmap, hashes u32[] (one per THEMABLE chunk, in order)
@@ -44,6 +47,8 @@ struct hdr {
     u32 reg_off, s_off, d_off, name_off;
     u8 cur, target, busy, pad;
     u32 nswitch, hash_off, chunk, nskipped, tbits_off;
+    u32 info_addr, info_n, light_idx;   /* light-only stock INFO card */
+    u32 wave_off;                       /* 0 = no waveform table */
 };
 
 #define MAXS 4096   /* 2026-10-26: light makes S ~3400 colours */
@@ -196,6 +201,79 @@ static void recolour(struct hdr *h)
     }
 }
 
+/* The INFO rows' icons are separate 24x24 sprite blits, not part of the
+ * card picture: keep their stock (black) pixels too while LIGHT is on. The
+ * selected row's note (0x08127190) stays themed so it contrasts with the
+ * light selection bar, like the row text. */
+static const u32 info_ico[][2] = {
+    {0x08113910u, 24 * 24}, {0x08112B90u, 24 * 24},
+    {0x08138890u, 24 * 24}, {0x08115410u, 24 * 24}, {0x08121310u, 24 * 24},
+    {0x0813C090u, 24 * 24}, {0x0813A110u, 24 * 24},
+};
+
+static void map_range(struct hdr *h, u16 *p, u32 cnt, u32 fast)
+{
+    u16 *end = p + cnt;
+    u32 a;
+    if (fast) {
+        while (p < end) {
+            *p = TOMAP[*p];
+            p++;
+        }
+    } else {
+        while (p < end) {
+            u16 v = *p;
+            if (IN(v))
+                *p = to[find(h->ns, v)];
+            p++;
+        }
+    }
+    for (a = (u32)(end - cnt) & ~31u; a < (u32)end; a += 32)
+        wb(a);
+}
+
+/* LIGHT-only INFO repair. Stock INFO is a white card in a dark UI, so a
+ * plain light-map inversion turns it into a dark panel. Keep that one
+ * region stock while LIGHT is active; the text wrapper also leaves its
+ * dark ink alone. Called AFTER the global recolour, with `cur` still the
+ * old theme, so a colour target reached from LIGHT is mapped directly
+ * from stock instead of from LIGHT's dark colours. */
+static void info_apply(struct hdr *h, u32 src_idx, u32 dst_idx)
+{
+    u8 oldc = h->cur, oldt = h->target;
+    u32 fast, i;
+    if (!h->info_addr || !h->info_n)
+        return;
+    h->cur = (u8)src_idx;
+    h->target = (u8)dst_idx;
+    build(h);
+    fast = maps(h->ns);
+    map_range(h, (u16 *)h->info_addr, h->info_n, fast);
+    for (i = 0; i < sizeof(info_ico) / sizeof(info_ico[0]); i++)
+        map_range(h, (u16 *)info_ico[i][0], info_ico[i][1], fast);
+    h->cur = oldc;
+    h->target = oldt;
+}
+
+/* 2026-11-10 review: the card used to be repaired only AFTER the recolour.
+ * Leaving LIGHT, every 1024-px chunk that held card/icon pixels (stock) next
+ * to ordinary artwork (light) failed the stock-fingerprint guard and was
+ * skipped: ~2750 neighbouring pixels (other 24x24 icons) stayed in LIGHT
+ * colours until power-off, more after each visit. Now the card is put back
+ * into LIGHT colours BEFORE leaving, so the guard sees one consistent theme
+ * and the normal recolour takes everything to the target. */
+static void info_leave(struct hdr *h)        /* before build()/recolour() */
+{
+    if (h->light_idx && h->cur == h->light_idx && h->target != h->light_idx)
+        info_apply(h, 0, h->light_idx);
+}
+
+static void info_enter(struct hdr *h)        /* after recolour() */
+{
+    if (h->light_idx && h->target == h->light_idx)
+        info_apply(h, h->light_idx, 0);
+}
+
 static void label(struct hdr *h)
 {
     volatile u8 *dst = (volatile u8 *)MSTNAME;
@@ -210,6 +288,38 @@ static void label(struct hdr *h)
     *(volatile u8 *)MSTAPP = 1;
 }
 
+/* 2026-11-12: the waveform colours follow the theme: the three firmware
+ * palettes (blue overview 12, PERFORM strip 8, centre 8 -- .data in RAM,
+ * read on every repaint) and the 3-band overview module's three colour
+ * literals. An entry is rewritten only while it still holds the colour of
+ * the theme being left, so anything the firmware or another mod changed
+ * there is left alone (and a module that is not installed is skipped).
+ * Exact in both directions (absolute values per theme row). */
+u32 ts_wave_writes, ts_wave_skips;
+static void wave_apply(struct hdr *h)
+{
+    if (!h->wave_off || h->wave_off & 3)
+        return;
+    const u32 *w = (const u32 *)((u8 *)h + h->wave_off);
+    u32 n = w[0], m = w[1];
+    if (!n || n > 64 || m < n + 3 || m > 72)
+        return;
+    const u16 *rows = (const u16 *)(w + 2 + n);
+    const u16 *from = rows + m * h->cur, *to = rows + m * h->target;
+    for (u32 i = 0; i < n; i++) {
+        u32 a = w[2 + i];
+        if (a & 1) {                       /* 32-bit literal, high half 0 */
+            volatile u32 *p = (volatile u32 *)(a & ~1u);
+            if (*p == from[i]) { *p = to[i]; ts_wave_writes++; }
+            else if (*p != to[i]) ts_wave_skips++;
+        } else {
+            volatile u16 *p = (volatile u16 *)a;
+            if (*p == from[i]) { *p = to[i]; ts_wave_writes++; }
+            else if (*p != to[i]) ts_wave_skips++;
+        }
+    }
+}
+
 /* apply h->target now (no-op when already there) */
 void ts_apply(void)
 {
@@ -220,8 +330,11 @@ void ts_apply(void)
         h->target = 0;
     if (h->target != h->cur) {
         h->busy = 1;
+        info_leave(h);
         build(h);
         recolour(h);
+        info_enter(h);
+        wave_apply(h);
         h->cur = h->target;
         h->nswitch++;
         h->busy = 0;

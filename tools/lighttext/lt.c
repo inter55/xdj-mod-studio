@@ -42,6 +42,11 @@ void lt_map(u8 *c)
         last_out = key;
         return;
     }
+    if (mx < 0x80) {                         /* dark INFO ink: keep it dark
+                                              * on the stock-white INFO card */
+        last_out = key;
+        return;
+    }
     /* neutral: lightness flip with extra contrast (white -> 0x20) */
     u32 v = 255 - (mx * 7 >> 3);
     v = v * v >> 8;                          /* darker mid greys */
@@ -56,9 +61,15 @@ typedef u32 (*rgb_t)(u32 r, u32 g, u32 b);
 u32 lt_rgb(u32 r, u32 g, u32 b)
 {
     if (lt_active) {
-        u8 c[3] = {(u8)r, (u8)g, (u8)b};
-        lt_map(c);
-        r = c[0]; g = c[1]; b = c[2];
+        /* own rule, NOT lt_map: lt_map keeps dark greys dark (INFO card
+         * ink), which left the centre waveform's black background black
+         * (2026-11-12 deck photos). Here every neutral flips. */
+        u32 mx = r > g ? (r > b ? r : b) : (g > b ? g : b);
+        u32 mn = r < g ? (r < b ? r : b) : (g < b ? g : b);
+        if (mx - mn <= 48) {
+            u32 v = 255 - (mx * 7 >> 3);
+            r = g = b = v;
+        }
     }
     return ((rgb_t)0x08DB6CD4u)(r, g, b);
 }

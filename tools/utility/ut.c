@@ -47,7 +47,7 @@ static const u16 L_GATE[] = u"HOT CUE GATE";
 static const u16 L_THEME[] = u"THEME";
 
 static const u16 S_ON[] = u"ON", S_OFF[] = u"OFF", S_GATE[] = u"GATE";
-static const u16 S_BLUE[] = u"BLUE", S_RGB[] = u"RGB", S_3B[] = u"3-BAND";
+static const u16 S_BLUE[] = u"BLUE/THEME",  /* 2026-11-12 user: blue follows the theme */ S_RGB[] = u"RGB", S_3B[] = u"3-BAND";
 static const u16 S_B1[] = u"1X", S_B2[] = u"2X", S_B4[] = u"4X",
                  S_B8[] = u"8X", S_B15[] = u"15X", S_B05[] = u"0.5X";
 static const u16 S_NONE[] = u"NOT INSTALLED";

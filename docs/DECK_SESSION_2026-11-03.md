@@ -92,9 +92,17 @@ Steps:
    and the rest of what you ticked).
 8. Play a track and run through a few of the Part A checks.
 
-If anything is wrong at step 5 or later: power off, then flash **stick 1**
-(the official file) with the same steps 1-4. That puts the deck back to
-exactly stock.
+If anything is wrong at step 5 or later: power off, then flash a **stock
+file numbered higher** than what UTILITY reports, with the same steps 1-4.
+That puts the deck back to exactly stock. Do NOT use stick 1 here: the deck
+now reports 1.16, and Pioneer's 1.15 file is refused as older (2026-11-07,
+twice on a reporter's deck). Build the restore file with
+`permanent_build.py --stock --banner 1.17`, which changes only the version
+number, or point the app at Advanced > Back to stock.
+
+After that the deck reports 1.17, so the next modded build must be numbered
+1.18 or higher. Going back to 1.15 is not needed to reflash: the updater only
+wants a higher number than the deck already has.
 
 If the deck refuses the loader update or nothing happens, that is harmless:
 power off, remove the stick, power on normally.

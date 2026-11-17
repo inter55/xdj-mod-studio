@@ -47,6 +47,14 @@ typedef unsigned int u32;
 #define PCOB_OFF 0xFC0u
 #define TAG_PCOB 0x424F4350u     /* "PCOB" as stored */
 #define SLOTS    0x0B6C4118u
+/* the deck keeps each pad's cue TWICE MORE, in two 8-record models of its
+ * own (0x38 per record: +0x00 u16 state, +0x02 u16 number, +0x04 ms,
+ * +0x08 loop, +0x0C 1/150 s). Measured 2026-11-08: paging the live slot
+ * alone left both models on A-C and the deck went on playing A-C, so the
+ * prototype borrow must write them as well (tools/hotcue8/hc.c does). */
+#define MODEL_A  0x0BA28800u
+#define MODEL_B  0x0BA2A52Cu
+#define MODEL_S  0x38u
 #define PREVIEW  0x0BA3BCCCu
 #define KEYB     0x0B6C7A28u     /* panel key bitmap */
 
@@ -75,6 +83,7 @@ u32 hg_borrow;                   /* 1 = slot hg_slot holds saved bytes */
 u32 hg_restore;                  /* flush countdown to the restore */
 u32 hg_presses, hg_swallowed, hg_restores, hg_draws;
 u32 hg_saved[16];                /* the borrowed slot's 64 bytes */
+static u32 hg_savedm[2][14];     /* ... and its two pad-model records */
 static u32 hg_hash;
 
 static u32 hash_preview(void)
@@ -110,11 +119,29 @@ static void key(u32 k, int on)
     else R8(a) = (u8)(R8(a) & ~KEY_BIT[k]);
 }
 
+/* one record of a pad model; only +0x00..+0x0D are used, the tail
+ * +0x10..+0x37 is zero on every stock record (measured 2026-11-08) */
+static void model_set(u32 k, u32 n, u32 ms, u32 loop)
+{
+    for (u32 m = 0; m < 2; m++) {
+        u32 r = (m ? MODEL_B : MODEL_A) + k * MODEL_S;
+        R16(r + 0x00) = 6;
+        R16(r + 0x02) = (u16)n;
+        R32(r + 0x04) = ms;
+        R32(r + 0x08) = loop;
+        R32(r + 0x0C) = ms * 3u / 20u;    /* ms -> 1/150 s */
+    }
+}
+
 static void restore_slot(void)
 {
     if (hg_borrow) {
         u32 s = SLOTS + hg_slot * 0x40;
         for (int i = 0; i < 16; i++) R32(s + 4 * i) = hg_saved[i];
+        for (u32 j = 0; j < 14; j++) {
+            R32(MODEL_A + hg_slot * MODEL_S + 4 * j) = hg_savedm[0][j];
+            R32(MODEL_B + hg_slot * MODEL_S + 4 * j) = hg_savedm[1][j];
+        }
         hg_borrow = 0;
         hg_restores++;
     }
@@ -172,13 +199,18 @@ u32 hg_touch(u32 down, u32 x, u32 y)
     u32 k = (n - 1) % 3, s = SLOTS + k * 0x40;
     if (n > 3) {
         for (int j = 0; j < 16; j++) hg_saved[j] = R32(s + 4 * j);
+        for (u32 j = 0; j < 14; j++) {
+            hg_savedm[0][j] = R32(MODEL_A + k * MODEL_S + 4 * j);
+            hg_savedm[1][j] = R32(MODEL_B + k * MODEL_S + 4 * j);
+        }
         hg_borrow = 1;
-        u32 ms = R32(e + 0x20);
+        u32 ms = R32(e + 0x20), loop = R32(e + 0x24);
         R16(s + 0x08) = 6;
         R16(s + 0x0A) = (u16)n;
         R32(s + 0x0C) = ms;
-        R32(s + 0x10) = R32(e + 0x24);
+        R32(s + 0x10) = loop;
         R32(s + 0x14) = ms * 3u / 20u;     /* ms -> 1/150 s */
+        model_set(k, n, ms, loop);         /* the pads read these */
     }
     hg_slot = k;
     hg_held = 1 + i;

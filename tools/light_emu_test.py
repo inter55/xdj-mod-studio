@@ -5,7 +5,9 @@
 UTILITY > THEME is set to LIGHT with real button presses, screenshots taken,
 and THEME set back to OFF: the artwork must return to stock exactly and the
 light add-on must switch itself off (it follows the switcher's theme).
-Screens: screenshots/light_emu_{main,perform,back}.png"""
+The INFO tab is checked too: LIGHT must keep the stock-white card with dark
+text and icons (the 2026-11-10 regression this gate exists to catch).
+Screens: screenshots/light_emu_{main,perform,browse,info,back}.png"""
 import os
 import sys
 import time
@@ -46,6 +48,45 @@ def install_lt(mem, idx):
     mem.w32(s["lt_prev"], mem.r32(FLUSH))
     mem.w32(FLUSH, s["lt_flush"])
     return s
+
+
+# 2026-11-10: stock INFO card and the six row icons (24x24) it does not
+# include; stars + pencil are separate blits on the same screen.
+INFO_CARD = (98, 76, 688, 243)
+INFO_ICONS = [(118, 109 + 30 * i) for i in range(6)]
+INFO_STARS = (118, 280, 132, 30)
+INFO_PENCIL = (420, 289, 24, 24)
+
+
+def info_contrast(buf):
+    """LIGHT's INFO card must stay stock-white with dark ink. FAILs on the
+    old regression (white text / icons on the white card)."""
+    assert len(buf) == 800 * 480 * 2, f"framebuffer {len(buf)} B"
+    a = np.frombuffer(buf, dtype="<u2").astype(np.uint32).reshape(480, 800)
+    r, g, b = (a >> 11) & 31, (a >> 5) & 63, a & 31
+    lum = 0.2126 * r / 31 + 0.7152 * g / 63 + 0.0722 * b / 31
+
+    def ink(box):
+        x, y, w, h = box
+        return int((lum[y:y + h, x:x + w] < 0.20).sum())
+
+    x, y, w, h = INFO_CARD
+    card = lum[y:y + h, x:x + w]
+    card_bg, card_ink = card[card > 0.65], card[card < 0.20]
+    rows = lum[100:280, 150:600]
+    row_bg, row_ink = rows[rows > 0.65], rows[rows < 0.20]
+    contrast = (row_bg.mean() + 0.05) / (row_ink.mean() + 0.05) if row_ink.size else 0
+    icons = [ink((x, y, 24, 24)) for x, y in INFO_ICONS]
+    stars, pencil = ink(INFO_STARS), ink(INFO_PENCIL)
+    ok = (card_bg.size > 0.25 * card.size and card_bg.mean() > 0.80
+          and card_ink.size > 1000
+          and row_bg.size > 0.25 * rows.size and row_bg.mean() > 0.80
+          and row_ink.size > 1000 and contrast > 4.5
+          and all(c >= 20 for c in icons) and stars >= 50 and pencil >= 20)
+    print(f"INFO card: light {card_bg.size / card.size:.0%} bg {card_bg.mean():.2f}, "
+          f"rows {row_ink.size:,} dark px contrast {contrast:.1f}:1, "
+          f"icons {icons}, stars {stars}, pencil {pencil}")
+    return ok
 
 
 def main():
@@ -145,9 +186,9 @@ def main():
     fb_png(m, pre + "_browse.png")
     run(12_000_000, ["Browse"]); run(150_000_000)
     run(6_000_000, touch=(433, 38)); run(120_000_000)       # INFO tab
-    fb_png(m, pre + "_info.png")
+    info_ok = info_contrast(fb_png(m, pre + "_info.png"))
     run(6_000_000, touch=(433, 38)); run(120_000_000)
-    ok = got == light
+    ok = got == light and info_ok
     back = theme(0)
     fb_png(m, pre + "_back.png")
     if os.environ.get("SAVEBACK"):

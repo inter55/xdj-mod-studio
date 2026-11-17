@@ -46,7 +46,7 @@ def main():
     base = s["tfx_flush_entry"]
     img = open(f"{OUT}/tfx.bin", "rb").read()
     end = s["end"]
-    ok_file = os.path.expanduser(f"~/.xdj700_tfx_survey_ok.{base:08x}")
+    ok_file = os.path.expanduser(f"~/.xdj700_tfx_survey_ok.{base:08x}.{end:08x}")  # a survey covers one exact range
     import hid
     from xdj700_usb_shell import PIONEER_VID, open_deck, drain
     from rgb_overview_apply import br, read_block, send
@@ -62,6 +62,16 @@ def main():
                                     "..", "build", "hotcue8", "hc.syms")):
             a_, _, n_ = ln.split()
             if n_.lstrip("_") == "hc_tentry":
+                known_touch.add(int(a_, 16))
+    except OSError:
+        pass
+    # 2026-11-13: the hot cue swipe module (tools/hcpad) sits in front of the
+    # hot cue pages in the touch chain; it steps aside while TOUCH FX is open
+    try:
+        for ln in open(os.path.join(os.path.dirname(os.path.abspath(__file__)),
+                                    "..", "build", "hcpad", "hp.syms")):
+            a_, _, n_ = ln.split()
+            if n_.lstrip("_") == "hp_touch_entry":
                 known_touch.add(int(a_, 16))
     except OSError:
         pass

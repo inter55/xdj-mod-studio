@@ -200,6 +200,23 @@ def summary(rs):
           f"{sum(1 for _, o, _ in rs if o is not None)}")
 
 
+def run_forward(cmd, **kw):
+    """Run a child program and pass its output on, line by line.
+
+    2026-11-13 (Windows, Reddit): the USB-stick job's log stopped at
+    "launching the install runner". A plain subprocess.call() on Windows
+    gives the child NO handle to our log pipe (macOS passes it on by
+    itself), so everything it printed vanished and a stuck step was
+    invisible. Here the pipe is explicit and we forward each line."""
+    flags = getattr(subprocess, "CREATE_NO_WINDOW", 0) if os.name == "nt" else 0
+    p = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
+                         stdin=subprocess.DEVNULL, text=True, encoding="utf-8",
+                         errors="replace", creationflags=flags, **kw)
+    for line in p.stdout:
+        print(line.rstrip("\n"), flush=True)
+    return p.wait()
+
+
 def main(argv):
     if not argv or argv[0] not in ("record", "pack", "marker"):
         print(__doc__)
@@ -231,9 +248,9 @@ def main(argv):
                        ROOT, "cache", "emu_dsp_mounted6.pkl")),
                    MOCK_RSLICE=os.environ.get("MOCK_RSLICE", "300000"))
         print("recording: launching the install runner on the emulated deck", flush=True)
-        rc = subprocess.call(([sys.executable, "--run-tool"] if getattr(sys, "frozen", False) else [sys.executable]) + [os.path.join(ROOT, "tools", "mock",
+        rc = run_forward(([sys.executable, "--run-tool"] if getattr(sys, "frozen", False) else [sys.executable]) + [os.path.join(ROOT, "tools", "mock",
                                                            "mock_install.py")] + rest,
-                             cwd=ROOT, env=env)
+                         cwd=ROOT, env=env)
         if rc:
             raise SystemExit(f"mock install failed ({rc}): no pack written")
     rs = runs(read_log(log))

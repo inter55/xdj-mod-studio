@@ -101,7 +101,12 @@ def install_hg(mem, code, syms):
 
 
 def main():
-    ck = sys.argv[1]
+    ck = sys.argv[1] if len(sys.argv) > 1 else os.path.join(
+        os.environ.get("TMPDIR", "/tmp"), "hotcue8_loaded.pkl")
+    if not os.path.exists(ck):
+        print(f"SKIP: {ck} missing -- build it first with "
+              "`.venv/bin/python tools/hotcue8_emu.py`")
+        return 0
     os.makedirs(OUT, exist_ok=True)
     code, syms = build()
     ok = True
@@ -124,6 +129,11 @@ def main():
         mem.w8(MS.MSOFF, 0)
         mem.w32(syms["hg_view"], view)
         m.cpu.run(limit=6_000_000)
+        if mem.r32(MODEW) != 7:                 # open PERFORM if the snapshot
+            m.mem.dev.panel_frame = panl.build_frame(touch=(709, 37))
+            m.cpu.run(limit=20_000_000)
+            m.mem.dev.panel_frame = panl.build_frame()
+            m.cpu.run(limit=10_000_000)
         return m, mem, mem.dev
 
     def slot(mem, k):
@@ -133,6 +143,10 @@ def main():
     def cue(mem, k):
         b = SLOT + 0x40 * k
         return mem.r16(b + 0x0A), mem.r32(b + 0x0C)
+
+    def model(mem, base, k):                  # the pads read these, not the
+        r = base + k * 0x38                    # live player slots
+        return (mem.r16(r), mem.r16(r + 2), mem.r32(r + 4))
 
     def keybit(mem, k):
         off, bit = [(86, 0x40), (86, 0x80), (87, 0x01)][k]
@@ -160,12 +174,18 @@ def main():
     chk(f"E held: slot 1 = cue E {cue(mem, 1)}", cue(mem, 1) == (5, TIMES[4]))
     chk("E held: KEY+86 bit 0x80 up", keybit(mem, 1))
     chk("E held: stock hit-tester idle (0x1E)", mem.r32(ZSTATE) == 0x1E)
+    chk("E held: both pad models hold cue E too (the deck plays from these)",
+        model(mem, 0x0BA28800, 1) == (6, 5, TIMES[4]) and
+        model(mem, 0x0BA2A52C, 1) == (6, 5, TIMES[4]))
     chk("E held: slots 0/2 untouched", slot(mem, 0) == s_before[0] and slot(mem, 2) == s_before[2])
     fb_png(m, f"{OUT}/held_E.png")
     release(m)
     chk("E released: key bit down", not keybit(mem, 1))
     chk("E released: slot 1 restored byte-exact",
         slot(mem, 1) == s_before[1] and mem.r32(syms["hg_restores"]) == 1)
+    chk("E released: pad models back to cue B",
+        model(mem, 0x0BA28800, 1) == (6, 2, TIMES[1]) and
+        model(mem, 0x0BA2A52C, 1) == (6, 2, TIMES[1]))
 
     # 4. pad A: its own slot, no write
     m, mem, dev = fresh()

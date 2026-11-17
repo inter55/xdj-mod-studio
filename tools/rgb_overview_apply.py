@@ -18,6 +18,7 @@ Order (fail-stop at every step, nothing irreversible):
 Bytes come from tools/rgb_overview.plan() -- the same source the
 emulator test validated.
 """
+import os
 import re
 import struct
 import sys
@@ -25,7 +26,7 @@ import time
 
 sys.path.insert(0, "tools")
 import hid
-from xdj700_usb_shell import PIONEER_VID, open_deck, drain, drain_values
+from xdj700_usb_shell import PIONEER_VID, open_deck, drain, drain_values, cdj
 from rgb_overview import plan, CAVE, HOOK_POOL, ORIG_RELEASE, MODE_ADDR, MODES, OLD_CAVES
 
 CHUNK = 32
@@ -41,16 +42,42 @@ def send(h, s, secs):
     return drain(h, secs)
 
 
+BR_WAIT = float(os.environ.get("XDJ_BR_WAIT", "9"))    # seconds per attempt
+BR_TRIES = int(os.environ.get("XDJ_BR_TRIES", "4"))
+
+
 def br(h, addr, n):
-    """Read n (<=32) bytes; retries a short window once."""
-    for _ in range(2):
+    """Read n (<=32) bytes.
+
+    A SILENT reply (not one byte back) is a different fault from a short or
+    garbled one: the deck's shell has stopped answering, and the plain retry
+    loop used to spend both its attempts on it -- 2026-11-07 an install died
+    on 'short read at 0x8d5278c (0/4)' after the same thing at 0x8dbc5c8.
+    A silent attempt now re-issues the $CDJ handshake and waits longer, and
+    the give-up message says which fault it was, because the fix differs:
+    silence = cable / power / wedged shell, short = a busy deck.
+    """
+    vals = []
+    silent = 0
+    wait = BR_WAIT
+    for attempt in range(BR_TRIES):
+        if attempt and silent:
+            cdj(h, 1.0)
+            wait = min(2 * BR_WAIT, wait * 2)
         q = f"{addr:x},{n - 1:x}BR\r\x00".encode()
         h.write(q + b"\x00" * (26 - len(q)))
-        raw = drain_values(h, n, 9.0)
+        raw = drain_values(h, n, wait)
         vals = [int(v, 16) for v in re.findall(
             r"\b([0-9A-Fa-f]{2})\b(?:\s|$)", raw.decode("ascii", "replace"))]
         if len(vals) >= n:
             return vals[-n:]
+        silent = silent + 1 if not raw.strip() else 0
+    if silent >= 1:
+        sys.exit(f"FAIL: the deck stopped answering over USB - no reply at all "
+                 f"to the {n}-byte read at {addr:#x} in {BR_TRIES} tries, "
+                 f"handshake included. Unplug and re-plug the USB cable (or "
+                 f"switch the deck off and on) and run it again. RAM only; a "
+                 f"restart clears anything written.")
     sys.exit(f"FAIL: short read at {addr:#x} ({len(vals)}/{n}) - aborting "
              f"(RAM only; reboot clears anything written)")
 

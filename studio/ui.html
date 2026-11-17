@@ -444,6 +444,7 @@ dialog h2 { font-size: 16px; margin-bottom: 6px; }
           <div class="small dim">Build this once, flash it once. After that the deck reads your mods off any stick by itself — no cable, ever again.</div>
         </div></div>
         <div class="row" style="margin-top:12px"><input class="field" id="stickupd" type="text" placeholder="~/Downloads/XDJ700.UPD" spellcheck="false" autocomplete="off"><button class="btn" id="stickupdpick">Choose…</button></div>
+        <div class="row" style="margin-top:10px;flex-wrap:wrap"><span class="dim">Version number</span><input class="field" id="stickver" type="text" value="1.16" style="width:86px" spellcheck="false" autocomplete="off"><span class="small dim">Must be higher than the number UTILITY shows on your deck (e.g. 1.17 if it says 1.16).</span></div>
         <div class="row" style="margin-top:10px;flex-wrap:wrap"><button class="btn primary" id="stickload" disabled>Build the reader-only update</button></div>
         <div class="small dim" style="margin-top:8px">Stock 1.15 plus the reader, nothing else: <b>none of the ticks on the left go into this file</b> — your mods are written to the stick in step 2.</div>
         <label class="row" style="margin-top:10px;align-items:flex-start"><input class="stickack" data-k="brick" type="checkbox" style="margin-top:3px"> <span class="small dim">A bad flash can brick the deck, so I'll stay on mains power and keep the official 1.15 file on a second stick to go back.</span></label>
@@ -541,7 +542,7 @@ dialog h2 { font-size: 16px; margin-bottom: 6px; }
     <div class="list" id="list"></div>
     <div class="selbar">
       <span class="dim" id="selc">Nothing selected</span><span class="grow"></span>
-      <span class="small faint" style="margin-right:10px">Stems only work on tracks made here. The track is replaced by its stems version under its own name (cues kept, original backed up); MP3/M4A/FLAC move their library entry with it. Leave Replacement on: a copy beside the track cannot be reached on the deck.</span>
+      <span class="small faint" style="margin-right:10px">Stems only work on tracks made here. The track is replaced by its stems version under its own name, in its own folder: it stays in ARTIST / TRACK with its cues, and the original is kept beside it as .pre-stems. MP3/M4A/FLAC are rewritten as WAV or AIFF and their library entry moves with them. There is no sidecar to hunt for and nothing to switch on.</span>
       <button class="btn" id="b3">Add 3-band</button><button class="btn primary" id="bstems">Make stems</button>
     </div>
   </div>
@@ -652,6 +653,9 @@ dialog h2 { font-size: 16px; margin-bottom: 6px; }
           <button class="btn sm" id="updpre-stock">Back to stock (no mods)</button></div></div>
       <div class="row"><span class="dim" style="width:150px">Version number</span><input class="field" id="updver" type="text" value="1.16" style="width:86px" spellcheck="false" autocomplete="off"><span class="small dim">The deck only accepts a file numbered higher than the one it already has — UTILITY shows the current one. Going back to stock after a modded flash needs a higher number too: build with nothing ticked and the stock overview colour.</span></div>
       <div class="row"><span class="dim" style="width:150px">Overview waveform</span><div class="seg" id="updwave"><button data-v="blue">Blue</button><button data-v="rgb" aria-pressed="true">RGB</button><button data-v="3band">3-Band</button></div></div>
+      <div class="row"><span class="dim" style="width:150px">Boot logo (optional)</span><input class="field" id="updlogo" type="text" placeholder="Leave empty for the Pioneer DJ logo" spellcheck="false" autocomplete="off"><button class="btn" id="updlogopick">Choose…</button><button class="btn sm" id="updlogoclear">Clear</button></div>
+      <div class="small dim" style="margin-left:150px">Any picture: it is fitted into 600 × 100 on black, the size of the stock logo. Only a flashed update shows it; the cable and USB-stick installs start after the logo has gone.</div>
+      <img id="updlogoprev" alt="" hidden style="margin-left:150px;max-width:100%;width:600px;aspect-ratio:6/1;border:1px solid var(--line, #333);background:#000">
       <label class="row"><input type="checkbox" id="updpads" checked> PERFORM pads: HOT CUE / BEAT JUMP tabs (KEY SHIFT / STEMS only when ticked below), beat jump 1–64</label>
       <div class="small dim">Extras: the file carries them and a small start-up routine copies them into the deck's memory every time it switches on.</div>
       <label class="row"><input type="checkbox" class="updx" data-x="centre" checked> RGB / 3-band centre waveform</label>
@@ -726,6 +730,15 @@ const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt
 const fmtT = s => s ? `${Math.floor(s / 60)}:${String(Math.floor(s % 60)).padStart(2, '0')}` : '';
 const fmtEta = s => s >= 5400 ? `about ${(s / 3600).toFixed(1)} h` : s >= 90 ? `about ${Math.round(s / 60)} min` : s >= 15 ? `about ${Math.max(10, Math.round(s / 10) * 10)} s` : 'a few seconds';
 
+// 3-BAND is per track: the deck draws it only for tracks prepared with
+// Track Builder > Add 3-band; the rest stay blue (deck and emulator).
+function need3txt() {
+  const n = LIB.loaded ? LIB.tracks.filter(t => !t.three_band).length : -1;
+  if (n === 0) return 'All tracks on your stick are ready for it.';
+  const more = n > 0 ? ' (' + n + (n === 1 ? ' track' : ' tracks') + ' on your stick still need it)' : '';
+  return 'Needs one more step: Track Builder > Add 3-band' + more + '. Tracks without it stay blue.';
+}
+function warn3(v) { if (v === '3band' && !(LIB.loaded && !LIB.tracks.some(t => !t.three_band))) toast('3-Band: ' + need3txt(), true); }
 function toast(msg, bad) {
   const d = document.createElement('div'); d.textContent = msg; if (bad) d.className = 'bad';
   $('#toast').appendChild(d); setTimeout(() => d.remove(), bad ? 6000 : 3500);
@@ -767,6 +780,18 @@ async function pickFolder(prompt) {
     toast('Type the folder path, then press “Use this folder”.'); return null;
   }
   return new Promise(res => { const id = String(Math.random()); picks[id] = res; h.postMessage({type: 'pickFolder', id, prompt}); });
+}
+
+// a picture: the Mac app's chooser takes any file; on Windows / in a browser
+// the server's dialog opens with a picture filter
+async function pickImage(prompt) {
+  const h = window.webkit && window.webkit.messageHandlers && window.webkit.messageHandlers.xdj;
+  if (!h) {
+    const r = await serverPick('image', prompt);
+    if (r.done) return r.path;
+    return prompt && window.prompt(prompt + ' (full path)') || null;
+  }
+  return new Promise(res => { const id = String(Math.random()); picks[id] = res; h.postMessage({type: 'pickFile', id, prompt}); });
 }
 
 async function pickFile(prompt) {
@@ -893,7 +918,7 @@ function updReady() {
   const acks = $$('.updack').every(c => c.checked);
   $('#updbtn').disabled = !(acks && $('#updpath').value.trim());
 }
-$$('#updwave button').forEach(b => b.onclick = () => { UPD.wave = b.dataset.v; segSet('updwave', UPD.wave); });
+$$('#updwave button').forEach(b => b.onclick = () => { UPD.wave = b.dataset.v; segSet('updwave', UPD.wave); warn3(UPD.wave); });
 $$('.updack').forEach(c => c.onchange = updReady);
 function updPads() {             /* stems + 8 hot cues live on the PERFORM pads */
   const pads = $('#updpads').checked;
@@ -918,6 +943,9 @@ function updPreset(which) {          /* one click instead of six unticks */
   segSet('updwave', UPD.wave);
   updPads(); updReady();
 }
+/* one version number for both builds: the stick page and the Advanced page show the same box */
+$('#updver').addEventListener('input', () => { $('#stickver').value = $('#updver').value; });
+$('#stickver').addEventListener('input', () => { $('#updver').value = $('#stickver').value; });
 $('#updpre-all').onclick = () => updPreset('all');
 $('#updpre-pm').onclick = () => updPreset('pm');
 $('#updpre-wave').onclick = () => updPreset('wave');
@@ -929,6 +957,7 @@ $('#updpre-stock').onclick = () => {          /* the restore file: no mods at al
   const v = $('#updver');
   const m = /^(\d)\.(\d\d)$/.exec(v.value.trim());
   if (m) v.value = m[1] + '.' + String(Math.min(99, +m[2] + 1)).padStart(2, '0');
+  $('#stickver').value = v.value;
   updPads(); updReady();
   toast('Stock build: nothing ticked, stock colours, version bumped. Set it higher than the number UTILITY shows on your deck, then build.');
 };
@@ -942,6 +971,19 @@ $('#updpick').onclick = async () => {
   const p = await pickFile('Choose the OFFICIAL XDJ-700 v1.15 update file (XDJ700.UPD)');
   if (p) { $('#updpath').value = p; updReady(); }
 };
+function updLogoShow() {
+  const p = $('#updlogo').value.trim(), img = $('#updlogoprev');
+  if (!p) { img.hidden = true; img.removeAttribute('src'); return; }
+  img.onerror = () => { img.hidden = true; toast('That boot logo is not a picture that opens.', true); };
+  img.onload = () => { img.hidden = false; };
+  img.src = '/api/logo?path=' + encodeURIComponent(p) + '&t=' + Date.now();
+}
+$('#updlogo').onchange = updLogoShow;
+$('#updlogoclear').onclick = () => { $('#updlogo').value = ''; updLogoShow(); };
+$('#updlogopick').onclick = async () => {
+  const p = await pickImage('Choose a picture for the boot logo (fitted into 600 x 100)');
+  if (p) { $('#updlogo').value = p; updLogoShow(); }
+};
 $('#updbtn').onclick = async () => {
   const ok = await ask('Build a permanent update file?',
     'This builds a modified firmware file and boot-tests it in the emulator. Flashing it to the deck is your decision, made later, at your own risk: it can brick the deck. Nothing is flashed by the app.',
@@ -951,6 +993,7 @@ $('#updbtn').onclick = async () => {
   const r = await api('/api/upd/build', {path: $('#updpath').value.trim(), mode: UPD.wave,
     pads: $('#updpads').checked, versions: false, ack,
     banner: ($('#updver').value || '1.16').trim(),
+    logo: $('#updlogo').value.trim(),
     extras: $$('.updx').filter(c => c.checked && !c.disabled).map(c => c.dataset.x)});
   if (r) { toast('Building + boot-testing — about 5 minutes.'); watch(); }
 };
@@ -1048,13 +1091,13 @@ $('#stickarm').onclick = async e => {
 };
 $('#stickload').onclick = async () => {
   const ok = await ask('Build the loader update?',
-    'This builds the official 1.15 firmware plus the stick loader, and boot-tests it in the emulator. Its version number is the one in the Version number field: the deck only takes a file numbered higher than what UTILITY shows, so build with 1.17 if it already reports 1.16. Flashing it is your decision, at your own risk: it can brick the deck. Nothing is flashed by the app.',
+    'This builds the official 1.15 firmware plus the stick loader, and boot-tests it in the emulator, numbered ' + ($('#stickver').value || '1.16').trim() + '. The deck only takes a file numbered higher than what UTILITY shows, so build with 1.17 if it already reports 1.16. Flashing it is your decision, at your own risk: it can brick the deck. Nothing is flashed by the app.',
     'Build the file');
   if (!ok) return;
   const on = $$('.stickack').every(c => c.checked);
   const ack = {brick: on, recovery: on, power: on};
   api('/api/stick/loader', {path: $('#stickupd').value.trim(), ack,
-    banner: ($('#updver').value || '1.16').trim()}).then(r => r && (toast('Building + boot-testing — about 6 minutes.'), watch()));
+    banner: ($('#stickver').value || '1.16').trim()}).then(r => r && (toast('Building + boot-testing — about 6 minutes.'), watch()));
 };
 $('#deckgo').onclick = async () => {
   const {mode: wave, pads, themes, liveks, touchfx, stems, phase, flac, opus} = modSel();
@@ -1139,7 +1182,7 @@ function preview() {
   $('#o-lit').textContent = MOD.lit || 'Stock';
   if ($('#customc') && MOD.custom) $('#customc').value = MOD.custom;
   $('#wcustom').hidden = MOD.wave !== 'custom';
-  $('#wnote').textContent = {blue: 'Stock XDJ-700 blue waveform.', rgb: 'Each track shows its own rekordbox colours.', '3band': 'Lows in the core, mids, then highs on the outside -- on both the overview and the centre waveform.',
+  $('#wnote').textContent = {blue: 'Stock XDJ-700 blue waveform.', rgb: 'Each track shows its own rekordbox colours.', '3band': 'Lows in the core, mids, then highs on the outside -- on both the overview and the centre waveform. ' + need3txt(),
     custom: 'Your colour, stock waveform shape.'}[MOD.wave];
   clearTimeout(pt);
   pt = setTimeout(() => {
@@ -1169,7 +1212,7 @@ $('#tcolor').oninput = e => {
   $('#lift').value = 0;
   MOD.theme = 'custom'; MOD.touched = true; swatches(); preview(); markDirty();
 };
-$$('#wstyle button').forEach(b => b.onclick = () => { MOD.wave = b.dataset.v; MOD.touched = true; segSet('wstyle', MOD.wave); preview(); markDirty(); });
+$$('#wstyle button').forEach(b => b.onclick = () => { MOD.wave = b.dataset.v; MOD.touched = true; segSet('wstyle', MOD.wave); preview(); markDirty(); warn3(MOD.wave); });
 $('#customc').oninput = e => { MOD.custom = e.target.value; try { localStorage.setItem('wave_custom', MOD.custom); } catch (_) {} MOD.touched = true; preview(); markDirty(); };
 $$('#pscreen button').forEach(b => b.onclick = () => { pscreen = b.dataset.v; segSet('pscreen', pscreen); preview(); });
 

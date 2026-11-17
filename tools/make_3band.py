@@ -64,8 +64,16 @@ def load_cal():
         return DEFAULT_CAL
 
 
+class NoFfmpeg(RuntimeError):
+    """the track has no rekordbox 3-band data and ffmpeg is not installed,
+    so the colours cannot be worked out from the audio either"""
+
+
 def decode_mono(path, sr=SR):
+    import shutil
     import subprocess
+    if not shutil.which("ffmpeg"):
+        raise NoFfmpeg("ffmpeg is not installed")
     raw = subprocess.run(["ffmpeg", "-v", "error", "-i", path, "-ac", "1", "-ar",
                           str(sr), "-f", "s16le", "-"], capture_output=True,
                          check=True).stdout
@@ -244,6 +252,14 @@ def patch_dir(stick, d, compute_all=False):
                 done.append("centre (computed)")
     except FileNotFoundError as ex:
         done.append(f"skipped the rest (audio not found: {ex})")
+    except NoFfmpeg:
+        # (subprocess raises FileNotFoundError for a missing program too: it
+        # used to be reported as "audio not found" and nothing was added)
+        done.append("NOT added: rekordbox made no 3-band data for this track "
+                    "(no ANLZ0000.2EX) and ffmpeg is missing to work it out "
+                    "from the audio")
+    if not any(x.startswith(("overview", "centre")) for x in done):
+        return "no 3-band: " + ", ".join(done)
     return "added 3-band: " + ", ".join(done)
 
 

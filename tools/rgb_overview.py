@@ -36,7 +36,8 @@ ORIG_RELEASE = 0x08C2C984   # stock value of HOOK_POOL
 CTX_TAB = 0x09826BE4        # ANLZ ctx table, slot 0 = USB
 IDX_OFF = 0x13B8            # ctx + 0x478 + 0xF40: .EXT extra-section index
 TAG_PWV4 = struct.unpack("<I", b"PWV4")[0]
-TAG_PWV6 = struct.unpack("<I", b"PWV6")[0]   # 3-band (copied in by stick_add_3band.py)
+TAG_PWV6 = struct.unpack("<I", b"PWV6")[0]
+TAG_PWAV = struct.unpack("<I", b"PWAV")[0]   # 3-band (copied in by stick_add_3band.py)
 STEP = 157286               # 1200/500 in 16.16 (2.4 * 65536)
 CAVE = int(os.environ.get("CAVE", "0x081D8900"), 0)
 # 2026-10-04: the first cave (0x088BA000) sat inside a graphic that the
@@ -53,6 +54,12 @@ MODE_ADDR = CAVE + 0x7F0    # u8: 0 = stock blue, 1 = RGB, 2 = 3-band
 SCRATCH = CAVE + 0x7F4      # u32: 3-band scale K (computed per track)
 RECIP = CAVE + 0x580        # u16[256]: 65535 // m  (in the code blob)
 COPY5 = CAVE + 0x2800 + 0x100   # rgb_detail.py snapshot routine
+SAME = CAVE + 0x480         # same-track check (in this cave's padding)
+PREVIEW = 0x0BA3BCCC        # overview painter input: LOADED track's PWAV as
+PREVIEW_WORDS = 200         #   400 (height, whiteness) byte pairs
+PWAV_OFF = 0xD9C            # ctx + 0xD9C: the ANLZ cache's own PWAV section
+SAME_MIN = 360              # columns that must agree (same track: 396-400,
+                            # another track: 2-37, 2026-11-15 measurement)
 SNAP = int(os.environ.get("SNAP", "0x0972B000"), 0)  # snapshot area
 SLOT4, SLOT6, SNAP_HASH, SLOT5 = SNAP, SNAP + 0x2000, SNAP + 0x3000, SNAP + 0x4000
 SLOT4_MAX, SLOT6_MAX, SLOT5_MAX = 0x2000, 0x1000, 0x40000
@@ -608,13 +615,108 @@ bput:
 """
 
 
+# 2026-11-15 (hyyzt, Reddit): colours that do not match the sound. The colour
+# sections are copied out of the ANLZ cache, which belongs to the deck's OWN
+# stick and also holds whatever track was last browsed or read. A track loaded
+# over LINK never goes through it, so the old routine copied ANOTHER track's
+# colours. SAME runs first in the snapshot routine (rgb_detail.COPY5):
+# T=1 only for a new track whose analysis really is in the cache (the cache's
+# PWAV agrees with the overview the deck is drawing). Otherwise the slots are
+# emptied (= stock blue) and the stored hash is 0, so it asks again on the
+# next paint and the centre module drops its PWV7 too.
+SAME_SRC = f"""
+same:
+  mov.l @({PREVIEW:#x},pc),r3
+  mov.l @({PREVIEW_WORDS:#x},pc),r4
+  mov #0,r5
+shh:
+  mov.l @r3+,r0
+  shll r5
+  add r0,r5
+  dt r4
+  bf shh
+  mov.l @({SNAP_HASH:#x},pc),r6
+  mov.l @r6,r0
+  cmp/eq r5,r0
+  bt sno                    ; same track as last time: nothing to copy
+  mov.l @({CTX_TAB:#x},pc),r1
+  mov.l @r1,r1
+  mov r1,r0                 ; ctx must be a 4-aligned 0x08..0x0F address
+  rotr r0
+  rotr r0
+  shlr16 r0
+  shlr8 r0
+  shlr r0
+  cmp/eq #1,r0
+  bf sbad
+  mov.l @({PWAV_OFF:#x},pc),r0
+  add r0,r1
+  mov.l @r1,r0
+  mov.l @({TAG_PWAV:#x},pc),r2
+  cmp/eq r2,r0
+  bf sbad
+  add #20,r1                ; 400 bytes (whiteness << 5 | height)
+  mov.l @({PREVIEW:#x},pc),r3
+  mov.l @({400:#x},pc),r4
+  mov #0,r6                 ; columns that agree
+scl:
+  mov.b @r1+,r0
+  extu.b r0,r2
+  and #31,r0                ; height
+  shlr2 r2
+  shlr2 r2
+  shlr r2                   ; whiteness
+  mov.b @r3+,r7             ; drawn height (may be +-1: the deck smooths)
+  sub r0,r7
+  add #1,r7
+  mov.b @r3+,r0             ; drawn whiteness
+  cmp/eq r2,r0
+  bf scn
+  mov #2,r0
+  cmp/hs r7,r0              ; 0 <= dh+1 <= 2 (unsigned)
+  bf scn
+  add #1,r6
+scn:
+  dt r4
+  bf scl
+  mov.l @({SAME_MIN:#x},pc),r0
+  cmp/hs r0,r6
+  bf sbad
+  mov.l @({SNAP_HASH:#x},pc),r6
+  mov.l r5,@r6              ; this track is in the cache: copy (T=1)
+  rts
+  cmp/eq r5,r5
+sbad:
+  mov #0,r0
+  mov.l @({SNAP_HASH:#x},pc),r6
+  mov.l r0,@r6              ; hash 0: ask again next paint
+  mov.l @({SLOT4:#x},pc),r1
+  mov.l r0,@r1
+  mov.l @({SLOT6:#x},pc),r1
+  mov.l r0,@r1
+  mov.l @({SLOT5:#x},pc),r1
+  mov.l r0,@r1              ; empty slots = stock blue
+sno:
+  mov #1,r0
+  rts
+  tst r0,r0                 ; T=0
+"""
+
+
+def same_bytes():
+    return assemble(SAME_SRC)
+
+
 def cave_bytes():
     """code, zero padding, then the reciprocal table at RECIP -- one
     contiguous blob the installers write (zeros are skipped on deck)."""
     code = assemble(SRC)
-    assert len(code) % 2 == 0 and CAVE + len(code) <= RECIP, len(code)
+    assert len(code) % 2 == 0 and CAVE + len(code) <= SAME, len(code)
+    sm = same_bytes()
+    assert SAME + len(sm) <= RECIP, len(sm)
     table = struct.pack("<256H", 0, *[65535 // m for m in range(1, 256)])
-    return code + bytes(RECIP - CAVE - len(code)) + table
+    return (code + bytes(SAME - CAVE - len(code)) + sm
+            + bytes(RECIP - SAME - len(sm)) + table)
 
 
 def _pack(r, g, b):

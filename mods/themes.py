@@ -218,6 +218,9 @@ def _map_all(h, s, val, spec, acc):
 ACCENT_CALM = (0.55, 0.0, 0.85)   # sat, vivid, val factors for the accent
 
 
+HIBAND_SRC = np.array([0xEF5D], np.uint16)   # stock highlight band (239,235,239)
+
+
 def light_map(c, bg=None):
     """uint16 RGB565 array -> light-mode colours: neutrals l' = (1-l)^3
     ("ink": dim grey labels stay readable), colours l' = 1 - 0.88 l with
@@ -237,7 +240,41 @@ def light_map(c, bg=None):
         s = np.where(d == 0, 0.0, d / np.where(l > 0.5, 2 - mx - mn, mx + mn + 1e-12))
     neutral = s < 0.25
     ink = neutral if bg is None else neutral & ~np.asarray(bg, bool)
+    if bg is not None:
+        # 2026-11-12 (user photo: dotted SLIP button in LIGHT): button edges
+        # are a fine two-tone dither of near-identical blue-greys, e.g.
+        # (58,81,99) / (66,81,107). The first is just saturated enough to
+        # count as a colour (mapped light), its twin as a neutral (mapped to
+        # dark ink) -> dots. A DARK ink grey (l < 0.45: button bodies; text
+        # greys are lighter) within 2 steps (R/B of 31, G 4 of 63) of a
+        # colour that goes light goes light too.
+        R, G, B = (v >> 11) & 31, (v >> 5) & 63, v & 31
+        lit = ~ink
+        lr, lg, lb = R[lit], G[lit], B[lit]
+        if lr.size:
+            for i in np.nonzero(ink & (l < 0.45))[0].tolist():
+                if np.any((np.abs(lr - R[i]) <= 2) & (np.abs(lg - G[i]) <= 4) &
+                          (np.abs(lb - B[i]) <= 2)):
+                    ink[i] = False
     l2 = np.clip(np.where(ink, (1 - l) ** 4.5, 1 - 0.88 * l), 0, 1)
+    hiband = np.zeros(len(c), bool)
+    if bg is not None:
+        # 2026-11-12 (user photos: UTILITY selected row and BROWSE rows dark
+        # with their black text invisible): the stock HIGHLIGHT band is a
+        # bright white background (239,235,239) drawn under BLACK text that
+        # stays dark in light mode. Flipping it made black-on-black. Bright
+        # backgrounds become a light blue highlight instead.
+        # Only that band colour: 0xF79E / 0xFFFF are white LABELS and
+        # digits (they must still go dark).
+        hiband = np.isin(c, HIBAND_SRC) & np.asarray(bg, bool)
+        # pressed buttons (MENU held): blue-grey dither (90,113,132)..
+        # counted as dark ink -> black. Blue-tinted greys go light.
+        blu = neutral & ~hiband & ((b - r) >= 0.09) & ink
+        ink = ink & ~blu
+        # the selected VALUE cell (148,162,173) is a big blue-grey
+        # background under black text: keep its lightness (no flip).
+        keepl = neutral & np.asarray(bg, bool) & ~hiband & ((b - r) >= 0.09) & (l > 0.45)
+        l2 = np.clip(np.where(ink, (1 - l) ** 4.5, np.where(keepl, l, 1 - 0.88 * l)), 0, 1)
     s2 = s * 0.8
     # hls -> rgb (vectorised colorsys)
     rc = np.where(d == 0, 0.0, (mx - r) / np.where(d == 0, 1, d))
@@ -258,6 +295,8 @@ def light_map(c, bg=None):
     bb = np.where(s2 == 0, l2, _v(h - 1 / 3))
     out = (np.round(rr * 31).astype(np.int64) << 11) | (np.round(gg * 63).astype(np.int64) << 5) \
         | np.round(bb * 31).astype(np.int64)
+    HI = (21 << 11) | (51 << 5) | 29           # (173,207,239) light blue
+    out = np.where(hiband, HI, out)
     return np.where(c == 0xF81F, 0xF81F, out).astype(np.uint16)
 
 

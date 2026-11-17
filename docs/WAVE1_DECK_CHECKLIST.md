@@ -41,7 +41,7 @@ move the pad: X = delay time, Y = feedback, DEPTH slider = wet amount.
   not move.
 - Bad: silence, a buzz, tempo drift, or the deck stalls. Write down which.
 
-**Not in tonight's build.** Echo and Flanger are compiled out (`FX_LIVE`, engine built with `FX_NO_RING=1`, 1,696 B): the delay-line page is in use on the deck with audio playing. The pad shows them as COMING SOON. Test FILTER / CRUSH / GATE instead.
+**Not in tonight's build.** Echo and Flanger are compiled out (`FX_LIVE`, engine built with `FX_NO_RING=1`, now 2,480 B with Pitch): the delay-line page is in use on the deck with audio playing. The pad shows them as COMING SOON. Test FILTER / CRUSH / GATE / PITCH instead; Pitch still needs its own deck listen.
 
 ## 2. Touch FX Flanger — new
 
@@ -52,7 +52,7 @@ Same page, press **FLANGER**.
   window, correlation 0.86–0.89.
 - Bad: comb noise with no movement, or the sweep runs backwards.
 
-**Not in tonight's build.** Echo and Flanger are compiled out (`FX_LIVE`, engine built with `FX_NO_RING=1`, 1,696 B): the delay-line page is in use on the deck with audio playing. The pad shows them as COMING SOON. Test FILTER / CRUSH / GATE instead.
+**Not in tonight's build.** Echo and Flanger are compiled out (`FX_LIVE`, engine built with `FX_NO_RING=1`, now 2,480 B with Pitch): the delay-line page is in use on the deck with audio playing. The pad shows them as COMING SOON. Test FILTER / CRUSH / GATE / PITCH instead; Pitch still needs its own deck listen.
 
 ## 3. Stem mute speed — expect ~10 s, not instant
 
@@ -160,8 +160,9 @@ PERFORM › HOT CUE, track loaded with cues A–H, then **tap the HOT CUE tab**
 
 ## Not in this session (do not report these as failures)
 
-- **Touch FX Pitch / Roll / Reverb** — still drawn as "COMING SOON" (five of
-  eight buttons are live).
+- **Touch FX Roll / Reverb** — still drawn as "COMING SOON" (four of eight
+  buttons are live: Filter, Crush, Gate and Pitch; Pitch still needs its own
+  deck listen, so do not count it as a Wave 1 result).
 
 - **8-pad view and DELETE** — the double press does not exist: DELETE and the
   pads are on the same single-touch screen, and the panel sends one point. The

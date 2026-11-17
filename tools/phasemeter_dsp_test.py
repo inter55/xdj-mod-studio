@@ -2,7 +2,10 @@
 """phasemeter_dsp_test.py -- phase meter on the REAL-audio-chip emulator
 (cache/emu_dsp_playing7.pkl: Get Lucky playing, rekordbox beat grid). The
 position word 0x0C0E6D18 is driven by the emulated DSP exactly as on the
-deck (2026-10-25 deck reading), so this checks the meter end to end: the
+deck (2026-10-25 deck reading), and pm.c reads it through the uncached P2
+alias. The emulator has no cache, so this gate cannot reproduce a
+stale-cache freeze; a real deck is still required for that. It checks the
+meter end to end: the
 red/grey tick columns on the blue row == the model from the track's own
 grid at the position the meter read, a few frames apart while it plays.
 PASS = every checked frame matches within 2 px."""
@@ -17,6 +20,7 @@ POS = 0x0C0E6D18
 
 
 def main():
+    T.build()                 # never test a pm.bin older than pm.c
     s = T.syms()
     img = open(f"{T.OUT}/pm.bin", "rb").read()
     m = Machine.load(sys.argv[1] if len(sys.argv) > 1 else "cache/emu_dsp_playing7.pkl")

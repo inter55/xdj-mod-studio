@@ -8,7 +8,8 @@ measured in the emulator the same night. No item is inferred.
 - **TOUCH FX**: the tab opens on PERFORM and a finger on the pad changes
   the sound. Built effects are Filter, Crush and Gate (`FX_LIVE`); Echo,
   Pitch, Flanger, Roll and Reverb are drawn but inert ("COMING SOON") by
-  design (docs/ROADMAP.md).
+  design (docs/ROADMAP.md). *Later: Pitch was enabled in the shipping
+  build on 2026-11-10 (1.1); this report is the 2026-11-02 state.*
 - **Phase meter**: runs on hardware.
 - **Stem mutes much faster**: about **30 s down to about 10 s** ("its
   faster, maybe 10s"). This is a real gain but still far from the v1

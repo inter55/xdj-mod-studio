@@ -936,10 +936,10 @@ H("cmpltu4")(simple(lambda a, b: sum((x < y) << k for k, (x, y) in enumerate(zip
 # ---- shifts / bit fields ----
 def _shiftop(kind):
     def make(i):
-        a = src(i.ops[0])            # src2 first
+        long_src = ":" in i.ops[0]   # 40-bit source pair (b5:b4): never src()
+        a = None if long_src else src(i.ops[0])   # src2 first
         b = src(i.ops[1])            # shift amount (src1)
         dst = i.ops[2]
-        long_src = ":" in i.ops[0]
         if long_src:
             sl, sh = pair(i.ops[0])
             a = lambda cpu: ((cpu.r[sh] & 0xFF) << 32) | cpu.r[sl]

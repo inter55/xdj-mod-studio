@@ -25,8 +25,8 @@ whenever they're needed.
   "UPD stops after 2 min", "centre colour module not built" and
   AssertionError-2802 reports). Key-shift MT freeze fix (tab inert while
   MT off, MT change resets the key), hot cue TAP pages again (swipe kept),
-  phase meter reads POSL 0x0C0E6D1C (the time digits' live source; the
-  old word 0x09D246E0 freezes on silicon), HLE advances POSL + adopts
+  phase meter reads POSL 0x0C0E6D18 through the uncached P2 alias (the time
+  digits' live source; the old word 0x09D246E0 freezes on silicon), HLE advances POSL + adopts
   SH_POS seeks, FLAC & Opus untickable (10 of the 15-20 min), UPD
   presets (phase meter only / waveform colours only), prebuilt/deck
   fallback for source checkouts, Vinyl-brake row + linked-deck row fix.
@@ -59,6 +59,14 @@ whenever they're needed.
   the key-shift freeze, D-H cues, what "N" is.
 
 ## Open tester reports -- after 0.9.8 (salvofly, 2026-10-25)
+- **Phase meter frozen on 1.0.6 (Hot-Cell5954, 2026-11-10 video):** TIME
+  advanced while both tick rows stayed in the same pixels. `pm.c` read POSL
+  through its cacheable P3 address; the DSP writes that word without
+  invalidating the SH-4 cache. It now reads the P2 alias (0xAC0E6D18). All
+  three emulator gates pass, but no emulator can reproduce a stale cache;
+  deck confirmation is still pending. The same cached `POS150` read was in
+  the 8-hot-cue setter (`tools/hotcue8/hc.c`); it now uses the P2 alias too.
+  Its cue-set gate is blocked by the old A–C-only snapshot, not by a failure.
 - Key shift + MT freeze + "corrupted file": NOT reproduced (emu real DSP:
   MP3 +-2, WAV +2/-6/+6 pitch exact, no DSP error; stock DSP with a tagged
   BD8 word = harmless; no SH reader of 0x09D24DD8 besides the BD8 pusher).
@@ -329,8 +337,8 @@ file, TOUCH FX, OneLibrary in-app, track filter, Windows out of beta.
   PERFORM button line stay live. Needs MASTER TEMPO ON. Shares the audio
   chip's hook with Live Key Shift: one or the other until a bigger DSP
   home is proven. Install: deck_session --touchfx / Studio "Touch FX
-  (beta)". Echo / Pitch / Flanger / Roll / Reverb buttons are drawn but
-  inert ("COMING SOON"). CLAUDE.md sec. 148.
+  (beta)". Echo / Flanger / Roll / Reverb buttons are drawn but
+  inert ("COMING SOON"); Pitch is live since 2026-11-10. CLAUDE.md sec. 148.
 - Waveform colours that follow the theme (deck side).
 - ~~Windows out of beta~~ **DONE 2026-11-06**: same source as the Mac app, the
   same checks on every build, and real-deck installs from Windows; issue #1's
@@ -346,7 +354,7 @@ file, TOUCH FX, OneLibrary in-app, track filter, Windows out of beta.
 **The 1.1 plan lives in `docs/V1_1_PLAN.md` (started 2026-11-06).** It organises
 1.1 into four waves: ship what is already emulator-passed (Echo, Flanger, faster
 stem mute, Opus, saving hot cues, stems replace, hot cue swipe, filter
-playlists, 8-pad grid, light theme), finish Touch FX (Pitch, Roll, Reverb if it
+playlists, 8-pad grid, light theme), finish Touch FX (Roll, Reverb if it
 fits), one real USB-stick-loader flash with a written recovery path, then the
 research items below (track filter, RGB over Link, theme-matched waveform,
 faster emulator). Each feature needs an emulator gate, a dated deck result,
@@ -411,6 +419,14 @@ Echo, Pitch, Flanger, Roll, Reverb.
   their code is bound to their own screen tables and absolute addresses).
   First step: xref the `DISPCMD FILTER` tags in MAIN1000.img to find the three
   routines -- category state, parameter edit, apply -- then mirror them.
+  UPDATE 2026-11-08: the mapping is solved. MAIN1000.img is flat at
+  0x08000000, and every browse message is referenced through the uncached
+  alias 0xA8000000+offset, which is why the earlier sweep found none. All 48
+  messages, the 15 FILTER ones included, are emitted from one block at
+  0x0950EFBE.. (filter branches 0x0950F4FE..0x0950F7F6) with consecutive
+  DISPCMD ids 0x101B..0x102A; `tools/filter_scan.py` now resolves 48/48 on the
+  1000 and 26/26 on the 700. That block is the command logger, so the next
+  step is the caller/state behind id 0x101B, not another string hunt.
   `tools/filter_scan.py` now indexes all 15 tags (0 in the 700 image, which
   confirms the gap); `docs/TRACK_FILTER_1.1.md` records where that stops: the
   1000 image has no absolute pointers to those strings and its block framing

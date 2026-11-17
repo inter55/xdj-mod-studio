@@ -4,8 +4,7 @@
 The 700 has no filter; the 1000 MK2 does, and the two decks share the browse
 module and the BPM-range data layer, so the filter is a port, not a new
 feature. This finds the `DISPCMD FILTER ...` log tags in the 1000's image and
-resolves which routine emits each one, so the three behaviours to mirror
-(category state, parameter edit, apply) can be read off concretely.
+resolves the code that emits each one.
 
 The image is a container of LZSS blocks: [u32 len][stream][u16 sum], where the
 sum is a plain byte sum over [hdr, hdr+4+len) -- the same framing the boot stub
@@ -14,8 +13,13 @@ exist after decoding, so --decode works on the decoded image.
 
     filter_scan.py IMAGE [--decode] [--md OUT.md]
 
-Base addresses are found, not assumed: the code and data windows differ per
-image, so the tool takes the most common (pointer - string offset) value.
+Mapping (solved 2026-11-08). The decoded image is flat: file offset F is the
+cached address 0x08000000+F. The browse messages, however, are referenced
+through the *uncached alias* 0xA8000000+F, which is why a sweep at 0x08... only
+(or one that assumes a shifted window) finds nothing. A pointer word is only
+believed when a real `mov.l @(disp,PC),Rn` loads it -- the messages sit in one
+run 24 bytes apart, so any stray data word would otherwise "explain" 20 of them
+at once.
 """
 import argparse
 import os
@@ -23,7 +27,10 @@ import re
 import struct
 import sys
 
-TAG = re.compile(rb"DISPCMD FILTER[A-Z0-9 _<>]*")
+TAG = re.compile(rb"@Ui_Browse> (?:DISPCMD|RESET)[^\x00]*")
+PREFIX = b"@Ui_Browse> DISPCMD"
+SHIFT = 0xA0000000            # cached -> uncached alias
+EMIT_ID_FN = 0x09511A38       # log(id, ...); id = (16<<8) + n, built in r4
 
 
 def decode_blocks(path, limit=None):
@@ -62,20 +69,9 @@ def decode_blocks(path, limit=None):
 
 
 def tags(data):
-    return [(m.start(), data[m.start():m.start() + 64].split(b"\0")[0]
+    """(file offset, text) for every DISPCMD/RESET message, prefix included."""
+    return [(m.start(), data[m.start():m.start() + 96].split(b"\0")[0]
              .decode("latin-1")) for m in TAG.finditer(data)]
-
-
-def guess_base(data, off):
-    """Most common pointer-minus-offset value: the window the image uses."""
-    from collections import Counter
-    c = Counter()
-    for i in range(0, len(data) - 4, 2):
-        w = struct.unpack_from("<I", data, i)[0]
-        v = w - off
-        if 0x08000000 <= v < 0x90000000 and v % 0x10000 == 0:
-            c[v] += 1
-    return c.most_common(1)[0][0] if c else None
 
 
 def pointer_sites(data, addr):
@@ -83,26 +79,52 @@ def pointer_sites(data, addr):
     return [i for i in range(0, len(data) - 4, 4) if data[i:i + 4] == pat]
 
 
-def literal_loads(data, lit, reach=4096):
-    hits = []
-    for a in range(max(0, lit - reach) & ~1, lit, 2):
+def pool_loaders(data, site, reach=0x400):
+    """`mov.l @(disp,PC),Rn` instructions whose pool word is at `site`."""
+    out = []
+    for a in range(max(0, site - reach) & ~1, site, 2):
         v = data[a] | (data[a + 1] << 8)
         if (v & 0xF000) != 0xD000:
             continue
-        if (((a + 4) & ~3) + (v & 0xFF) * 4) == lit:
-            hits.append(a)
-    return hits
+        if (((a + 4) & ~3) + (v & 0xFF) * 4) == site:
+            out.append(a)
+    return out
 
 
-def func_start(data, addr):
-    i = addr & ~1
-    while i > 4:
-        if data[i:i + 4] == b"\x0b\x00\x09\x00":
-            j = (i + 8 + 3) & ~3
-            while data[j:j + 2] == b"\x09\x00":
-                j += 2
-            return j
-        i -= 2
+def emit_id(data, load):
+    """The DISPCMD id built in r4 just before the message is pushed.
+
+    The emitter does `mov #16,r4; shll8 r4; ... add #n,r4` and passes r4 to
+    the log function. Returns None when the pattern is absent.
+    """
+    add = None
+    for a in range(load, max(0, load - 0x80), -2):
+        w = data[a] | (data[a + 1] << 8)
+        if (w & 0xF000) == 0x7000 and ((w >> 8) & 0xF) == 4:
+            add = w & 0xFF
+            break
+    if add is None:
+        return None
+    seen_sh = seen_mov = False
+    for a in range(load, max(0, load - 0x80), -2):
+        w = data[a] | (data[a + 1] << 8)
+        if w == 0x4418:
+            seen_sh = True
+        if w == 0xE410:
+            seen_mov = True
+    return (0x1000 | add) if (seen_sh and seen_mov) else None
+
+
+def resolve(data, off, base=None):
+    """Verified pointer word + load site for one message, or None."""
+    if base is not None:
+        cands = [base + off]
+    else:
+        cands = [0x08000000 + off, (SHIFT + 0x08000000) + off]
+    for addr in cands:
+        for site in pointer_sites(data, addr):
+            for load in pool_loaders(data, site):
+                return {"addr": addr, "site": site, "load": load}
     return None
 
 
@@ -111,7 +133,7 @@ def main():
     ap.add_argument("image")
     ap.add_argument("--decode", action="store_true")
     ap.add_argument("--base", type=lambda x: int(x, 16), default=None,
-                    help="pointer window for this image, e.g. 0x08000000")
+                    help="force the pointer window instead of the alias test")
     ap.add_argument("--md")
     a = ap.parse_args()
     if a.decode:
@@ -121,37 +143,45 @@ def main():
     else:
         data, blocks = open(a.image, "rb").read(), []
     rows = [{"off": off, "text": text} for off, text in tags(data)]
-    print("%d DISPCMD FILTER tags" % len(rows))
-    if not a.base:
-        print("pointer window: not established for this image -- showing file "
-              "offsets; pass --base once the load address is known")
+    print("%d browse DISPCMD messages" % sum(1 for r in rows
+                                             if PREFIX in r["text"].encode()))
+    print("pointer window: %s"
+          % ("forced %08X" % a.base if a.base else
+             "auto (cached 0x08... or uncached 0xA8... alias)"))
+    n_ok = 0
     for r in rows:
-        if not a.base:
-            print("  file +%08X  %s" % (r["off"], r["text"].strip()))
+        m = resolve(data, r["off"], a.base)
+        r["map"] = m
+        if not m:
+            print("  file +%08X  UNRESOLVED  %s" % (r["off"], r["text"][:60]))
             continue
-        r["addr"] = a.base + r["off"]
-        r["sites"] = pointer_sites(data, r["addr"])
-        r["loads"] = sorted({x for s_ in r["sites"] for x in literal_loads(data, s_)})
-        r["funcs"] = sorted({func_start(data, x) for x in r["loads"]
-                             if func_start(data, x)})
-        print("  %08X %-46s ptr=%-2d loads=%-2d routine=%s"
-              % (r["addr"], r["text"][:46], len(r["sites"]), len(r["loads"]),
-                 ", ".join("%08X" % (a.base + f) for f in r["funcs"]) or "?"))
+        n_ok += 1
+        r["id"] = emit_id(data, m["load"])
+        print("  %08X  pool %08X  load %08X  id %s  %s"
+              % (m["addr"], 0x08000000 + m["site"], 0x08000000 + m["load"],
+                 ("%04X" % r["id"]) if r["id"] else "----",
+                 r["text"][:60]))
+    print("%d/%d messages resolved to a real pool load" % (n_ok, len(rows)))
     if a.md:
         with open(a.md, "w") as f:
             f.write("# Track filter on the XDJ-700 (1.1, in progress)\n\n")
-            f.write("Generated by `tools/filter_scan.py %s`: %d tags.\n\n"
-                    % (os.path.basename(a.image), len(rows)))
-            f.write("pointer window: %s\n\n```\n"
-                    % ("%08X" % a.base if a.base else "not established"))
+            f.write("Generated by `tools/filter_scan.py %s`: %d messages, "
+                    "%d resolved.\n\n```\n"
+                    % (os.path.basename(a.image), len(rows), n_ok))
             for r in rows:
-                if a.base:
-                    f.write("%08X  %s\n" % (a.base + r["off"], r["text"].strip()))
+                m = r["map"]
+                if m:
+                    f.write("%08X  pool %08X  load %08X  id %s  %s\n"
+                            % (m["addr"], 0x08000000 + m["site"],
+                               0x08000000 + m["load"],
+                               ("%04X" % r["id"]) if r["id"] else "----",
+                               r["text"].strip()))
                 else:
-                    f.write("file +%08X  %s\n" % (r["off"], r["text"].strip()))
+                    f.write("file +%08X  UNRESOLVED  %s\n"
+                            % (r["off"], r["text"].strip()))
             f.write("```\n")
         print("wrote " + a.md)
-    return 0
+    return 0 if n_ok else 1
 
 
 if __name__ == "__main__":

@@ -25,11 +25,30 @@ POLL_ACC = 0x08BF2BCC        # its stock value: the host-port read accessor
 DIRECT = 0x08DDFFD4          # the media API's direct USB read slot (also fread)
 FREAD = 0x08C61A6C
 OUT = "build/stems"
+# 2026-11-16: three builds of the same module (STEMS_BUILD=name picks one;
+# an explicit SM_CFLAGS in the environment still wins):
+#   clean   short read-ahead only: mute heard ~4.5 s after the tap,
+#           the audio chip's memory is never touched
+#   stock   (default, 1.1) no short read-ahead: the 1.0 read path, ~30 s, known
+#           clean on hardware -- the fallback
+#   instant clean + the rewrite of the chip's buffered audio (~2 s);
+#           glitched on every deck test so far, experiments only
+#   fast    the rewrite started 0.5 s ahead with a 2 ms pause between blocks
+#           (emulator 0.52 s). At the deck's speed it only just keeps up with
+#           playback, so a slow moment can still let playback catch it.
+BUILDS = {"clean": "-DSM_AHEAD=340u", "stock": "-DSM_AHEAD=0u", "instant": "-DSM_DR -DDR_FIRST=160u",
+          "fast": "-DSM_DR -DDR_PACE_MS=2u -DDR_FIRST=40u"}
 
 
 def build():
     import perform_pads as PP
     env = dict(os.environ, PMASK=hex(PP.PMASK))
+    which = os.environ.get("STEMS_BUILD", "stock")     # 1.1: the proven 1.0 path
+    if which not in BUILDS:
+        sys.exit(f"STEMS_BUILD={which}: use one of {', '.join(BUILDS)}")
+    env.setdefault("SM_CFLAGS", BUILDS[which])
+    print(f"stems build: {which if 'SM_CFLAGS' not in os.environ else 'custom'} "
+          f"({env['SM_CFLAGS'] or 'default flags'})")
     import shbuild
     shbuild.build("tools/stems/build.sh", [f"{OUT}/sm.bin", f"{OUT}/sm.syms"], env)
     s = {}
@@ -81,7 +100,11 @@ def main():
         poll = s["sm_poll_entry"]
 
         def arm_poll():
-            """fast trigger: the poll pool -> sm_poll (only from stock)"""
+            """fast trigger: the poll pool -> sm_poll (only from stock).
+            Only the instant build does anything there: the other builds
+            leave the player task's poll untouched (2026-11-16)."""
+            if "sm_drblk" not in s:
+                return False
             pv = rd32(h, POLL)
             if pv == poll:
                 return True
@@ -144,6 +167,11 @@ def main():
                 lw(h, DIRECT, FREAD)
                 sys.exit("FAIL: direct slot verify - restored")
         fast = arm_poll()
+        # the probe finds its symbol map by the hook address: keep this
+        # build's map even if build/stems is rebuilt with other flags later
+        import shutil
+        import time
+        shutil.copy(f"{OUT}/sm.syms", time.strftime(f"{OUT}/sm_deck_%Y-%m-%d_%H%M.syms"))
         print("RESULT: PASS - load a STEMS file; PERFORM > STEMS mutes/solos live"
               + (" (fast trigger on)" if fast else ""))
         return 0

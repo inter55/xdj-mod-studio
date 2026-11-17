@@ -134,7 +134,13 @@ PMASK=$PMASK sh tools/stems/build.sh >/dev/null
 #   fx.bin  TOUCH FX engine (this one was found stale on 2026-11-08)
 if [ -d work/tic6x-tools/bin ]; then
   sh tools/keyshift_dsp/build_ksr.sh >/dev/null
-  sh tools/fx_dsp/build.sh >/dev/null
+  # Shipping engine: Pitch, no delay line. The ring pages are in use on
+  # hardware; a ring build is a separate experiment (FX_RING=1).
+  FX_PITCH=1 FX_NO_RING=1 sh tools/fx_dsp/build.sh >/dev/null
+  # The one-shot installer cave carries the engine bytes; without this it
+  # would keep shipping the previous fx.bin (the 2026-11-09 check caught
+  # exactly that mismatch).
+  sh tools/fx_dsp/build_fxh.sh >/dev/null
 fi
 sh tools/keyshift_dsp/build_ksh.sh >/dev/null
 mkdir -p "$REPO/build/stems" "$REPO/build/keyshift"
@@ -154,9 +160,12 @@ cp build/centre/cw.bin build/centre/cw.syms "$REPO/build/centre/"
 # too; until now these were only checked for existence, so a source fix
 # could sit unwrapped in a release forever.
 sh tools/lighttext/build.sh >/dev/null
-sh tools/touchfx/build.sh >/dev/null
+FX_PITCH=1 sh tools/touchfx/build.sh >/dev/null
+HCPAGE=$HCPAGE PMODE=$PMODE MSOFF=$MSOFF sh tools/hotcue8/build.sh >/dev/null   # again: reads touchfx symbols
+sh tools/hcpad/build.sh >/dev/null          # needs hotcue8 + touchfx symbols
 sh tools/usbloader/build.sh >/dev/null
 for f in lighttext/lt.bin lighttext/lt.syms touchfx/tfx.bin touchfx/tfx.syms \
+         hcpad/hp.bin hcpad/hp.syms hotcue8/hc.bin hotcue8/hc.syms \
          fx/ksh.bin fx/ksh.syms fx/fx.bin fx/fx.syms fx/ring.txt \
          usbloader/ld.bin usbloader/ld.syms; do
   [ -f "build/$f" ] || { echo "ERROR: build/$f missing"; exit 1; }
@@ -198,6 +207,7 @@ stale build/keyshift/ksh.bin           tools/keyshift_dsp   || _stale=1
 stale build/keyshift/ks.bin            tools/keyshift_dsp/ks.c || _stale=1
 stale build/lighttext/lt.bin           tools/lighttext      || _stale=1
 stale build/touchfx/tfx.bin            tools/touchfx        || _stale=1
+stale build/hcpad/hp.bin              tools/hcpad          || _stale=1
 # fx.bin is the DSP-side engine (tools/fx_dsp/build.sh, C6x toolchain),
 # not the SH panel built from tools/touchfx.
 stale build/fx/fx.bin                  tools/fx_dsp         || _stale=1

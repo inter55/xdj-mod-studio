@@ -4,6 +4,10 @@ sys.path[:0] = [".", "tools"]
 from emu.machine import Machine
 from emu import panl
 
+if not os.path.exists("/tmp/ram0.bin"):
+    print("SKIP: /tmp/ram0.bin missing -- a RAM dump taken during a deck "
+          "session (see CODEC.md); this check needs one")
+    raise SystemExit(0)
 ram = open("/tmp/ram0.bin","rb").read()
 BASE = 0x08000000
 SITES = [0x08D3664E, 0x08D365B0, 0x08D366B2, 0x08D366C0,

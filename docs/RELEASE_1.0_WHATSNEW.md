@@ -120,9 +120,11 @@ flash anything.
 
 Not in this build, and not promised:
 
-- **Faster stem mutes.** A mute that lands in under a second instead of the
-  current ~30 s, by rewriting the audio the deck has already buffered. Works
-  in the emulator; nobody has heard it on a deck yet.
+- **Faster stem mutes.** Timed on a deck on 2026-11-07: 27.8 s, so still not
+  instant. The deck keeps about 28 s of already-decoded audio ahead of the
+  playhead, so rewriting the file cannot be heard any sooner than that. Under
+  a second needs the mute applied where the stems are mixed, not where they
+  are read — research, not built.
 - **MP3 / M4A / FLAC stems that replace the track in place**, so they stop being a
   second file under BROWSE › FOLDER and keep the cues and playlist slot the
   way WAV/AIFF do now.

@@ -95,7 +95,7 @@ UIHTML = os.path.join(BUNDLE, "studio", "ui.html") if FROZEN else os.path.join(H
 
 APP_SUPPORT = app_support_dir()
 # the app's own release number (GitHub release tag v<APP_VERSION>)
-APP_VERSION = "1.0.9.2"
+APP_VERSION = "1.1"
 RELEASES_API = "https://api.github.com/repos/inter55/xdj-mod-studio/releases/latest"
 RELEASES_PAGE = "https://github.com/inter55/xdj-mod-studio/releases/latest"
 SETTINGS = os.path.join(APP_SUPPORT, "studio.json")
@@ -517,11 +517,56 @@ def j_3band(log, prog, stick, dirs, compute_all):
     import make_3band as M3
     dirs = dirs or [r["dir"] for r in scan(stick)["tracks"]]
     n = len(dirs) or 1
+    ok = bad = nof = 0
     for i, d in enumerate(dirs):
         prog(i / n, f"computing 3-band waveform {i + 1} of {n}")
-        log(f"[{i + 1}/{len(dirs)}] {d}: "
-            f"{M3.patch_dir(stick, os.path.join(stick, d), compute_all)}")
-    prog(1.0, "done")
+        r = M3.patch_dir(stick, os.path.join(stick, d), compute_all)
+        log(f"[{i + 1}/{len(dirs)}] {d}: {r}")
+        if r.startswith(("added", "already")) and "NOT added" not in r \
+                and "skipped the rest" not in r:
+            ok += 1
+        else:
+            bad += 1
+            nof += "ffmpeg is missing" in r
+    _SCAN.clear()
+    log(f"{ok} of {len(dirs)} tracks now have 3-band waveforms"
+        + (f"; {bad} do not and stay blue on the deck" if bad else "") + ".")
+    if nof:
+        log(f"{nof} track(s) need ffmpeg: rekordbox exported no 3-band data "
+            "for them, so it has to be worked out from the audio. Install "
+            "ffmpeg (Mac: brew install ffmpeg -- Windows: winget install "
+            "ffmpeg), restart Mod Studio and press Add 3-band again. Or "
+            "export the tracks again from a current rekordbox, which writes "
+            "the 3-band data itself.")
+    prog(1.0, "done" if not bad else f"done -- {bad} track(s) still without 3-band")
+
+
+def three_band_note(log, mode):
+    """3-BAND is per track: the deck can only draw it for tracks whose
+    analysis file on the stick carries the 3-band data, and rekordbox puts
+    that in a file the XDJ-700 never opens -- Track Builder > Add 3-band
+    copies it across. Without it the deck draws the stock blue waveform with
+    the setting on 3-BAND, which reads as "3-band does not work" (reported
+    2026-11-10 for both the deck and the emulator). Say so wherever 3-band
+    is chosen."""
+    if mode != "3band":
+        return
+    need = total = None
+    try:
+        stick = settings().get("stick")
+        if stick and os.path.isdir(stick):
+            tr = scan(stick)["tracks"]
+            total, need = len(tr), sum(1 for t in tr if not t["three_band"])
+    except Exception:
+        pass
+    if need == 0 and total:
+        log(f"3-BAND: all {total} tracks on your stick are ready for it.")
+        return
+    log("3-BAND NEEDS ONE MORE STEP: the deck only shows 3-band on tracks "
+        "that have been prepared. Open Track Builder, choose your stick and "
+        "press Add 3-band (\"Add to all\")."
+        + (f" {need} of {total} tracks on your stick still need it." if need else "")
+        + " Tracks without it stay blue, also in the emulator.")
 
 
 # (pre-rendered key versions removed 2026-10-14: the deck gets real-time
@@ -782,13 +827,19 @@ def meta_cache():
 
 
 def _probe(path):
-    r = subprocess.run(["ffprobe", "-v", "error", "-show_entries",
-                        "format=duration:format_tags=artist,title,ARTIST,TITLE",
-                        "-of", "json", path], capture_output=True, text=True)
-    f = json.loads(r.stdout or "{}").get("format", {})
-    tags = {k.lower(): v for k, v in (f.get("tags") or {}).items()}
-    return {"duration": float(f.get("duration") or 0),
-            "artist": tags.get("artist", ""), "title": tags.get("title", "")}
+    """Duration and tags, or blanks. A missing/broken ffprobe or an
+    unreadable file must never kill the background metadata thread (it did:
+    one bad track stopped every later track from being cached)."""
+    try:
+        r = subprocess.run(["ffprobe", "-v", "error", "-show_entries",
+                            "format=duration:format_tags=artist,title,ARTIST,TITLE",
+                            "-of", "json", path], capture_output=True, text=True)
+        f = json.loads(r.stdout or "{}").get("format", {})
+        tags = {k.lower(): v for k, v in (f.get("tags") or {}).items()}
+        return {"duration": float(f.get("duration") or 0),
+                "artist": tags.get("artist", ""), "title": tags.get("title", "")}
+    except Exception:
+        return {"duration": 0.0, "artist": "", "title": ""}
 
 
 def fill_meta(paths):
@@ -1770,6 +1821,7 @@ def j_stick_pack(log, prog, sel):
         "the stick goes in. The deck needs the loader in memory first: send "
         "it over the cable (5 seconds, no flash) or build the loader update "
         "once if you never want the cable again.")
+    three_band_note(log, sel.get("mode"))
     prog(1.0, "Mods file written to your stick")
 
 
@@ -1973,6 +2025,7 @@ def j_deck_install(log, prog, mode, pads=True,
         return
     if rc or "DONE" not in out:
         raise RuntimeError("deck session stopped -- see log")
+    three_band_note(log, mode)
     prog(1.0, "Finished")
 
 
@@ -1985,18 +2038,18 @@ BANNER_ERR = ("the version number must look like 1.16 (one digit, a dot, two "
 def upd_banner(raw):
     """The version the built file will report, or None if unusable.
 
-    The deck's updater refuses a file that is not NEWER than the one it runs,
-    and every modded flash reports 1.16 -- so a second flash, or going back to
-    stock afterwards, needs 1.17 or higher. This used to be hardcoded to 1.16
-    in the stick-loader build, which made that file un-installable on a deck
-    already at 1.16."""
+    The deck's updater refuses a file that is not NEWER than the one it runs
+    (docs/old/PAYLOAD_EDITS.md section 0), and every modded flash reports
+    1.16 -- so a second flash, or going back to stock afterwards, needs 1.17
+    or higher. This used to be hardcoded to 1.16 in the stick-loader build,
+    which made that file un-installable on a deck already at 1.16."""
     b = str(raw or "1.16").strip()
     if not re.fullmatch(r"\d\.\d\d", b) or b == "1.15":
         return None
     return b
 
 
-def j_upd_build(log, prog, upd, mode, pads, versions, banner, extras=()):
+def j_upd_build(log, prog, upd, mode, pads, versions, banner, extras=(), logo=None):
     """PERMANENT mode: build a modded update file from the user's OWN
     official XDJ-700 v1.15 .UPD (tools/permanent_build.py), then boot it in
     the emulator from reset. Writes a file only -- the app never flashes."""
@@ -2011,6 +2064,8 @@ def j_upd_build(log, prog, upd, mode, pads, versions, banner, extras=()):
         args.append("--no-versions")
     if extras:
         args += ["--extras", ",".join(extras)]
+    if logo:
+        args += ["--boot-logo", logo]
     prog(0.0, "Building the update file", eta=90)
     rc, txt = run_tool(log, args)
     if rc or "RESULT: built" not in txt:
@@ -2041,6 +2096,7 @@ def j_upd_build(log, prog, upd, mode, pads, versions, banner, extras=()):
                           + ["theme switching", "FLAC & Opus"])))
     log(f"ready: {out} -- firmware {banner}; read READ ME FIRST.txt before "
         "flashing")
+    three_band_note(log, mode)
     prog(1.0, "Built + boot-tested. Read the warnings before flashing.")
 
 
@@ -2231,6 +2287,31 @@ def emu_cmd(b):
     return {"ok": True}
 
 
+# ------------------------------------------------------------ boot logo ---
+def logo_ok(path):
+    try:
+        from PIL import Image
+        with Image.open(path) as im:
+            im.verify()
+        return True
+    except Exception:
+        return False
+
+
+def logo_preview_png(path):
+    """The picture exactly as the deck will show it: fitted into 600 x 100
+    on black and rounded to the deck's colours (permanent_build.logo_pixels)."""
+    import numpy as np
+    from PIL import Image
+    import permanent_build as PB
+    px = np.frombuffer(PB.logo_pixels(path), "<u2").reshape(PB.LOGO_H, PB.LOGO_W)
+    rgb = np.dstack([((px >> 11) & 31) * 255 // 31, ((px >> 5) & 63) * 255 // 63,
+                     (px & 31) * 255 // 31]).astype("uint8")
+    buf = io.BytesIO()
+    Image.fromarray(rgb).save(buf, "PNG")
+    return buf.getvalue()
+
+
 # ------------------------------------------------------ native choosers ---
 # The Mac app's window has its own chooser (tools/studio-shell.swift). The
 # Windows app (and a source run in a browser) has no such window: the page
@@ -2247,6 +2328,15 @@ $d.Description = $env:XDJ_PICK_PROMPT
 $d.ShowNewFolderButton = $false
 if ($d.ShowDialog($o) -eq [System.Windows.Forms.DialogResult]::OK) { [Console]::Out.Write($d.SelectedPath) }
 """
+_PS_IMAGE = r"""
+Add-Type -AssemblyName System.Windows.Forms
+[Console]::OutputEncoding = [Text.Encoding]::UTF8
+$o = New-Object System.Windows.Forms.Form -Property @{TopMost = $true}
+$d = New-Object System.Windows.Forms.OpenFileDialog
+$d.Title = $env:XDJ_PICK_PROMPT
+$d.Filter = "Pictures (*.png;*.jpg;*.jpeg;*.bmp;*.gif)|*.png;*.jpg;*.jpeg;*.bmp;*.gif|All files (*.*)|*.*"
+if ($d.ShowDialog($o) -eq [System.Windows.Forms.DialogResult]::OK) { [Console]::Out.Write($d.FileName) }
+"""
 _PS_FILE = r"""
 Add-Type -AssemblyName System.Windows.Forms
 [Console]::OutputEncoding = [Text.Encoding]::UTF8
@@ -2262,12 +2352,13 @@ def native_pick(kind, prompt):
     """{"path": str} chosen, {"path": None} cancelled, {"unsupported": True}
     when this computer has no dialog we can open (the page then falls back
     to typing the path)."""
-    folder = kind != "file"
+    folder = kind not in ("file", "image")
     env = dict(os.environ, XDJ_PICK_PROMPT=prompt[:200])
     try:
         if WINDOWS:
             import base64              # -EncodedCommand: no quoting of a multi-line script
-            enc = base64.b64encode((_PS_FOLDER if folder else _PS_FILE)
+            enc = base64.b64encode((_PS_FOLDER if folder else
+                                    _PS_IMAGE if kind == "image" else _PS_FILE)
                                    .encode("utf-16-le")).decode("ascii")
             cmd = ["powershell", "-NoProfile", "-STA", "-ExecutionPolicy", "Bypass",
                    "-EncodedCommand", enc]
@@ -2362,6 +2453,11 @@ class H(BaseHTTPRequestHandler):
                 with LOCK:
                     return self.send([job_view(j) for j in
                                       sorted(JOBS.values(), key=lambda j: -j["id"])])
+            if u.path == "/api/logo":               # boot logo as the deck shows it
+                pth = os.path.expanduser(q.get("path") or "")
+                if not pth or not logo_ok(pth):
+                    return self.send({"error": "not a picture that opens"}, code=400)
+                return self.send(logo_preview_png(pth), "image/png")
             if u.path in ("/api/preview", "/api/wave"):
                 with RENDER:
                     return self._render(u.path, q)
@@ -2658,10 +2754,14 @@ class H(BaseHTTPRequestHandler):
                                and (pads or e not in ("hotcue8", "stems", "touchfx")))
                 if "touchfx" in extras:          # one DSP slot: Touch FX wins
                     extras = tuple(e for e in extras if e != "keyshift")
+                logo = os.path.expanduser((b.get("logo") or "").strip()) or None
+                if logo and not logo_ok(logo):
+                    return self.send({"error": "the boot logo has to be a picture "
+                                               "(PNG, JPG, BMP or GIF) that opens"}, code=400)
                 return self.send({"job": job("Build permanent update (UPD)", j_upd_build,
                                              upd, b.get("mode", "rgb"), pads,
                                              bool(b.get("versions", True)), banner,
-                                             extras)})
+                                             extras, logo)})
             if p == "/api/stick/pack":
                 sel = {k: b[k] for k in ("mode", "pads", "themes", "liveks", "stems",
                                          "phase", "brake", "flac", "opus", "touchfx")

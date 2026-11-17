@@ -195,21 +195,14 @@ def install(mem):
 
 COPY_SRC = f"""
 snap:                       ; called at overview-cave entry (every overview
-  sts.l pr,@-r15            ; paint). Only on a NEW track (hash of the
-  mov.l @({PREVIEW:#x},pc),r3   ; loaded track's preview changed) copy the
-  mov.l @({PREVIEW_WORDS:#x},pc),r4  ; raw PWV4/PWV6/PWV5 sections into
-  mov #0,r5                 ; private slots -- browsing later reuses the
-hsh:                        ; ANLZ cache for OTHER tracks.
-  mov.l @r3+,r0
-  shll r5                   ; h = 2h + w (only has to change with the
-  add r0,r5                 ; track; 2026-10-25: bytes for the LINK guard)
-  dt r4
-  bf hsh
-  mov.l @({RO.SNAP_HASH:#x},pc),r3
-  mov.l @r3,r0
-  cmp/eq r5,r0
-  bt sdone                  ; same track: keep snapshots
-  mov.l r5,@r3
+  sts.l pr,@-r15            ; paint). Only on a NEW track whose analysis is
+  mov.l @({RO.SAME:#x},pc),r1   ; really in the ANLZ cache (RO.SAME: hash +
+  mov.l @r1,r0              ; same-track check, 2026-11-15) copy the raw
+  tst r0,r0                 ; PWV4/PWV6/PWV5 sections into private slots.
+  bt sdone                  ; overview cave without the check: no snapshot
+  jsr @r1
+  nop
+  bf sdone
   mov.l @({TAG_PWV4:#x},pc),r4
   mov.l @({RO.SLOT4:#x},pc),r5
   mov.l @({RO.SLOT4_MAX:#x},pc),r6

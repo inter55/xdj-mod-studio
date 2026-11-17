@@ -46,6 +46,22 @@ LIVE_DATA = []
 # became a solid black bar. Its two 504x5 pictures keep their stock colours
 # in every theme (colour themes never touched them: neutral only).
 KEEP_STOCK = [(0x0840AAF0, 0x0840AAF0 + 504 * 5 * 2), (0x083B78A0, 0x083B78A0 + 504 * 5 * 2)]
+# 2026-11-10: the INFO card is a white surface in a dark UI. LIGHT must
+# keep it stock (and lighttext keeps its dark ink) without excluding it for
+# the colour themes. ts.c honours this region only while its target is LIGHT.
+LIGHT_INFO = (0x086B11A0, 688 * 243)
+INFO_SLICE = slice((LIGHT_INFO[0] - IMG_BASE) // 2,
+                   (LIGHT_INFO[0] - IMG_BASE) // 2 + LIGHT_INFO[1])
+# 2026-11-10: the INFO rows' icons (person/music/clock/BPM/key) and the
+# pencil are separate 24x24 sprite blits, so the card restore alone leaves
+# them white on the white card. Keep them stock too. The selected row's
+# note (0x08127190) is deliberately not here: it sits on the light selection
+# bar, so it follows the theme like the row text.
+LIGHT_INFO_ICONS = [
+    (0x08113910, 24 * 24), (0x08112B90, 24 * 24),
+    (0x08138890, 24 * 24), (0x08115410, 24 * 24), (0x08121310, 24 * 24),
+    (0x0813C090, 24 * 24), (0x0813A110, 24 * 24),
+]
 
 
 def _steps(radius=8):
@@ -474,6 +490,59 @@ def tables(names, w=None):
     return tables_full(names, w)[1:5]
 
 
+# 2026-11-12: waveform colours follow the theme. Three firmware palettes in
+# RAM (.data, read on every repaint; image copy = RAM - 0x058D2F5C): the blue
+# overview (12: unplayed 0..5 by whiteness, played 6..11), the PERFORM strip
+# (8) and the centre (8, also the centre colour module's blue fallback); then
+# the 3-band OVERVIEW colours, which are three 32-bit literal-pool constants
+# in the overview module (tools/rgb_overview.py, found by value, must be
+# unique); then the 3-band CENTRE triad cw.c draws (no address: cw.c reads
+# it from the table).
+# Blob +68 wave_off -> u32 n, u32 m, u32 addr[n], u16 rows[nt + 1][m]
+# (row 0 = stock, row t = theme t; entries n..n+2 = the cw.c triad). An
+# address with bit 0 set is a 32-bit word whose high half must be 0. ts.c
+# rewrites an entry only while it still holds the row of the theme being left.
+WAVE_PAL = ((0x0E7355E0, 12), (0x0E735FA8, 8), (0x0E736150, 8))
+WAVE_TRIAD = (0xEF18, 0xE4A5, 0x1B1A)          # cw.c C_CORE, C_MIDC, C_OUTER
+RAM_DATA_OFF = 0x058D2F5C
+
+
+def wave_entries(w0):
+    """[(address, stock colour)]: palette words, then the overview's 3-band
+    literals (address | 1)"""
+    out = []
+    for a, n in WAVE_PAL:
+        o = (a - RAM_DATA_OFF - IMG_BASE) // 2
+        out += [(a + 2 * k, int(w0[o + k])) for k in range(n)]
+    import rgb_overview as RO
+    code = RO.cave_bytes()
+    for v in (RO.C_HIGH, RO.C_MID, RO.C_LOW):
+        hit = [i for i in range(0, len(code) - 3, 4) if struct.unpack_from("<I", code, i)[0] == v]
+        assert len(hit) == 1, f"overview colour {v:#x} found {len(hit)} times"
+        out.append(((RO.CAVE + hit[0]) | 1, v))
+    return out
+
+
+def wave_section(names, w0):
+    import themes as T
+    ent = wave_entries(w0)
+    n = len(ent)
+    st = np.array([c for _, c in ent] + list(WAVE_TRIAD), np.uint16)
+    m = len(st) + len(st) % 2
+    st = np.concatenate([st, np.zeros(m - len(st), np.uint16)])
+    rows = [st]
+    for nm in names:
+        spec = T.THEMES[nm]
+        if spec.get("light"):                  # LIGHT: stock waveform colours
+            rows.append(st.copy())
+            continue
+        r = np.asarray(T.map_colours(st.copy(), spec), np.uint16)
+        r[st == 0] = 0                         # black is the background
+        rows.append(r)
+    out = struct.pack("<II", n, m) + struct.pack(f"<{n}I", *[a for a, _ in ent])
+    return out + b"".join(r.astype("<u2").tobytes() for r in rows)
+
+
 MAXS = 4096                                # ts.c: more source colours = no-op
 
 
@@ -492,7 +561,9 @@ def build(names, w=None):
     if len(S) > MAXS:
         raise RuntimeError(f"{len(S)} theme colours > {MAXS}: fewer themes")
     ns, nt = len(S), len(names)
-    reg_off = 56
+    light_idx = names.index("light") + 1 if "light" in names else 0
+    info_addr, info_n = LIGHT_INFO if light_idx else (0, 0)
+    reg_off = 72                                  # 56-byte header + INFO + wave_off
     s_off = reg_off + 8 * len(regs)
     d_off = s_off + 2 * ns
     name_off = d_off + 2 * ns * nt
@@ -501,9 +572,11 @@ def build(names, w=None):
     tbits_off = name_off + 16 * nt
     hash_off = tbits_off + len(tbits)
     hash_off += (-hash_off) % 4
-    out = struct.pack("<8I4B5I", MAGIC, len(regs), ns, nt, reg_off, s_off,
+    wave = wave_section(names, w0)
+    out = struct.pack("<8I4B5I3I", MAGIC, len(regs), ns, nt, reg_off, s_off,
                       d_off, name_off, 0, 0, 0, 0, 0, hash_off, CHUNK, 0,
-                      tbits_off)
+                      tbits_off, info_addr, info_n, light_idx)
+    out += b"\0\0\0\0"                          # +68 wave_off, patched below
     out += bytes(reg_off - len(out))
     for a, n in regs:
         out += struct.pack("<II", a, n)
@@ -516,6 +589,9 @@ def build(names, w=None):
     assert len(out) == tbits_off
     out += tbits
     out = out + bytes(hash_off - len(out)) + hashes
+    out += bytes((-len(out)) % 4)
+    out = out[:68] + struct.pack("<I", len(out)) + out[72:]
+    out += wave
     writes = []
     if grp:
         import litbuttons as LB
@@ -547,6 +623,58 @@ def model_switch(img, regs, frm, to):
         s = (a - IMG_BASE) // 2
         out[s:s + n] = lut[img[s:s + n]]
     return out
+
+
+def guard_model(w, regs, S, Ds, light):
+    """ts.c EXACTLY, guard included: a chunk is recoloured only if it maps
+    back to stock; the INFO card + icons are stock while LIGHT is on (put
+    back into LIGHT colours before leaving). Returns the pixels that differ
+    from stock after stock -> light -> theme -> light -> stock, plus those
+    that differ from a direct switch on the way."""
+    S = np.asarray(S)
+    inS = np.zeros(65536, bool)
+    inS[S] = True
+    chunks = []
+    for a, n in regs:
+        s = (a - IMG_BASE) // 2
+        for k in range(0, n, CHUNK):
+            sl = slice(s + k, s + min(n, k + CHUNK))
+            if inS[w[sl]].any():
+                chunks.append(sl)
+    info = [slice((a - IMG_BASE) // 2, (a - IMG_BASE) // 2 + n)
+            for a, n in [LIGHT_INFO] + LIGHT_INFO_ICONS]
+
+    def lut(frm, to):
+        m = np.arange(65536, dtype=np.uint16)
+        m[np.asarray(frm)] = np.asarray(to, np.uint16)
+        return m
+
+    def switch(img, cur, t):
+        frm = S if cur == 0 else Ds[cur - 1]
+        to = S if t == 0 else Ds[t - 1]
+        if cur == light and t != light:             # info_leave
+            m = lut(S, Ds[light - 1])
+            for sl in info:
+                img[sl] = m[img[sl]]
+        st, tm = lut(frm, S), lut(frm, to)
+        for sl in chunks:
+            if np.array_equal(st[img[sl]], w[sl]):
+                img[sl] = tm[img[sl]]
+        if t == light:                              # info_enter
+            m = lut(Ds[light - 1], S)
+            for sl in info:
+                img[sl] = m[img[sl]]
+
+    other = 1 if light != 1 else 2
+    img, cur, bad = w.copy(), 0, 0
+    for t in (light, other, light, 0):
+        switch(img, cur, t)
+        cur = t
+        if t == other:
+            d = w.copy()
+            switch(d, 0, other)
+            bad += int((img != d).sum())
+    return bad + int((img != w).sum())
 
 
 def default_names():
@@ -585,16 +713,39 @@ def check(names):
         ok &= len(set(D.tolist())) == len(D) and not F[D].any()
     # cycle stock -> every theme -> stock, in order and some jumps
     cur, img = 0, w.copy()
+    light = names.index("light") + 1 if "light" in names else 0
+    info_sl = [INFO_SLICE] + [slice((a - IMG_BASE) // 2, (a - IMG_BASE) // 2 + n)
+                             for a, n in LIGHT_INFO_ICONS]
+
+    def fix_info(pic, before, target):
+        """model ts.c's LIGHT-only stock INFO card and row icons"""
+        if not light:
+            return pic
+        if target == light:
+            for sl in info_sl:
+                pic[sl] = w[sl]
+        elif before == light:
+            base = w if target == 0 else model_switch(w, regs, S, Ds[target - 1])
+            for sl in info_sl:
+                pic[sl] = base[sl]
+        return pic
+
     seq = list(range(1, len(names) + 1)) + [0, len(names), 2 if len(names) > 1 else 1, 0]
     for t in seq:
         frm = S if cur == 0 else Ds[cur - 1]
         to = S if t == 0 else Ds[t - 1]
-        img = model_switch(img, regs, frm, to)
-        direct = model_switch(w, regs, S, to)
+        img = fix_info(model_switch(img, regs, frm, to), cur, t)
+        direct = fix_info(model_switch(w, regs, S, to), 0, t)
         ok &= np.array_equal(img, direct)
+        if t == light:
+            ok &= all(np.array_equal(img[sl], w[sl]) for sl in info_sl)
         cur = t
     ok &= np.array_equal(img, w)
     print("stock -> all themes -> jumps -> stock exact:", np.array_equal(img, w))
+    if light:
+        g = guard_model(w, regs, S, Ds, light)
+        print("same, with ts.c's per-chunk guard (LIGHT visits):", g, "px left over")
+        ok &= g == 0
     # how close each theme is to the Studio preview (themes.recolour)
     worst = 0.0
     for n, D in zip(names, Ds):

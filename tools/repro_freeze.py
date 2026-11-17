@@ -96,7 +96,7 @@ def install(m, parts):
         mem.w32(0x08D5FFA8, syms["sm_fread"])
         if mem.r32(0x08DDFFD4) == 0x08C61A6C:   # deck installer routes it too
             mem.w32(0x08DDFFD4, syms["sm_fread"])
-        if "sm_poll_entry" in syms and mem.r32(0x08C1D56C) == 0x08BF2BCC:
+        if "sm_drblk" in syms and mem.r32(0x08C1D56C) == 0x08BF2BCC:   # instant build only
             mem.w32(0x08C1D56C, syms["sm_poll_entry"])   # fast mute trigger (as the deck)
         mem.w8(PP.PMASK, 0b0101)            # some stems muted while playing
     if "flac" in parts:

@@ -18,12 +18,32 @@ PY = sys.executable
 PYCMD = [PY, "--run-tool"] if getattr(sys, "frozen", False) else [PY]
 
 
+def run_forward(cmd, **kw):
+    """Run a child program and pass its output on, line by line.
+
+    2026-11-13 (Windows, Reddit): the USB-stick job's log stopped at
+    "launching the install runner". A plain subprocess.call() on Windows
+    gives the child NO handle to our log pipe (macOS passes it on by
+    itself), so everything it printed vanished and a stuck step was
+    invisible. Here the pipe is explicit and we forward each line."""
+    flags = getattr(subprocess, "CREATE_NO_WINDOW", 0) if os.name == "nt" else 0
+    p = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
+                         stdin=subprocess.DEVNULL, text=True, encoding="utf-8",
+                         errors="replace", creationflags=flags, **kw)
+    for line in p.stdout:
+        print(line.rstrip("\n"), flush=True)
+    return p.wait()
+
+
 def main():
     td = tempfile.mkdtemp(prefix="mockdeck")
     sock = os.path.join(td, "deck.sock")
     ckpt = os.environ.get("MOCK_CKPT", os.path.join(ROOT, "cache", "emu_mainscreen.pkl"))
     srv = subprocess.Popen(PYCMD + [os.path.join(ROOT, "tools/mock/mockdeck_server.py"), ckpt, sock],
-                           stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)
+                           stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True,
+                           stdin=subprocess.DEVNULL,
+                           creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0)
+                           if os.name == "nt" else 0)
     # 2026-11-13 (Windows, Reddit): the USB-stick job sat at 2 % for 14+ min
     # with an EMPTY log -- it was waiting here for the emulated deck's
     # "ready" line with no time limit and nothing printed. Now it says what
@@ -66,7 +86,7 @@ def main():
                XDJ_SURVEY_CACHE=os.environ.get("MOCK_SURVEY_CACHE",
                                                os.path.join(td, "surveys.json")))
     t0 = time.time()
-    rc = subprocess.call(PYCMD + ["tools/deck_session.py"] + sys.argv[1:], cwd=ROOT, env=env)
+    rc = run_forward(PYCMD + ["tools/deck_session.py"] + sys.argv[1:], cwd=ROOT, env=env)
     sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
     import mocksock
     s = mocksock.connect(sock)

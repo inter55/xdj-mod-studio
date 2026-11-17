@@ -10,7 +10,7 @@ ROOT=$(cd "$(dirname "$0")/../.." && pwd)
 SH=$ROOT/work/sh-tools/bin
 OUT=$ROOT/build/fx
 BASE=${KSH_BASE:-0x09800000}
-sh "$ROOT/tools/fx_dsp/build.sh" >/dev/null
+FX_PITCH=1 FX_NO_RING=1 sh "$ROOT/tools/fx_dsp/build.sh" >/dev/null
 PBUF=$(awk '$3=="FX"{print "0x"$1}' "$OUT/fx.syms")
 [ -n "$PBUF" ] || { echo "FX symbol missing"; exit 1; }
 W=$OUT/inst

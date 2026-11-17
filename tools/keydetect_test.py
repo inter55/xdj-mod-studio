@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """keydetect_test.py -- all 24 keys, synthetic harmonic music, plus
 transposition tracking on real audio (resample by 2^(n/12))."""
+import os
 import sys
 import numpy as np
 sys.path.insert(0, "tools")
@@ -45,7 +46,14 @@ def main():
             if not good:
                 print(f"  miss: true {K.name(tonic, minor)} got {K.name(t, mn)} conf {conf:.3f}")
     print(f"synthetic: {ok}/24 exact")
-    x, sr = K.read_wav("work/shift_samples/keyshift_+0.wav")
+    # Informational leg only: the pass/fail above is the synthetic 24-key
+    # check. The clip came from an older key-shift session and no tool in the
+    # repo regenerates it, so a fresh checkout must not die here.
+    sample = "work/shift_samples/keyshift_+0.wav"
+    if not os.path.exists(sample):
+        print(f"  real-audio leg skipped: {sample} not present (optional)")
+        return 0 if ok >= 22 else 1
+    x, sr = K.read_wav(sample)
     t0, m0, _ = K.detect(x, sr)
     for n in (1, 2, 3, 5, 7):
         r = 2 ** (n / 12.0)

@@ -37,8 +37,12 @@ DEP_Y, BTN_Y, BTN_H, BTN_W = 214, 236, 34, 125
 
 
 def build():
+    # The shipping panel now offers PITCH; build it with the same flag as
+    # tools/build_studio.sh so a test cannot silently use the old 3-effect
+    # panel.
+    env = dict(os.environ, FX_PITCH="1")
     subprocess.run(["sh", os.path.join(HERE, "touchfx", "build.sh")], check=True,
-                   stdout=subprocess.DEVNULL)
+                   env=env, stdout=subprocess.DEVNULL)
 
 
 def syms():
@@ -199,7 +203,9 @@ def emu():
     state("open")
     chk("panel open", v("tfx_mode") == 1)
     chk("pads mode HOT CUE", mem.r8(PP.PST + 2) == 0)
-    run(4_000_000)
+    # 2026-11-13: the LIGHT colour check sits in every pixel write now; the
+    # first full panel draw lands ~6M steps after the release (was <4M)
+    run(10_000_000)
     buf = fb_png(m, "screenshots/touchfx/1_open.png")
     pad_c = px(buf, 200, 200)
     chk("pad drawn", pad_c not in (0,) and v("tfx_full") >= 1)
@@ -245,6 +251,11 @@ def emu():
     chk("ECHO inert", v("tfx_eff") == 1)
     tap(grid(2))
     chk("gate picked", v("tfx_eff") == 2)
+    tap(grid(5))
+    chk("PITCH picked", v("tfx_eff") == 5)
+    state("pitch")
+    tap(grid(2))
+    chk("back to gate", v("tfx_eff") == 2)
     state("gate")
     # 5. DEPTH bar to ~half
     tap((RX + RW // 2, DEP_Y + 4), tag="depth")

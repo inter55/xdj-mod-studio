@@ -211,9 +211,10 @@ HOOK_BLIT, ORIG_BLIT = 0x08C92E20, 0x08E7D278
 MODEW, ZSTATE = 0x0BA371D4, 0x0C0E75BC
 PLAYW = 0x0B6C4264                # play state word (5 = playing)
 PLAYPP = 0x0B6C7A7F               # key bitmap byte holding PlayPause 0x04
+PAY16 = 0x0B6C7A30 + 16           # panel payload byte (synthetic writes here
+                                  # do not reach PLAYPP; see pgate)
 GATEBAND = (114, 230, 506, 68)    # stock hot-cue row rect (x, y, w, h)
 GATEW, GATEH = 506, 68            # pool-constant widths (imm range)
-PULSEN = 4000000                  # PlayPause pulse iterations (~8M steps)
 MSGATE = MSET.MS + 0x7F8           # u8 1 = hot-cue gate armed (MY SETTINGS)
 KEY93, KEY94 = 0x0B6C7A85, 0x0B6C7A86
 ROWREV, ROWFWD = 0xA80B7D20, 0xA80B7D28      # actions 1 / 2, uncached alias
@@ -541,18 +542,14 @@ pgate:                      ; gated stock hot-cue pad released?
   mov.l @r1,r0
   cmp/eq #5,r0
   bf porig                  ; not playing: nothing to pause
+  mov.l @({GATELATCH:#x},pc),r1  ; reload: r1 still points at PLAYW
+  mov #2,r0
+  mov.b r0,@r1              ; pending: hold PlayPause for the next frames
   mov.l @({PLAYPP:#x},pc),r1
   mov.b @r1,r0
-  mov #4,r2
-  or r2,r0
-  mov.b r0,@r1              ; press PlayPause...
-  mov.l @({PULSEN:#x},pc),r2
-ppulse:
-  dt r2
-  bf ppulse
-  mov.b @r1,r0
-  and #251,r0
-  mov.b r0,@r1              ; ...hold ~16 ms, release (= pause)
+  or #4,r0
+  mov.b r0,@r1              ; PlayPause in the key bitmap the stock consumer
+                            ; reads (PAY16 alone is not propagated here)
 porig:
   tst r4,r4                 ; release frames: nothing to arm
   bt porig_go
@@ -1595,125 +1592,6 @@ pdkeys:
   bra pdend                 ; top-left box removed (see phk)
   nop
   mov #0,r12                ; KEY area: box i
-pdbox:
-  mov.l @({A["kb"]:#x},pc),r1
-  mov r12,r0
-  shll2 r0
-  add r0,r1
-  mov.w @r1,r8              ; x
-  mov.w @(2,r1),r0
-  mov r0,r9                 ; w
-  mov.b @r14,r0             ; pressed?
-  extu.b r0,r0
-  mov.l @({KFILL:#x},pc),r10
-  mov.l @({KEDGE:#x},pc),r11
-  add #-20,r0
-  mov r0,r2
-  mov r12,r0
-  cmp/eq #1,r0              ; name box never highlights
-  bt pdbx
-  shlr r0                   ; box 0 -> 0 ('-'), box 2 -> 1 ('+')
-  cmp/eq r0,r2
-  bf pdbx
-  mov.l @({KPRESS:#x},pc),r10
-  mov.l @({ORANGE:#x},pc),r11
-pdbx:
-  mov.l @({PCOL:#x},pc),r1  ; edge
-  mov.l r11,@r1
-  mov r8,r4
-  mov #{K_Y},r5
-  mov r9,r6
-  bsr fillrect
-  mov #{K_H},r7
-  mov.l @({PCOL:#x},pc),r1  ; inside
-  mov.l r10,@r1
-  mov r8,r4
-  add #1,r4
-  mov #{K_Y + 1},r5
-  mov r9,r6
-  add #-2,r6
-  bsr fillrect
-  mov #{K_H - 2},r7
-  mov.l @({FONTP:#x},pc),r13 ; font for this box -> r13, y -> r11
-  mov #{K_Y + (K_H - 14) // 2},r11
-  mov r12,r0                ; label -> r6, colour -> r7
-  cmp/eq #1,r0
-  bt pdname
-  mov.l @({A["mi"]:#x},pc),r6
-  cmp/eq #0,r0
-  bt pdlab
-  mov.l @({A["pl"]:#x},pc),r6
-pdlab:
-  mov.l @({WHITE:#x},pc),r7
-  bra pdtxt
-  nop
-pdname:
-  mov.l @({FONTT:#x},pc),r13
-  mov #{K_Y + (K_H - 9) // 2},r11
-  mov.l @({VR.VTBL + 8:#x},pc),r1
-  mov r1,r2                 ; table word as a value: steppers keep VSEL in
-                            ; 0..n <= 8 now, so this loose bound can never
-                            ; walk past the 8 name slots
-  mov.l @({A["key"]:#x},pc),r6
-  mov.l @({DIM:#x},pc),r7
-  tst r2,r2
-  bt pdtxt
-  mov.l @({WHITE:#x},pc),r7
-  mov.l @({A["mix"]:#x},pc),r6
-  mov.l @({VR.VSEL:#x},pc),r1
-  mov.b @r1,r0
-  extu.b r0,r0
-  tst r0,r0
-  bt pdtxt
-  cmp/hi r2,r0
-  bt pdtxt
-  add #-1,r0                ; name k-1 (8 B, maybe unterminated) -> PTMP
-  shll2 r0
-  add r0,r0
-  mov.l @({VR.VNAMES:#x},pc),r1
-  add r0,r1
-  mov.l @({PTMP:#x},pc),r6
-  mov.l @r1+,r0
-  mov.l r0,@r6
-  mov.l @r1,r0
-  mov.l r0,@(4,r6)
-  mov #0,r0
-  mov.b r0,@(8,r6)
-pdtxt:                      ; centred in the box, clipped to it
-  mov.l @({PFONT:#x},pc),r1
-  mov.l r13,@r1
-  mov r7,r10
-  mov r6,r13
-  mov.l @({PCLIP:#x},pc),r1
-  mov r8,r0
-  add r9,r0
-  add #-2,r0
-  mov.l r0,@r1
-  bsr aawidth
-  nop
-  mov r9,r1
-  cmp/hi r1,r0
-  bf pdtw
-  mov r9,r0
-pdtw:
-  mov r9,r4
-  sub r0,r4
-  shlr r4
-  add r8,r4
-  mov r11,r5
-  mov r13,r6
-  bsr drawaa
-  mov r10,r7
-  mov.l @({PCLIP:#x},pc),r1
-  mov.l @({800:#x},pc),r0
-  mov.l r0,@r1
-  add #1,r12
-  mov #3,r0
-  cmp/eq r0,r12
-  bt pdend
-  nop
-  bra pdbox
-  nop
 pdend:
   mov.l @r15+,r14
   mov.l @r15+,r13

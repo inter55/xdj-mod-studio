@@ -1,8 +1,10 @@
-09770790 b _bits
-09776790 b _frm
-09774790 b _to
-09770010 T _ts_apply
-09770708 B _ts_maps_used
-097705c8 T _ts_push
-09770710 B _ts_skiplog
+09770afc b _bits
+09776afc b _frm
+09774afc b _to
+09770404 T _ts_apply
+09770a74 B _ts_maps_used
+097708f4 T _ts_push
+09770a7c B _ts_skiplog
 09770000 T _ts_table
+09770a6c B _ts_wave_skips
+09770a70 B _ts_wave_writes

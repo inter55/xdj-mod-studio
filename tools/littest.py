@@ -34,6 +34,11 @@ def movl_targets(buf):
 
 
 def main():
+    if not os.path.exists(os.path.join(HERE, "..", "work", "OKU.blk01.bin")):
+        print("SKIP: work/OKU.blk01.bin missing -- it is a block of the user's "
+              "own firmware image (never shipped with this repo); put it in "
+              "work/ before running this")
+        return 0
     P = Prov()
     buf = P.img
     print('scanning for mov.l pool targets ...', file=sys.stderr)

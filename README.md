@@ -40,18 +40,18 @@ deck will accept. Keep both to hand.
 | Mod settings in UTILITY | hold MENU, end of the list: mods on/off, waveform style, vinyl brake, hot cue gate, theme (hardware-tested) |
 | Vinyl brake length | UTILITY › VINYL BRAKE LENGTH, 0.5×–15×; the stop changes to the length you pick |
 | FLAC playback | the deck's own decoder; a normal FLAC file lists, loads and plays |
+| Ogg Opus playback | same layer as FLAC; an Opus file lists, loads and plays (deck-checked 2026-11-07) |
 | Phase meter | this deck's beats, following the playing track; with two decks linked the master row shows too |
-| 8 hot cues | pages A–C / D–F / G–H, and you can set one from an empty pad while the track plays; page by **tapping** the HOT CUE tab (swiping across the pads does not page); the cues live on your stick, not the deck |
 
 **Working in the emulator, not yet tested on a deck.** These run against the
 deck's real firmware in the emulator, so they should work on a real deck,
-but nobody has tried them on one yet:
+but parts of them have not been tried on one yet:
 
 | Mod | Notes |
 | --- | --- |
-| Faster stem mute (beta) | rewrites the audio the deck already buffered; < 1 s in the emulator |
-| Ogg Opus playback | own decoder on the deck (FLAC is the confirmed one; Opus uses the same layer but nobody has played an Opus file on a deck) |
-| Touch FX (beta) | PERFORM › TOUCH FX, an X/Y pad with Filter, Crush and Gate; needs MASTER TEMPO on and shares the DSP hook with live key shift, so one or the other. Echo, Pitch, Flanger, Roll and Reverb are drawn but not implemented |
+| Touch FX (beta) | PERFORM › TOUCH FX, an X/Y pad with Filter, Crush, Gate, Pitch and Roll; opening it turns MASTER TEMPO on. Shares the DSP hook with live key shift, so one or the other. Echo, Flanger and Reverb are drawn but not implemented. The panel and tabs are deck-checked; Pitch and Roll have not been heard on a deck yet |
+| 8 hot cues | pages A–C / D–F / G–H: tap the HOT CUE tab or swipe across the pads. D–H play D–H, a tap on an empty pad or REC records one cue, set pads light up, and the overview markers read D E F / G H. Recording and the marker labels are deck-checked; the lit pads are emulator-only |
+| Waveforms follow the theme | the blue waveforms and the 3-band colours take the deck theme's colours (deck-checked); colour waveforms never show another track's colours (emulator-only) |
 
 ## For DJs: Mod Studio
 
@@ -178,6 +178,7 @@ that must pass before it touches hardware, for example:
 ```bash
 .venv/bin/python tools/perform_pads.py emu
 .venv/bin/python tools/hotcue8_test.py
+.venv/bin/python tools/hotcue8_jump_emu.py
 .venv/bin/python tools/theme_switch.py check
 .venv/bin/python tools/sh4test.py
 ```

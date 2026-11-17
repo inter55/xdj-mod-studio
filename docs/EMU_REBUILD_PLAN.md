@@ -268,3 +268,22 @@ need real audio output.
   20 counts/frame = gentle, 60 = 1.33x / 0.82x, 150 = 1.52x / 0.59x.
   Paused scrubbing was already right both ways. emu/ui.py: inner 72 % of
   the wheel = top platter (JogTouch), outer ring = bend only.
+
+## Frame rate, measured 2026-11-08 (tools/qemu_fps_probe.py)
+
+- Screen updates reaching the app: 0/s idle (nothing changes: correct),
+  ~8/s while a track plays (four runs: 7.7-8.2), the same with sound off
+  ("none") and with sound paced in real time (wav backend).
+- QEMU ~176-183 % CPU while playing. `sample` (3 s): the main loop thread is
+  idle almost all the time (`gui_update` ~0.5 % of samples -- the xdj1000
+  board's lcdc_gfx_update copies 800x480 on every 30 ms refresh, cheap);
+  the "ALL CPUs/TCG" thread is in `cpu_tb_exec` 94 % of samples, ~3 %
+  waiting in `cdj_dsp_host_lock` (HPI writes vs the c6747 thread).
+- So the VNC/display path is NOT the limit: the guest swaps frames only
+  ~8 times/s. Not yet known whether that is TCG speed (main chip too slow)
+  or the firmware's own pacing (it may spin idle, so 94 % busy proves
+  nothing). NEXT: count LDRCNTR bit-1 flips inside lcdc.c (a counter in our
+  qemu patch, logged once a second) = the guest's true frame rate; compare
+  with the real deck by filming its screen at 120/240 fps during playback.
+  If the guest is below the deck, the lever is TCG time (profile guest PCs
+  with QEMU's -d / perf map); if equal, there is nothing to fix.

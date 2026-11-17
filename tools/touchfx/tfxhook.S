@@ -2,7 +2,7 @@
  * tfx_flush_entry: display-flush pool 0x08C92E20; calls tfx_flush(dev, req)
  *   in C, then chains to tfx_prev_flush with the original arguments.
  * tfx_touch_entry: hit-tester pool 0x08D5278C (down, x, y, r7); calls
- *   tfx_touch(down, x, y); nonzero = consumed (return to the caller like
+ *   tfx_touch(down, x, y); 1 = consumed (return to the caller like
  *   the pads do), zero = chain to tfx_prev_touch with the original args. */
         .section .entry,"ax"
         .global _tfx_flush_entry, _tfx_touch_entry
@@ -39,8 +39,17 @@ _tfx_touch_entry:
         mov.l   @r15+,r6
         mov.l   @r15+,r5
         mov.l   @r15+,r4
+        cmp/eq  #2,r0           /* 2 = chain with the touch in tfx_fwd */
+        bf      .Lnofwd
+        mov.l   .Lfwd,r1
+        mov.l   @r1,r4
+        mov.l   @(4,r1),r5
+        bra     .Lchain
+        mov.l   @(8,r1),r6
+.Lnofwd:
         tst     r0,r0
         bf      .Lconsumed
+.Lchain:
         lds.l   @r15+,pr
         mov.l   .Lptouch,r0
         mov.l   @r0,r0
@@ -55,6 +64,7 @@ _tfx_touch_entry:
 .Ltouch:  .long _tfx_touch
 .Lpflush: .long _tfx_prev_flush
 .Lptouch: .long _tfx_prev_touch
+.Lfwd:    .long _tfx_fwd
 
         .section .data
         .global _tfx_prev_flush, _tfx_prev_touch

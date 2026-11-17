@@ -1,3 +1,74 @@
+# XDJ Mod Studio v1.1
+
+Install the mods again after updating (cable, USB-stick file or a flash).
+
+## Hot cues D–H work like A–C
+
+- **Paging:** tap the HOT CUE tab, or swipe across the pads, to go
+  A–C → D–F → G–H. The old 8-pad grid is gone.
+- **Playing:** D–H play D–H. This fixes "D–H play A, B, C" and playback
+  stopping after a D–H jump.
+- **Recording:** a tap on an empty pad, or REC, records one cue at the
+  playhead. One press = one cue (the panel's double presses no longer make
+  three).
+- **Looks:** empty D–H pads show the grey "ready" strip like stock. Pads
+  with a cue light up green.
+- **Overview markers:** the cue labels on the bottom waveform read D E F /
+  G H on those pages.
+
+## Touch FX
+
+- **Pitch:** pad X = ±11 semitones; tempo and waveform stay put.
+- **Roll:** uses the deck's own beat loop, 1/2 to 4 beats following your
+  finger, and lets go when you lift.
+- **MASTER TEMPO:** opening Touch FX turns it on (the effects need it).
+- **Opening:** the TOUCH FX tab opens on a clean tap only. A swipe along
+  the tabs no longer opens it.
+- **Fast swipes:** the panel no longer repaints itself every frame while a
+  track plays. This is the likely cause of the "fast swipes freeze it"
+  report.
+- **Hot cue letters** no longer show through the panel.
+- **USB button:** the deck's own USB button no longer pokes out under the
+  STEMS tab.
+
+## Waveforms and themes
+
+- **Theme colours:** the blue waveforms (overview, centre, PERFORM strip)
+  and the 3-band colours now follow the deck theme. UTILITY > WAVEFORM COLOR
+  shows this as BLUE/THEME.
+- **Colours always match the track:** colour waveforms no longer borrow
+  another track's colours, for example after a LINK load. If the deck
+  doesn't have the loaded track's colour data, it shows blue instead.
+- **Light theme:**
+  - no more dotted button edges;
+  - readable selected rows and pressed buttons;
+  - switching away from LIGHT leaves no light icons behind.
+
+## App
+
+- **3-band warning:** choosing 3-BAND tells you how many tracks on your
+  stick still need "Add 3-band" (without it the deck draws blue).
+- **USB-stick page:** has its own Version number box. The deck only takes a
+  higher number than UTILITY shows, so use 1.17 if it says 1.16.
+
+## Stems
+
+Unchanged: a mute is heard about 30 s after the tap. A faster mute is still
+being tested on the deck and is not in this release.
+
+## Tested how
+
+- **On a real XDJ-700:** waveform theme colours, D–F marker labels, REC on
+  D–F, Touch FX panel and tabs.
+- **Emulator only so far:**
+  - the green "cue set" strip on D–H pads;
+  - Touch FX Pitch and Roll;
+  - the USB-button corner;
+  - the same-track colour check;
+  - the light theme fixes.
+
+  Please report anything that looks or sounds wrong.
+
 # XDJ Mod Studio v1.0.9.2
 
 App-only update: nothing on the deck changes, and you do not need to install

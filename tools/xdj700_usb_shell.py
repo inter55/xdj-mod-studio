@@ -230,6 +230,19 @@ def open_deck(vid, pid, usage=None):
     return h
 
 
+def cdj(h, secs=1.5):
+    """Re-issue the shell handshake; returns whatever came back.
+
+    The deck's shell can go quiet without the HID link dying (a long install
+    session, a busy CPU). A handshake is what brings it back, and it is the
+    only recovery available without re-plugging the cable. Read-only; safe to
+    call between reads.
+    """
+    q = b"$CDJ\r\x00"
+    h.write(q + b"\x00" * (26 - len(q)))
+    return drain(h, secs)
+
+
 def drain_values(h, n, secs=9.0):
     """Collect a BR reply until n 'XX' values (+ line end) arrived or secs
     elapse -- usually well under a second instead of a fixed wait."""

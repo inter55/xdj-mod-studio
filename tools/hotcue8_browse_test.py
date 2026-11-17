@@ -11,7 +11,7 @@ they wrote the previewed track's A-C into the live slots + pad models.
 This gate loads the cue track (snapshot from tools/hotcue8_emu.py), lets the
 pads settle, then OVERWRITES the ctx cue lists with another track's times --
 what a browse preview does -- and checks:
-  1. 8-pad toggle and back: live slots + both pad models still the loaded
+  1. a full round of pages (three taps) and back: live slots + both pad models still the loaded
      track's A-C (the 1.0.5 code writes the browsed track's)
   2. page 2 = the loaded track's D E F, page 1 again = its A-C
   3. a NEW track whose ctx is still a browsed track's (A-C disagree with the
@@ -106,14 +106,15 @@ def main():
 
     pollute(FAKE)                                 # the BROWSE preview
     run(30_000_000)
-    tap(*tab)                                     # 8-pad view
-    tap(*tab)                                     # and back to the stock row
-    chk(f"after browsing + 8-pad toggle: slots {slots()}", slots() == own)
+    for _ in range(3):                            # a tap pages forward (2026-11-12):
+        tap(*tab)                                 # three taps = round to page 1
+    chk(f"after browsing + a full round of pages: slots {slots()}", slots() == own)
     chk("... and both pad models are still this track's",
         models() == own + own)
     swipe(100, 30)                                # page 2
     chk(f"page 2 = this track's D E F {slots()}",
-        mem.r8(PP.HCPAGE) == 1 and slots() == [(4 + k, TIMES[3 + k]) for k in range(3)])
+        mem.r8(PP.HCPAGE) == 1 and slots() == [(1 + k, TIMES[3 + k]) for k in range(3)])
+    # (pad number 1-3 in the slot, never the cue number: hc.c PADNUM)
     swipe(30, 100)                                # back to page 1
     chk(f"page 1 again = this track's A-C {slots()}",
         mem.r8(PP.HCPAGE) == 0 and slots() == own and models() == own + own)

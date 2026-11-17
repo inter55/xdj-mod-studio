@@ -81,7 +81,14 @@ def _lr_round(h, addr, n, tries=3):
     """n (<=32) u32 values from addr (4-aligned) via the shell's LR.
     Retries a short/garbled reply (tries in all) before giving up."""
     pat = re.compile(rb"\b([0-9A-Fa-f]{8})\b")
-    for _ in range(tries):
+    raw = bytearray()
+    for k in range(tries):
+        if k and not raw.strip():          # silent: revive the shell first
+            try:
+                from xdj700_usb_shell import cdj
+                cdj(h, 1.0)
+            except Exception:
+                pass
         _flush(h)
         h.write(_q(f"{addr:x},{n - 1:x}LR".encode()))
         raw = bytearray()
@@ -144,7 +151,14 @@ def _br_only(h, base, size):
     while off < size:
         n = min(READ_CHUNK, size - off)
         q = f"{base + off:x},{n - 1:x}BR\r\x00".encode()
-        for _ in range(3):                 # retry a short/garbled reply
+        raw = bytearray()
+        for k in range(3):                 # retry a short/garbled reply
+            if k and not raw.strip():      # silent: revive the shell first
+                try:
+                    from xdj700_usb_shell import cdj
+                    cdj(h, 1.0)
+                except Exception:
+                    pass
             _flush(h)
             h.write(_q(q))
             raw = bytearray()

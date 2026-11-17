@@ -9,8 +9,11 @@ BASE=${HC_BASE:-0x09790000}
 mkdir -p "$OUT"
 cd "$ROOT/tools/hotcue8"
 "$ROOT/.venv/bin/python" mkglyphs.py >/dev/null
+# TOUCH FX panel open -> no letters (its address; tfx does not need ours)
+TFXM=$(awk '$3=="_tfx_mode"{print $1}' "$ROOT/build/touchfx/tfx.syms" 2>/dev/null || true)
+TFXD=""; [ -n "$TFXM" ] && [ -z "${HC_NO_TFX:-}" ] && TFXD="-DTFX_MODE=0x${TFXM}u"
 "$SH/sh-elf-gcc" -m4-nofpu -mdiv=call-div1 -ml -O2 -Wall -ffreestanding -fno-builtin \
-  -DHCPAGE=${HCPAGE:?}u -DPMODE=${PMODE:?}u -DMSOFF=${MSOFF:?}u \
+  -DHCPAGE=${HCPAGE:?}u -DPMODE=${PMODE:?}u -DMSOFF=${MSOFF:?}u $TFXD \
   -ffunction-sections -fdata-sections -nostdlib -Wl,--gc-sections -Wl,-e,_hc_entry \
   -Wl,--section-start=.entry=$BASE -Wl,-Ttext=$(printf '0x%X' $((BASE + 0x80))) \
   -o "$OUT/hc.elf" hchook.S hc.c -lgcc

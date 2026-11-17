@@ -233,9 +233,10 @@ def main():
         # Wait 15 s AND at least 80 status reads. On the emulated deck that
         # records the USB-stick mods file (tools/mock), time only advances
         # per read (MOCK_RSLICE steps each), and the cave needs a screen
-        # flush. Wall time alone can give a slow PC too few reads (a
-        # suspect for GitHub #11, not confirmed). On a real deck 80 reads
-        # at 0.3 s is ~24 s worst case, only if it never answers early.
+        # flush -- several million steps. Wall time alone gave a slow PC
+        # (Windows, GitHub #11) too few reads: "cave did not finish". On a
+        # real deck 80 reads at 0.3 s is ~24 s worst case, only if it never
+        # answers early.
         t = time.time()
         status, polls = 0, 0
         while time.time() - t < 15 or polls < 80:

@@ -14,13 +14,16 @@ before moving on.
 
 ## Step 0 — before you touch the deck (30 s, no deck)
 
+    FX_RING=1 sh tools/fx_dsp/build.sh                 # Echo experiment only
     .venv/bin/python tools/fxring_gate_test.py          # expect RESULT: PASS
     cat build/fx/ring.txt                               # expect 0xC0073400 6500
 
-If `ring.txt` is missing, rebuild the engine first: `sh tools/fx_dsp/build.sh`.
+The shipping engine is built **without** a delay line (`ring.txt` = `0x0 0`);
+the command above builds the experiment that would carry Echo. If `ring.txt`
+is missing, rebuild it first with that command.
 
-Current state: the shipped engine keeps its echo in the 52 KB block at
-`0xC0073400`, and the deck survey found **all 13,056 words there non-zero**.
+Current state: the Echo experiment uses the 52 KB block at `0xC0073400`, and
+the deck survey found **all 13,056 words there non-zero**.
 The install gate therefore refuses, by design. That is what this session
 changes — either by finding a block that is genuinely free, or by proving
 none is.

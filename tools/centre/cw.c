@@ -85,6 +85,17 @@ static void theme_sync(void)
         t_core = C_CORE; t_midc = C_MIDC; t_outer = C_OUTER;
         return;
     }
+    u32 w_off = h[17];                       /* +68: waveform table (2026-11-12) */
+    if (w_off && !(w_off & 3) && w_off + 8 <= TS_END - TS_DATA) {
+        const u32 *w = (const u32 *)(TS_DATA + w_off);
+        u32 n = w[0], m = w[1];
+        if (n && n <= 64 && m >= n + 3 && m <= 72 &&
+            w_off + 8 + 4 * n + 2 * m * (nt + 1) <= TS_END - TS_DATA) {
+            const u16 *r = (const u16 *)(w + 2 + n) + m * cur;
+            t_core = r[n]; t_midc = r[n + 1]; t_outer = r[n + 2];
+            return;
+        }
+    }
     const u16 *S = (const u16 *)(TS_DATA + s_off);
     const u16 *D = (const u16 *)(TS_DATA + d_off + (cur - 1) * 2 * ns);
     t_core = tmap(C_CORE, S, D, ns);
@@ -163,7 +174,8 @@ static u32 col(u32 idx8, u32 step, u32 white, u32 rmax, u32 pal)
     u32 h = R32(SNAP_HASH);
     if (h != last_hash) {                             /* new track loaded */
         last_hash = h;
-        snap7();
+        if (h) snap7();             /* 0 = the cache holds another track */
+        else R32(SLOT7) = 0;        /* (LINK, 2026-11-15): stock colours */
     }
     u32 mode = R8(MODE_ADDR), first = idx8 >> 3;
     theme_sync();

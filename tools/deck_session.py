@@ -302,11 +302,22 @@ def main():
         if a.no_hotcues:
             print("5f  8 hot cue pages skipped (not selected)")
         else:
-            print("5f  8 hot cue pages (PERFORM > swipe along the HOT CUE tab)")
+            print("5f  8 hot cue pages (PERFORM > swipe across the A B C pads)")
             r = until_pass(["tools/hotcue8_apply.py", "--precheck"], "hotcues")
             if r is not True:
                 sys.exit("STOP: hot cue pages install failed - power-cycle "
                          "the deck.")
+            # 2026-11-13: swipe across the pads to page (tools/hcpad, like the
+            # BEAT JUMP row); a tap plays the cue on lift, a hold at once
+            out = run(["tools/hcpad_apply.py", "--survey"])
+            if "SURVEY OK" not in out:
+                print("    hot cue swipe area not empty on this deck - skipped "
+                      "(tap the HOT CUE tab to page instead)")
+            else:
+                r = until_pass(["tools/hcpad_apply.py"], "hcpad")
+                if r is not True:
+                    sys.exit("STOP: hot cue swipe install failed - power-cycle "
+                             "the deck.")
         if a.no_stems:
             print("5g  live stems skipped (not selected)")
         else:

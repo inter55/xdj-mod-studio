@@ -30,7 +30,7 @@ i.e. **8.2 ms** of stereo float audio.
 
 | effect | buffer it needs | bytes | fits in 2.8 KB? |
 | --- | --- | --- | --- |
-| **Pitch** | none of its own — it *is* the key-shift stretcher already in the window | 0 | **no, not yet**: the code is **416 B** over the wall (measured 2026-11-07) |
+| **Pitch** | none of its own — it *is* the key-shift stretcher already in the window | 0 | **yes**: 2,480 B of the 2,496 B wall, shipping 2026-11-10 |
 | **Flanger** | 5–25 ms delay line, both channels | 1,102 frames x 2 x 4 = **8.8 KB** | no (3x the window) |
 | **Echo** | 1/4 beat at 120 BPM = 125 ms; 250 ms is the useful setting | **44 KB … 88 KB** | no (15–30x) |
 | **Roll** | one loop of up to 1 beat (~0.25 s) | **44 KB** | no — or **0 B** by driving the deck's own loop engine instead |
@@ -174,6 +174,49 @@ Two honest consequences:
   words. That is the concrete cost of a delay line on a page that is not
   actually free -- and the reason the deck's word-by-word proof must come
   before any ring goes at `0xC006C000`, never after.
+
+## Roll and Reverb, the last two effects (built 2026-11-08)
+
+The panel always had eight slots but only six effects existed. Roll (effect 6)
+and Reverb (effect 7) are now written, and one engine carries both:
+
+```
+FX_ROLL=1 FX_REVERB=1 FX_STATE_BASE=0xC007F400 FX_RING_FRAMES=6100u \
+    FX_OUT=build/fx_both sh tools/fx_dsp/build.sh     # 2,816 / 2,880 B
+FX_ROLL=1 FX_REVERB=1 sh tools/touchfx/build.sh        # panel, FPU 0
+```
+
+* **Roll** is the Echo delay line with the decay removed, so the slice repeats
+  for seconds. **Reverb** is two combs (1,427 and 1,613 frames) carved from the
+  same line, wet only, which is a small room rather than a hall -- four combs
+  plus two allpasses cost 736 B and do not fit.
+
+Emulator gates on that one blob (play position `317 -> 317`, `x1.000`):
+
+| effect | setting | measured | result |
+| --- | --- | --- | --- |
+| Roll | X=120 (76 ms) | corr at the slice 0.32, repeat 1.06 | PASS |
+| Roll | X=200 (113 ms) | corr at the slice 0.32, repeat 0.98 | PASS |
+| Reverb | X=180 Y=120 D=255 | spectrum 0.97, waveform 0.41 (diffuse) | PASS |
+
+Three traps, each cost a failed gate, so they are written down:
+
+1. **Feedback exactly 1.0 is wrong.** This topology *sums*, so the slice grows
+   without bound -- and the DSP fell behind, play position `x0.675`. 0.95
+   repeats for seconds, stays bounded, and costs one constant.
+2. **`0xC006C000` cannot hold the state.** The code window's neighbour carries
+   live DSP data; with the state moved there the engine stalled and the output
+   was silent (`calls 13`). The state now lives at `0xC007F400`, in the ring
+   page's tail, which is why the ring drops to 6,100 frames.
+3. **Check the tail for overlap.** The first attempt put the state at
+   `0xC007F280`, which is 32 B *inside* a 6,100-frame ring (it ends
+   `0xC007F2A0`) -- the line would have written over its own counters.
+
+Two consequences if this ships: the ring is 6,100 frames, so Echo's longest
+setting becomes 138 ms instead of 147 ms, and the state block moves out of the
+2,880 B code window, which is what makes room for both effects at once.
+Nothing here is deck-proven yet: the ring tail needs the same word-by-word
+proof the rest of that page had.
 
 ## The deck check itself (built 2026-11-05, emulator-proven)
 
@@ -374,7 +417,7 @@ that ships:
 | build | bytes | wall |
 | --- | --- | --- |
 | shipping, `FX_NO_RING=1` (Filter/Crush/Gate) | 1,696 | 2,496 |
-| + Pitch, `FX_PITCH=1 FX_NO_RING=1` | **2,912** | 2,496 — refused by `build.sh` |
+| + Pitch, `FX_PITCH=1 FX_NO_RING=1` | **2,912** | 2,496 — refused by `build.sh` (superseded 2026-11-10: 2,480) |
 | + Pitch with the delay line too | 3,744 | refused |
 
 Three compaction passes took it 4,320 → 3,520 → 2,912 B: linear interpolation
@@ -400,6 +443,64 @@ neither is a whole answer alone; (b) prove a second small code block free
 with audio playing (the echo-ring job, just 2 KB instead of 52); (c) a DSP
 home outside the window. "Pitch is free because it needs no buffer" was the
 wrong lesson: the buffer was never the cost, the code room is.
+
+### Update 2026-11-08: Pitch fits (exactly), emulator-passed
+
+Compacted 2,912 -> **2,496 B**, the wall exactly, without dropping anything:
+
+| change | saved |
+| --- | --- |
+| 1/k as `pk_of(-semi)` (2^(-s/12)) instead of a reciprocal routine | 96 B |
+| resampler: clamp past-the-end reads in the loop, no fill-in loop | 160 B |
+| latch check `(16sp/k+2)k+3 < 32` rewritten as `16sp + 2k < 29`, on the integer tempo word (`SPEED >> 16`, one frame stricter) | 32 B |
+| semitone pick `(X*23)>>8` instead of `X*22/255` (no divide); init only resets what needs it | 32 B |
+| signed int<->float conversions (the unsigned ones expand to ~100 B) | 32 B |
+| `pshift` counter dropped (nothing read it) | 32 B |
+| resampler inlined (one call site; saves the function's 32-B alignment) | 32 B |
+
+Code is packed in 32-B fetch packets, so trims only count when they cross a
+packet. Emulator gates on the real DSP program, one blob
+(`FX_PITCH=1 FX_NO_RING=1`, `build/fx_pitch`), each with play position and
+L/R balance checked (`sane`):
+
+| effect | setting | measured | result |
+| --- | --- | --- | --- |
+| Pitch | X=200 (+6 st) | spectrum vs shifted 0.979, vs dry 0.811 | PASS |
+| Pitch | X=40 (-8 st) | spectrum vs shifted 0.946, vs dry 0.619 | PASS |
+| Filter | X=40 Y=200 | >4 kHz 0.0239 -> 0.0000 | PASS |
+| Crush | X=40 Y=200 | corr vs model 0.969 | PASS |
+| Gate | X=40 Y=200 | envelope 4.6x, 2.84 Hz | PASS |
+
+Panel: `FX_PITCH=1 sh tools/touchfx/build.sh` makes the PITCH button live
+(copy in `build/touchfx_pitch`); off by default. Pitch is a no-ring build, so
+it ships with Filter/Crush/Gate and needs no memory proof. Still needed: a
+deck listen (MASTER TEMPO on, one track, pad left/right). Zero bytes of slack:
+any future change to `fx_pull` must be re-measured against the gate.
+
+### Update 2026-11-10: 2,480 B, shipping in the default build
+
+Pitch is now **in the shipping build**, not behind a separate experiment:
+
+| change | result |
+| --- | --- |
+| Q14 semitone table replaces the polynomial | 46 B table, one indexed load for `k` and one for `1/k`; 128 B function and two calls gone |
+| `platch`/`pshift` removed; `pk == 0` is the latch sentinel | 32 B+ of state/branch gone |
+| redundant `SPEED != 0` and latch `valid >= 4` checks removed | the use-site `valid < 4` check carries it; short chunks recover at the next block |
+| phase `> 8` clamp removed | `pphi` is the fractional remainder by construction |
+
+Built with `FX_PITCH=1 FX_NO_RING=1`: **2,480 B of the 2,496 B wall** (16 B
+spare). `tools/fx_dsp/build.sh` now defaults to **no ring** and only builds a
+delay line for an explicit `FX_RING=1` (or `FX_ROLL`/`FX_REVERB`) experiment;
+`tools/build_studio.sh` and `tools/fx_dsp/build_fxh.sh` pass `FX_PITCH=1` and
+rebuild the installer cave, so the panel and the DSP carry the same engine.
+
+Emulator gates on this exact blob (real DSP, MASTER TEMPO on, play position
+and L/R checked): Pitch X=200 (+6) spectrum 0.981 vs 0.811 dry **PASS**;
+Pitch X=40 (-8) 0.947 vs 0.621 dry **PASS**; Filter X=40/Y=200 unchanged
+**PASS**. The panel builds with `FX_PITCH=1` (22,248 B, FPU 0, end
+`0x0984980C`). Still needed: one deck listen (MASTER TEMPO on, one track,
+pad left/right). Echo/Flanger/Roll/Reverb remain blocked on a proven-free
+delay line; see the sections above.
 
 ## Wider than 2 MB: four passes of the same cave (Nov 6, late)
 

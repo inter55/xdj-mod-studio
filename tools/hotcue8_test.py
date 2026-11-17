@@ -86,6 +86,9 @@ def main():
         dev.panel_frame = panl.build_frame()
         run(after)
 
+    # Slots and pad models carry the PAD number (1-3), never the cue number:
+    # the deck indexes 3-pad tables with it (hc.c PADNUM, 2026-11-12). Which
+    # cue a page holds is told by its time.
     def slots():
         return [(mem.r16(SLOT + k * 0x40 + 0x0A), mem.r32(SLOT + k * 0x40 + 0x0C),
                  mem.r32(SLOT + k * 0x40 + 0x08)) for k in range(3)]
@@ -128,72 +131,24 @@ def main():
             run(8_000_000)
         dev.panel_frame = panl.build_frame()
         run(30_000_000)
-    # --- the 8-pad view (tap; integrated 2026-11-07) --------------------
+    # --- a TAP on the HOT CUE tab pages forward (2026-11-12, user: no 8-pad
+    # grid; pages must look exactly like the stock A B C row) --------------
     tap(*tab)
-    chk("tap: 8-pad view on, page 1", mem.r32(syms["hc_view"]) == 1 and
-        mem.r8(PP.HCPAGE) == 0)
-    run(30_000_000)
-    chk("8 pads drawn", mem.r32(syms["hc_draws8"]) > 0)
-    fb_png(m, f"{OUT}/grid8.png")
-    padx = [116 + 63 * i + 29 for i in range(8)]
-    pady = 263
-    page1 = slots()
-    dev.panel_frame = panl.build_frame(touch=(padx[4], pady))   # pad E
-    run(12_000_000)
-    chk("grid: E held borrows slot 1 -> cue 5",
-        (mem.r16(SLOT + 0x40 + 0x0A), mem.r32(SLOT + 0x40 + 0x0C)) == (5, TIMES[4]))
-    chk("grid: E held borrows the pad models too",
-        model(0x0BA28800, 1) == (ST, 5, TIMES[4]) and
-        model(0x0BA2A52C, 1) == (ST, 5, TIMES[4]))
-    chk("grid: E sets no stock zone (hit-tester untouched)",
-        mem.r32(0x0C0E75BC) == 0x1E)
-    fb_png(m, f"{OUT}/grid8_held_E.png")
-    dev.panel_frame = panl.build_frame()
-    run(40_000_000)
-    chk("grid: E released restores slot 1", slots() == page1)
-    chk("grid: E released restores the pad models",
-        model(0x0BA28800, 1) == (ST, 2, TIMES[1]) and
-        model(0x0BA2A52C, 1) == (ST, 2, TIMES[1]))
-    dev.panel_frame = panl.build_frame(touch=(padx[7], pady))   # pad H = old REC
-    run(12_000_000)
-    chk("grid: H (old REC spot) borrows -> cue 8",
-        (mem.r16(SLOT + 0x40 + 0x0A), mem.r32(SLOT + 0x40 + 0x0C)) == (8, TIMES[7]))
-    dev.panel_frame = panl.build_frame()
-    run(40_000_000)
-    chk("grid: H released restores slot 1", slots() == page1)
-    sw_before = mem.r32(syms["hc_swallowed"])
-    dev.panel_frame = panl.build_frame(touch=(116 + 63 * 2 + 60, pady))  # gap
-    run(12_000_000)
-    chk("grid: gap swallowed", mem.r32(syms["hc_swallowed"]) == sw_before + 1 and
-        slots() == page1)
-    dev.panel_frame = panl.build_frame()
-    run(30_000_000)
-    # DELETE and a borrowed slot (measured 2026-11-07): MEMORY-DELETE is zone
-    # 17 (0x11) and its own handler 0x08DD0B60 sets KEYB+84 bit 0x40 -- it is
-    # NOT a panel key (holding the "Delete" frame bit does not move it). One
-    # panel frame carries a SINGLE touch point (payload +22..+25), so DELETE
-    # and a pad cannot be pressed together: the "delete the borrowed slot"
-    # combination is unreachable. hc_touch still reads that bit and swallows
-    # D-H presses as defence in depth; that guard cannot be driven through the
-    # emulator's one point, so it is not claimed as emulator-tested here.
-    # What IS tested: D (a borrowed pad) works normally afterwards.
-    dev.panel_frame = panl.build_frame(touch=(padx[3], pady))      # pad D
-    run(12_000_000)
-    chk("grid: D works (slot 0 = cue 4)",
-        (mem.r16(SLOT + 0x0A), mem.r32(SLOT + 0x0C)) == (4, TIMES[3]))
-    dev.panel_frame = panl.build_frame()
-    run(40_000_000)
-    chk("grid: D released restores slot 0", slots() == page1)
+    s = slots()
+    chk("tap: page 2 = D E F, no grid", mem.r8(PP.HCPAGE) == 1 and
+        mem.r32(syms["hc_view"]) == 0 and [x[1] for x in s] == TIMES[3:6])
     tap(*tab)
-    chk("tap again: stock row back", mem.r32(syms["hc_view"]) == 0 and
-        mem.r8(PP.HCPAGE) == 0)
+    chk("tap: page 3 = G H", mem.r8(PP.HCPAGE) == 2 and slots()[0][1] == TIMES[6])
+    tap(*tab)
+    chk("tap: wraps to page 1 = A B C", mem.r8(PP.HCPAGE) == 0 and
+        slots()[0][1] == TIMES[0] and mem.r32(syms["hc_view"]) == 0)
 
     swipe(100, 30)                                # swipe -> page 2 (D E F)
     s = slots()
     print("page", mem.r8(PP.HCPAGE), "slots", s, "count", mem.r32(syms["hc_count"]))
     chk("page 2 = D E F", mem.r8(PP.HCPAGE) == 1 and
-        [x[0] for x in s] == [4, 5, 6] and [x[1] for x in s] == TIMES[3:6])
-    want = [(ST, 4, TIMES[3]), (ST, 5, TIMES[4]), (ST, 6, TIMES[5])]
+        [x[0] for x in s] == [1, 2, 3] and [x[1] for x in s] == TIMES[3:6])
+    want = [(ST, 1, TIMES[3]), (ST, 2, TIMES[4]), (ST, 3, TIMES[5])]
     chk("page 2 pad models = D E F",
         [model(0x0BA28800, k) for k in range(3)] == want and
         [model(0x0BA2A52C, k) for k in range(3)] == want)
@@ -210,17 +165,16 @@ def main():
     swipe(100, 30)                                # another left -> page 3 (G H -)
     s = slots()
     print("page", mem.r8(PP.HCPAGE), "slots", s)
-    chk("page 3 = G H -", mem.r8(PP.HCPAGE) == 2 and [x[0] for x in s[:2]] == [7, 8]
+    chk("page 3 = G H -", mem.r8(PP.HCPAGE) == 2 and [x[0] for x in s[:2]] == [1, 2]
         and [x[1] for x in s[:2]] == TIMES[6:8] and s[2][2] == 0xFFFFFFFF)
-    # measured stock empty record (build/hc_model_probe.py): state 0, number
-    # 0, ms 0, pos 0 -- loop 0xFFFFFFFF in model A but 0 in model B
-    chk("page 3 empty pad = stock empty patterns (A -1 / B 0)",
-        mem.r16(0x0BA28800 + 2 * 0x38) == 0 and
-        mem.r32(0x0BA28800 + 2 * 0x38 + 4) == 0 and
-        mem.r32(0x0BA28800 + 2 * 0x38 + 8) == 0xFFFFFFFF and
-        mem.r16(0x0BA2A52C + 2 * 0x38) == 0 and
-        mem.r32(0x0BA2A52C + 2 * 0x38 + 4) == 0 and
-        mem.r32(0x0BA2A52C + 2 * 0x38 + 8) == 0)
+    # 2026-11-16: a FRESHLY LOADED track's empty pad is state/number
+    # 0xFFFF/0xFFFF, ms/loop/pos 0 in both models (emulator,
+    # cache/emu_perform_track.pkl) -- that is what draws the grey "ready to
+    # record" strip; the old zeros left D-H without it (deck report)
+    chk("page 3 empty pad = stock fresh-load empty pattern (0xFFFFFFFF, 0, 0, 0)",
+        all(mem.r32(b + 2 * 0x38) == 0xFFFFFFFF and mem.r32(b + 2 * 0x38 + 4) == 0
+            and mem.r32(b + 2 * 0x38 + 8) == 0 and mem.r32(b + 2 * 0x38 + 12) == 0
+            for b in (0x0BA28800, 0x0BA2A52C)))
     run(30_000_000)
     fb_png(m, f"{OUT}/page3.png")
     swipe(100, 30)                                # left from page 3 wraps -> page 1
@@ -231,15 +185,15 @@ def main():
         [model(0x0BA28800, k)[1] for k in range(3)] == [1, 2, 3] and
         [model(0x0BA2A52C, k)[1] for k in range(3)] == [1, 2, 3])
     swipe(30, 100)                                # right from page 1 wraps -> page 3
-    chk("swipe right wraps: page 3", mem.r8(PP.HCPAGE) == 2 and slots()[0][0] == 7)
+    chk("swipe right wraps: page 3", mem.r8(PP.HCPAGE) == 2 and slots()[0][1] == TIMES[6])
     swipe(100, 30)                                # left -> page 1
-    chk("swipe left: page 1", mem.r8(PP.HCPAGE) == 0 and slots()[0][0] == 1)
+    chk("swipe left: page 1", mem.r8(PP.HCPAGE) == 0 and slots()[0][1] == TIMES[0])
     swipe(30, 100)                                # right wraps -> page 3 again
-    chk("swipe right wraps again: page 3", mem.r8(PP.HCPAGE) == 2 and slots()[0][0] == 7)
+    chk("swipe right wraps again: page 3", mem.r8(PP.HCPAGE) == 2 and slots()[0][1] == TIMES[6])
     swipe(100, 30)                                # left -> page 1
-    chk("swipe left to page 1", mem.r8(PP.HCPAGE) == 0 and slots()[0][0] == 1)
+    chk("swipe left to page 1", mem.r8(PP.HCPAGE) == 0 and slots()[0][1] == TIMES[0])
     swipe(100, 30)                                # left -> page 2 (D E F) for the BJ leg
-    chk("swipe left: page 2", mem.r8(PP.HCPAGE) == 1 and slots()[0][0] == 4)
+    chk("swipe left: page 2", mem.r8(PP.HCPAGE) == 1 and slots()[0][1] == TIMES[3])
     chk("latch dropped after swipes", mem.r8(PP.PST) == 0)
     bj = (PP.TAB_X + PP.TAB_W // 2, PP.TAB_Y[1] + PP.TAB_H // 2)
     tap(*bj)                                      # BEAT JUMP mode
@@ -247,13 +201,12 @@ def main():
     tap(*tab)                                     # back to HOT CUE: mode, no page step
     chk("HOT CUE tab from other mode = mode change only",
         mem.r8(PP.PST + 2) == 0 and mem.r8(PP.HCPAGE) == 1)
-    tap(*tab)                                     # in mode now: tap = 8 pads
-    chk("tap from the stock row: 8-pad view, page 1",
-        mem.r32(syms["hc_view"]) == 1 and mem.r8(PP.HCPAGE) == 0 and
-        slots()[0][0] == 1)
-    tap(*tab)                                     # -> stock row
-    chk("tap again: stock row, page 1", mem.r32(syms["hc_view"]) == 0 and
-        mem.r8(PP.HCPAGE) == 0 and slots()[0][0] == 1)
+    tap(*tab)                                     # in mode now: tap = next page
+    chk("tap in HOT CUE mode: page 2 -> page 3", mem.r8(PP.HCPAGE) == 2 and
+        mem.r32(syms["hc_view"]) == 0 and slots()[0][1] == TIMES[6])
+    tap(*tab)                                     # -> page 1
+    chk("tap again: page 1, stock row", mem.r32(syms["hc_view"]) == 0 and
+        mem.r8(PP.HCPAGE) == 0 and slots()[0][1] == TIMES[0])
     run(30_000_000)
     fb_png(m, f"{OUT}/back_to_hc.png")
     # 2026-11-06: the swipe threshold went 40 -> 24 px because the tab strip is
@@ -267,13 +220,13 @@ def main():
     drag(-32)                                     # left = next page
     chk("32 px swipe left pages forward", mem.r8(PP.HCPAGE) == p)
     run(30_000_000)
-    drag(-8)                                      # wobble: a TAP -> 8-pad view
-    chk("8 px wobble is a tap (8-pad view)", mem.r8(PP.HCPAGE) == 0 and
-        mem.r32(syms["hc_view"]) == 1)
+    drag(-8)                                      # wobble: a TAP -> next page
+    chk("8 px wobble is a tap (next page)", mem.r8(PP.HCPAGE) == (p + 1) % 3 and
+        mem.r32(syms["hc_view"]) == 0)
     run(30_000_000)
-    tap(*tab)                                     # tap back: stock row, page 1
-    chk("tap back: page 1, stock row", mem.r8(PP.HCPAGE) == 0 and
-        mem.r32(syms["hc_view"]) == 0 and slots()[0][0] == 1)
+    while mem.r8(PP.HCPAGE) != 0:                 # back to page 1 by tapping
+        tap(*tab)
+    chk("tapped round to page 1", mem.r8(PP.HCPAGE) == 0 and slots()[0][1] == TIMES[0])
     mem.w8(MS.MSOFF, 1)                           # MODS OFF: no paging/view
     v = mem.r32(syms["hc_view"])
     tap(*tab)

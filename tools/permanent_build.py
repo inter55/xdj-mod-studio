@@ -40,8 +40,11 @@ What it does, from the user's own official XDJ-700 v1.15 update file:
     recomputes the block checksums, round-trips the file, and leaves the
     boot stub, block 0 and the PANL section byte-identical to stock.
 
-To go back to stock: flash the OFFICIAL v1.15 file (its version differs
-from BANNER, so the updater accepts it).
+To go back to stock: --stock builds the same firmware with ONLY the version
+number changed, numbered above whatever the deck reports. Pioneer's own 1.15
+file can be refused as older once a modded build has been flashed, so this is
+the reliable way back ("nothing ticked" in the app is NOT this: it still bakes
+the UTILITY rows and the boot copier).
 
 Writing a file needs --i-know-flashing-can-brick (and read this header
 first). The --emu boot-test now also taps through the baked PERFORM
@@ -539,6 +542,43 @@ def boot_tail(mem, img_len):
 
 SPLASH_OFF, SPLASH_A, SPLASH_B = 0x08102E30, 0x000DC650, 0x000F9B10
 
+# Custom boot logo (1.1). The boot frames draw picture record 0x08102E10:
+# 600 x 100 (record word +4 = 0x00640258), RGB565 little-endian, pixels at
+# 0x08100000 + SPLASH_B = 0x081F9B10 once the opening frame is re-pointed
+# (above). Only a FLASHED update can show it: cable and stick installs run
+# after the logo has already been drawn.
+LOGO_ADDR, LOGO_W, LOGO_H = 0x08100000 + SPLASH_B, 600, 100
+LOGO_STOCK_SHA = "359460ce552307c791d3ae6e8e1b2b410e0c2a2d2cb42517871f7c56057aca48"
+
+
+def logo_pixels(path):
+    """The user's picture fitted into 600 x 100 on black (aspect kept,
+    centred) as RGB565 little-endian bytes."""
+    from PIL import Image
+    im = Image.open(path).convert("RGB")
+    im.thumbnail((LOGO_W, LOGO_H), Image.LANCZOS)
+    canvas = Image.new("RGB", (LOGO_W, LOGO_H), (0, 0, 0))
+    canvas.paste(im, ((LOGO_W - im.width) // 2, (LOGO_H - im.height) // 2))
+    out = bytearray()
+    for r, g, b in canvas.getdata():
+        v = ((r * 31 + 127) // 255) << 11 | ((g * 63 + 127) // 255) << 5 \
+            | ((b * 31 + 127) // 255)
+        out += struct.pack("<H", v)
+    return bytes(out)
+
+
+def bake_boot_logo(mem, path, log=print):
+    stock = bytes(mem.r8(LOGO_ADDR + i) for i in range(LOGO_W * LOGO_H * 2))
+    if hashlib.sha256(stock).hexdigest() != LOGO_STOCK_SHA:
+        raise SystemExit("REFUSED: the boot logo picture is not the stock one "
+                         "(wrong firmware, or a logo is already baked)")
+    px = logo_pixels(path)
+    for i in range(0, len(px), 4):
+        mem.w32(LOGO_ADDR + i, struct.unpack_from("<I", px, i)[0])
+    if mem.r32(SPLASH_OFF) == SPLASH_A:          # both boot frames use it
+        mem.w32(SPLASH_OFF, SPLASH_B)
+    log(f"boot logo: {os.path.basename(path)} (fitted into {LOGO_W}x{LOGO_H})")
+
 
 def apply_mods(mem, mode="rgb", versions=True, pads=True, log=print,
                extras=()):
@@ -605,7 +645,8 @@ def apply_mods(mem, mode="rgb", versions=True, pads=True, log=print,
 
 def mods_image(dec, mode="rgb", versions=False, pads=True,
                extras=tuple(e for e in EXTRAS if e != "touchfx"), log=print,
-               themes=False, theme_start=None, theme_names=None):
+               themes=False, theme_start=None, theme_names=None,
+               boot_logo=None):
     """The decoded firmware image (block 1, as the deck runs it) with the
     mods baked in exactly as a permanent update would carry them -- the
     boot copier included -- for an emulator that boots the image directly
@@ -616,6 +657,8 @@ def mods_image(dec, mode="rgb", versions=False, pads=True,
     apply_mods(mem, mode, versions, pads, log, extras)
     if themes:              # after the pads: their art is themed too
         bake_themes(mem, log, theme_names, theme_start)
+    if boot_logo:
+        bake_boot_logo(mem, boot_logo, log)
     if mem.regions:
         tail, at, jobs = boot_tail(mem, len(dec))
         mem.w32(ENTRY_POOL, at)
@@ -624,7 +667,8 @@ def mods_image(dec, mode="rgb", versions=False, pads=True,
 
 
 def build(stock, out, mode="rgb", banner="1.16", versions=True,
-          pads=True, log=print, extras=(), stick_loader=False):
+          pads=True, log=print, extras=(), stick_loader=False,
+          stock_only=False, boot_logo=None):
     h = hashlib.sha256(open(stock, "rb").read()).hexdigest()
     if h != OFFICIAL:
         raise SystemExit("REFUSED: not the official XDJ-700 v1.15 update file")
@@ -636,12 +680,25 @@ def build(stock, out, mode="rgb", banner="1.16", versions=True,
     dec = bytearray(L.decode(bytes(main.img[hdr + 4:hdr + 4 + ln])))
     stock_dec = bytes(dec)
     mem = SplitMem(dec)
-    if stick_loader:
+    if stock_only:
+        # A genuinely stock file: nothing of ours at all, not even the UTILITY
+        # rows. "Nothing ticked" was not enough -- it still baked the utility
+        # table and the boot copier (1,796 image bytes on 2026-11-07), so a
+        # deck "restored" that way still carries our code. Here the image is
+        # Pioneer's own and the only difference is the version number, which
+        # is what makes a deck that reports 1.16 accept it.
+        if stick_loader or extras or boot_logo:
+            raise SystemExit("REFUSED: --stock takes no other mod options")
+        log("no mods: stock firmware, only the version number changes "
+            "(mode / pads / versions are ignored)")
+    elif stick_loader:
         # stock + loader only: the stick's pack was recorded on a stock deck
         # and checks stock values before it writes anything
         bake_stickloader(mem, log)
     else:
         apply_mods(mem, mode, versions, pads, log, extras)
+    if boot_logo:
+        bake_boot_logo(mem, boot_logo, log)
     if mem.regions:
         if (mem.r32(ENTRY_POOL) != ENTRY_STUB or mem.r16(ENTRY_STUB) != 0x000B
                 or mem.r16(ENTRY_STUB + 2) != 0x0009):
@@ -876,7 +933,17 @@ def emu_check(upd, steps=6_000_000_000, log=print):
     import mysettings as MS
     ok = True
     jobs, extras = baked_jobs(dec)
-    checks = [("overview hook", m.mem.r32(RO.HOOK_POOL) == RO.CAVE),
+    # A --stock file bakes nothing of ours, so every hook must read exactly
+    # what the image itself says. Demanding our cave here made a genuine
+    # restore file fail its own boot test (2026-11-07, "overview hook").
+    stock_file = not jobs and not extras
+
+    def from_image(pool):
+        return struct.unpack_from("<I", dec, pool - BASE)[0]
+
+    checks = [("overview hook",
+               m.mem.r32(RO.HOOK_POOL) == (from_image(RO.HOOK_POOL)
+                                           if stock_file else RO.CAVE)),
               ("audio read hook as built (versions / stems / stock)",
                m.mem.r32(VR.HOOK) == struct.unpack_from("<I", dec, VR.HOOK - BASE)[0]
                in (VR.VCAVE, VR.FREAD, extras.get("stems", {}).get("sm_fread"))),
@@ -992,6 +1059,12 @@ def main():
     ap.add_argument("--stick-loader", action="store_true",
                     help="stock firmware + the USB-stick mods loader only "
                          "(mods then come from XDJMODS/PACK.BIN on the stick)")
+    ap.add_argument("--stock", action="store_true",
+                    help="genuinely stock firmware with only the version number "
+                         "changed -- the way back from a modded build")
+    ap.add_argument("--boot-logo", metavar="PICTURE",
+                    help="your own boot logo (any image; fitted into 600x100 "
+                         "on black). Only a flashed update shows it")
     ap.add_argument("--i-know-flashing-can-brick", action="store_true",
                     help="REQUIRED to write a file: flashing the wrong file, "
                          "or losing power mid-flash, can leave the deck "
@@ -1007,7 +1080,8 @@ def main():
     extras = EXTRAS if a.extras == "all" else tuple(x for x in a.extras.split(",") if x)
     build(a.files[0], a.files[1], a.mode, a.banner,
           not a.no_versions, not a.no_pads, extras=extras,
-          stick_loader=a.stick_loader)
+          stick_loader=a.stick_loader, stock_only=a.stock,
+          boot_logo=a.boot_logo)
     print("RESULT: built. Boot-tested in the emulator only -- this build has not "
           "been flashed by this project (a tester flashed a v1.16 build of this "
           "family on a real deck). Boot-test: permanent_build.py --emu", a.files[1])

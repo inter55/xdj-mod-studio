@@ -737,10 +737,14 @@ static void __attribute__((noinline, optimize("Os"))) letter(u16 *lay, int strid
      * the stock strip ourselves: rows PAD_Y+4..+7, x px+5..px+93, the exact
      * pixels of a lit stock pad (emulator capture); state 3 stays as it is, so
      * the press still loads the right cue. */
-    if (rec) {
-        /* REC record mode: all three pads lit RED, as stock A-C light up in
-         * it (manual). The pad is fully repainted above, so this replaces
-         * the green cue-set strip while the mode is on.
+    if (rec && !have) {
+        /* REC record mode: the pads that have NOTHING on them go red ("touch
+         * here to record"). A pad that holds a cue keeps its green set strip
+         * instead -- 2026-11-20 (deck: "it sets it u just cant see it"): with
+         * every pad red, the pad you had just recorded still looked empty
+         * until the mode was closed, so the store looked like it had failed.
+         * The pad is fully repainted above, so this replaces the green
+         * cue-set strip while the mode is on.
          * 2026-11-18 (deck: "why is it orange and red when you click rec?"):
          * the shade was made by subtracting 0x0200/0x0400 per row, which in
          * RGB565 borrows out of the RED field into GREEN (0xF800 - 0x0200 =

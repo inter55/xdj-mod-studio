@@ -515,3 +515,31 @@ Not covered by this run: the LINK colour fallback (no second Pro DJ Link
 player was available; recorded as untested) and a pad-colour comparison
 against stock orange (the user reported red, the 2026-11-18 orange report
 was not repeated).
+
+## 12. 2026-11-20 follow-ups from the 1.1.1 deck look
+
+Three deck reports on the shipped 1.1.1 build, in the order they came:
+
+1. **"the DEF text is going red too, only the top bit should"** — record mode
+   was recolouring the pad letters as well as the strip. `letter()` now keeps
+   `fg = 0xFFFF`; only rows `PAD_Y+4..+7` go red. **In 1.1.1**, and seen
+   working on the deck by the user ("it works").
+2. **"shouldn't we have a symbol on the empty pad? ... blank one after H"** —
+   the G-H page carries two cues, so its third pad was repainted and then
+   skipped (`idx > 7` returned early), leaving a bare face. `letter()` now
+   paints a short white dash there. **In 1.1.1**, seen on the deck.
+3. **"no, like it sets it u just cant see it"** — the real answer to "it
+   doesn't work until I click REC to close": the cue WAS being stored, but
+   record mode painted all three strips red, so a pad that had just recorded
+   looked empty until the mode was closed. Now only EMPTY pads go red; a pad
+   that holds a cue keeps its green set strip, so the store is visible while
+   the mode is still armed. **NOT on a deck and not in any release yet:** the
+   deck dropped off USB before this build could be installed (the installer
+   refused with `found 0 shell interface(s)`, and two waits of 80 s and 150 s
+   never brought it back). Gate `hcpad_test` PASS (REC arm, pad store at the
+   playhead with E/F untouched, swipe-from-REC pages and stores nothing,
+   A-C restore) — emulator-passed only.
+
+Still open from the same session: the **waveform marker says A** for a cue
+recorded as D (the deck's own slot name; see §11), which needs a hook in the
+waveform marker painter — queued as a later release, unstarted.

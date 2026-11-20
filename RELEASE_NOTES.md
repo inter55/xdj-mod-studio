@@ -1,3 +1,20 @@
+# XDJ Mod Studio v1.1.2
+
+Install the mods again after updating (cable, USB-stick file or a flash).
+
+## Hot cues D–H
+
+- **You can see the cue you have just recorded.** While the deck was in
+  record mode all three strips were red, so a pad you had just recorded on
+  still looked empty until you left the mode — the cue really was stored, it
+  just could not be seen. Now the pads that hold nothing go red ("touch here
+  to record") and a pad that holds a cue keeps its green set strip, so the cue
+  shows up the moment you record it.
+
+Emulator-tested only: the deck was off USB when this build went out, so this
+one change has not been run on hardware yet. Everything else is the 1.1.1
+build that was checked on the deck.
+
 # XDJ Mod Studio v1.1.1
 
 Install the mods again after updating (cable, USB-stick file or a flash).

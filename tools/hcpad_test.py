@@ -13,6 +13,8 @@ the deck's 150 ms tap/hold window would close after ~25 ms of emulated time:
     HP_CFLAGS="-DHOLD_MS=900u -DREC_GAP_MS=2400u" sh tools/hcpad/build.sh
 (then rebuild without it for the deck). PASS 2026-11-13: tap A, swipe left
 -> D-F with no jump, tap D, hold E, swipe right -> A-C, tap A.
+2026-11-18: REC on pages 2/3 arms the deck's record mode (no cue on the REC
+tap alone, the pad press stores); a slide that starts on REC pages instead.
 """
 import os
 import sys
@@ -120,30 +122,66 @@ def main():
     check("tap pad 1 -> D (29 s)", 29, 1)
     tap(PAD_X[1], ROW, hold=200_000_000)
     check("hold pad 2 -> E (37 s)", 37, 1)
-    # REC on page 2: empty the D slot (as if D were never set), tap REC ->
-    # D is set at the playhead (RAM only), REC no longer greyed out
+    # REC on pages D-F / G-H is the deck's own RECORD MODE (manual, Setting
+    # Hot Cue: touch REC, the pads light red, then touch the pad at the point;
+    # touch REC again to leave). 2026-11-18 deck report: "click REC and swipe
+    # creates a D cue without clicking D" -- so a REC tap alone must store
+    # NOTHING, and a slide from REC must page instead of pressing it.
     SLOTS = 0x0B6C4118
-    mem.w16(SLOTS + 0x08, 0); mem.w32(SLOTS + 0x0C, 0xFFFFFFFF)
-    here = mem.r32(POS)
-    tap(500, ROW)
-    st, ms = mem.r16(SLOTS + 0x08), mem.r32(SLOTS + 0x0C)
-    good = st not in (0, 0xFFFF) and abs(ms - here * 20 // 3) < 2000 and v("hp_recs") == 1
-    print(f"REC on page 2 -> D set at the playhead: state {st:#x} ms {ms} (playhead "
-          f"{here * 20 // 3} ms) recs {v('hp_recs')}  {'ok' if good else 'WRONG'}")
+    arm = lambda: mem.r32(hs["hc_recarm"])      # noqa: E731
+
+    def snap():                    # (state, ms) of the three live slots
+        return [(mem.r16(SLOTS + k * 0x40 + 0x08),
+                 mem.r32(SLOTS + k * 0x40 + 0x0C)) for k in range(3)]
+
+    before, r0 = snap(), v("hp_recs")
+    tap(500, ROW)                               # REC: record mode on
+    good = arm() == 1 and snap() == before and v("hp_recs") == r0 + 1
+    print(f"REC tap on page 2 -> record mode on, cues unchanged "
+          f"{snap() == before}, recs +{v('hp_recs') - r0}  {'ok' if good else 'WRONG'}")
     ok &= good
+    tap(500, ROW)                               # REC again: leave the mode
+    good = arm() == 0 and snap() == before and v("hp_recs") == r0 + 2
+    print(f"REC again -> record mode off, cues unchanged {snap() == before}  "
+          f"{'ok' if good else 'WRONG'}")
+    ok &= good
+    # armed + pad press: THAT pad is stored at the playhead (RAM only)
+    tap(500, ROW)                               # arm
+    here, c0 = mem.r32(POS), mem.r32(hs["hc_recs"])
+    tap(PAD_X[0], ROW)
+    st, ms = snap()[0]
+    rest = snap()[1:] == before[1:]
+    good = (st not in (0, 0xFFFF) and abs(ms - here * 20 // 3) < 2500
+            and mem.r32(hs["hc_recs"]) == c0 + 1 and arm() == 1 and rest)
+    print(f"record mode + pad 1 -> D set at the playhead: state {st:#x} ms {ms} "
+          f"(playhead {here * 20 // 3} ms) hc_recs +{mem.r32(hs['hc_recs']) - c0}, "
+          f"E/F untouched {rest}  {'ok' if good else 'WRONG'}")
+    ok &= good
+    tap(500, ROW)                               # leave record mode
+    # a swipe that STARTS on REC pages, and stores nothing
+    r0, c0 = v("hp_recs"), mem.r32(hs["hc_recs"])
+    touch([(500, ROW), (470, ROW), (440, ROW), (410, ROW)])
+    good = (mem.r8(PP.HCPAGE) == 2 and arm() == 0 and v("hp_recs") == r0
+            and mem.r32(hs["hc_recs"]) == c0)
+    print(f"swipe starting on REC -> page index {mem.r8(PP.HCPAGE)}, no store "
+          f"(recs +{v('hp_recs') - r0}, cues +{mem.r32(hs['hc_recs']) - c0})  "
+          f"{'ok' if good else 'WRONG'}")
+    ok &= good
+    touch([(200, ROW), (230, ROW), (260, ROW), (290, ROW), (320, ROW)])
+    check("swipe right -> page 2 again", page=1)
     # one REC press that the panel reports as three quick presses (deck
-    # 2026-11-16: "it made 3 cues") must set ONE cue
-    for k in (0, 1, 2):
-        mem.w16(SLOTS + k * 0x40 + 0x08, 0); mem.w32(SLOTS + k * 0x40 + 0x0C, 0xFFFFFFFF)
-    r0 = v("hp_recs")
+    # 2026-11-16: "it made 3 cues") must change the mode ONCE
+    before, r0 = snap(), v("hp_recs")
     for _ in range(3):
         tap(500, ROW, hold=8_000_000, after=10_000_000)
     run(150_000_000)
-    setn = sum(1 for k in range(3) if mem.r16(SLOTS + k * 0x40 + 0x08) not in (0, 0xFFFF))
-    good = setn == 1 and v("hp_recs") == r0 + 1 and v("hp_recbounce") >= 1
-    print(f"REC pressed 3x in a burst -> {setn} cue set, recs +{v('hp_recs') - r0}, "
-          f"bounces ignored {v('hp_recbounce')}  {'ok' if good else 'WRONG'}")
+    good = (arm() == 1 and snap() == before and v("hp_recs") == r0 + 1
+            and v("hp_recbounce") >= 1)
+    print(f"REC pressed 3x in a burst -> armed {arm()}, cues unchanged "
+          f"{snap() == before}, recs +{v('hp_recs') - r0}, bounces ignored "
+          f"{v('hp_recbounce')}  {'ok' if good else 'WRONG'}")
     ok &= good
+    tap(500, ROW)                               # leave record mode again
     touch([(200, ROW), (230, ROW), (260, ROW), (290, ROW), (320, ROW)])
     check("swipe right -> page 1", page=0)
     run(30_000_000)
@@ -153,6 +191,8 @@ def main():
           f"(rewrites {v('hp_lblw')}, refusals {v('hp_lblbad')})")
     ok &= back and v("hp_lblbad") == 0
     tap(PAD_X[0], ROW)
+    # every pad was touched on page 2, so the return to page 1 must make it
+    # reload (hcpad_test 2026-11-18: without that, A played D after a REC store)
     check("tap pad 1 -> A again", 5, 0)
     print("RESULT:", "PASS" if ok else "FAIL")
     return 0 if ok else 1

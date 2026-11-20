@@ -457,6 +457,7 @@ dialog h2 { font-size: 16px; margin-bottom: 6px; }
         </div></div>
         <div class="row" style="margin-top:12px;flex-wrap:wrap"><button class="btn primary" id="stickpack">Write mods to my stick</button></div>
         <div class="small faint" style="margin-top:8px">About 5 minutes. Changed your mods? Rewrite the file — no reflashing.</div>
+        <div class="small faint" style="margin-top:6px">The deck only reads this file once step 1 is on it (UTILITY shows 1.16 or higher). A deck still showing <b>1.15</b> ignores it completely — that is not a broken file.</div>
         <div class="small faint" style="margin-top:10px">No flash at all? <a href="#" id="stickarm">Send the loader over the cable</a> — once per power-on, nothing permanent.</div>
       </div>
       <div class="row" style="padding:2px 4px 0;flex-wrap:wrap;gap:8px">
@@ -1112,7 +1113,7 @@ $('#deckgo').onclick = async () => {
   // same session plan as the server (studio/app.py INSTALL_STEPS, ~50 s each)
   const mins = Math.round(((ST.surveyed ? 1 : 5) + 3 + 1 + 1 + 1 + 1 + 2 + (pads ? (stems ? 3 : 2) : 0) + (themes ? 4 : 0) + (liveks ? 2 : 0) + (touchfx ? 4 : 0) + (phase ? 3 : 0) + (flac ? (opus ? 5 : 2) : 0)) * 70 / 60);
   if (await ask('Install mods on the deck?',
-    `${parts.join(' · ')}. It takes about ${mins} minutes, plus the moment you eject the stick when asked. Keep the USB stick out of the deck until the log asks for it. Power-cycle the deck any time to go back to stock.`, 'Install'))
+    `${parts.join(' · ')}. It takes about ${mins} minutes, plus the moment you eject the stick when asked. Keep the USB stick out of the deck until the log asks for it. Nothing is written to the deck, so when it finishes the mods are in its memory: LEAVE THE DECK SWITCHED ON — switching it off returns it to stock.`, 'Install'))
     api('/api/deck/install', {mode: wave, pads, themes, liveks, touchfx, stems, phase, flac, opus}).then(r => r && watch());
 };
 

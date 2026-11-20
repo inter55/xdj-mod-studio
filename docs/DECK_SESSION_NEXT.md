@@ -63,9 +63,12 @@ the probe lines from Test 1 say why (see below).
 
 ## Test 3 -- optional, only if Test 1 was clean and there is time: INSTANT
 
-The rewrite on top of the clean build, now starting 2.1 s ahead of playback
-instead of 0.85 s so playback cannot catch it. Expect the mute after ~2 s.
-This kind of build has glitched on every visit so far.
+The rewrite on top of the clean build, now starting AT the playhead (8 blocks
+= 0.11 s ahead) instead of 2.1 s ahead -- that start distance, not the rewrite
+speed, was the whole "2 s" delay. Emulator: mute heard 0.09 s after the tap.
+The risk moved: the pass must now outrun playback from ~0.1 s of lead, so if
+the deck is slower than ~7 ms per block the drums come back for a moment
+(`drbump` > 0) instead of the mute arriving late.
 
 1. Power-cycle, stick OUT, wait 30 s. Then:
 
@@ -73,7 +76,10 @@ This kind of build has glitched on every visit so far.
    STEMS_BUILD=instant .venv/bin/python tools/deck_session.py --mode rgb --touchfx --phasemeter --no-flac
    ```
 
-2. Play for 30 s first, then tap DRUMS. Listen, then run the probe at once.
+2. Play for 30 s first, then tap DRUMS. Expect the drums gone almost at
+   once, with no return. Listen 30 s, then run the probe at once and note
+   `drbump`, `drblk`, `drms` from `tools/stems_mute_deck.py` (or the probe's
+   rewrite line). `drbump` 0 and a full window = the pass kept up.
 
 ## Test 3b -- optional, after Test 3: FAST (closest to instant)
 

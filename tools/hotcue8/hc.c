@@ -138,6 +138,8 @@ static const u8 KEY_BIT[3] = {0x40, 0x80, 0x01};
 /* state: every symbol comes BEFORE hc_count, because the installers zero
  * base..hc_count+4 and nothing past it */
 u32 hc_recs, hc_sets;                     /* cues set on the deck this track (diag) */
+u32 hc_recarm;                   /* 1 = REC record mode armed (pages 2/3) */
+u32 hc_p1r;                      /* page-1 restores (test/diag) */
 u32 hc_draws;
 static u32 hc_hash;
 static u8 hc_ram_set[8];         /* cue set on the deck (no export entry) */
@@ -155,6 +157,7 @@ static u8 hc_keyprev;            /* pad key bits seen on the last flush */
 u32 hc_view;                     /* 1 = all 8 pads (tap on the tab) */
 u32 hc_armed;                    /* 1 = the touch hook is installed */
 u32 hc_presses, hc_swallowed, hc_restores, hc_draws8;
+static u32 hc_pagewas;           /* page drawn last (0 = the stock A-C row) */
 static u32 hc_held;              /* 1 + pad index, or HG_DEAD */
 static u32 hc_bslot;             /* live slot the held pad borrows */
 static u32 hc_borrow;            /* 1 = hc_bslot holds borrowed bytes */
@@ -180,8 +183,15 @@ static u32 hc_cap;               /* 1 = hc_x* hold the loaded track's D-H */
 static u8 hc_xhave[8];
 static u32 hc_xms[8], hc_xloop[8];
 static u32 hc_p1ok;              /* 1 = hc_p1* hold the deck's page-1 bytes */
+/* 2026-11-18b (hcpad_test): a pad pressed on page 2/3 leaves the deck's
+ * engine holding THAT page's cue while PADST may read 1 (loaded) -- p1_restore
+ * then restored the saved page-1 state and the pad never reloaded, so A played
+ * D. Remember which pads were touched away from page 1 and make them reload. */
+u8 hc_p1used[3];
 static u32 hc_p1s[3][16];        /* live slots A-C */
 static u32 hc_p1m[2][3][14];     /* their pad-model records */
+static u32 hc_p1st[3];           /* their pad-state words (0 empty, 1 loaded) */
+static u32 hc_p1us[3];           /* ... and their triggered flags */
 u32 hc_caps;                     /* tracks captured (test/diag) */
 u32 hc_count;                    /* cues in the loaded track (test/diag) */
 
@@ -316,19 +326,48 @@ static void p1_save(void)
             hc_p1m[0][k][j] = R32(MODEL_A + k * MODEL_S + 4 * j);
             hc_p1m[1][k][j] = R32(MODEL_B + k * MODEL_S + 4 * j);
         }
+        hc_p1st[k] = R32(PADST + 4u * k);
+        hc_p1us[k] = R32(PADUSED + 4u * k);
     }
     hc_p1ok = 1;
 }
 
+/* 2026-11-18b (deck: "after paging back to A-B-C all three pads do the pause
+ * when pressed, then the next press is normal"): a pad at state 3 asks the
+ * deck to load its cue, and that load re-cues the track -- the pause. The
+ * pads are NOT loaded in the background (the poll loop is gated on PADREQ and
+ * PADEVAL, which nothing sets), so a pad that was never used while we were
+ * away still has its page-1 cue in the engine. Its state is also untouched:
+ * 3 when this module wrote a cue into it, 0 when the other page's pad is
+ * empty. In that case put back the state we saved (0 empty / 1 loaded)
+ * instead of asking for a reload; only a pad that was actually used keeps
+ * state 3 and reloads on its next press. */
 static void p1_restore(void)
 {
     if (!hc_p1ok) return;                  /* never left page 1 with data */
+    hc_p1r++;
     for (u32 k = 0; k < 3; k++) {
         for (u32 j = 0; j < 16; j++) R32(SLOTS + k * 0x40 + 4 * j) = hc_p1s[k][j];
-        pad_reload(k);
         for (u32 j = 0; j < 14; j++) {
             R32(MODEL_A + k * MODEL_S + 4 * j) = hc_p1m[0][k][j];
             R32(MODEL_B + k * MODEL_S + 4 * j) = hc_p1m[1][k][j];
+        }
+        /* the deck loads a pad only on a press, so a pad is still untouched
+         * while we are away when its word is 3 (we put it there) or 0 (the
+         * other page's pad is empty). Anything else (1 loaded, 5 loading)
+         * means it was used and now holds the other page's cue. */
+        u32 cur = R32(PADST + 4u * k);
+        int settled = (hc_p1st[k] == 0u || hc_p1st[k] == 1u) && !hc_p1used[k];
+        hc_p1used[k] = 0;
+        if (settled && (cur == 3u || cur == 0u)) {
+            R32(PADST + 4u * k) = hc_p1st[k];
+            R32(PADUSED + 4u * k) = hc_p1us[k];
+        } else {
+            pad_reload(k);
+            /* stay "load me": the engine still holds the other page's cue
+             * until the next press, so a second p1_restore (there are two
+             * ways back to page 1) must not claim this pad is loaded */
+            hc_p1st[k] = 3u;
         }
     }
 }
@@ -388,6 +427,7 @@ static void model_set(u32 base, u32 k, u32 n, u32 have, u32 ms, u32 loop,
 
 static void load_page(u32 page)
 {
+    hc_recarm = 0;                         /* record mode is per page */
     if (page == 0) {                       /* the deck's own A-C, as it had them */
         p1_restore();
         R8(HCPAGE) = 0;
@@ -420,12 +460,12 @@ static void load_page(u32 page)
  * stock handler runs unchanged (and finds nothing to recall on an empty
  * slot, exactly as before); a press on a set slot is not touched here. */
 /* store cue 3*page+k+1 at the playhead in slot k (RAM only); 0 = that
- * pad already holds a cue or is past H */
-static u32 set_pad(u32 k, u32 page, u32 pos)
+ * pad already holds a cue (unless force: REC record mode) or is past H */
+static u32 set_pad(u32 k, u32 page, u32 pos, u32 force)
 {
     u32 s = SLOTS + k * 0x40, n = 3 * page + k + 1;
     if (n > 8) return 0;
-    if (ST_SET(R16(s + 0x08))) return 0;         /* set: stock recall */
+    if (!force && ST_SET(R16(s + 0x08))) return 0;   /* set: stock recall */
     u32 ms = pos * 20u / 3u;                     /* 1/150 s -> ms */
     hc_ram_set[n - 1] = 1;
     hc_ram_ms[n - 1] = ms;
@@ -459,26 +499,41 @@ static void scan_pads(void)
      * (same hardware-only class as the phase meter's POSL read). */
     u32 pos = R32(UNCACHED(POS150));
     if (pos == 0xFFFFFFFFu) return;                  /* no playhead yet */
-    for (u32 k = 0; k < 3; k++)
-        if (rise & (1u << k))
-            set_pad(k, page, pos);
+    for (u32 k = 0; k < 3; k++) {
+        if (!(rise & (1u << k))) continue;
+        hc_p1used[k] = 1;                  /* used away from page 1 */
+        if (set_pad(k, page, pos, hc_recarm) && hc_recarm) hc_recs++;
+    }
 }
 
 /* 2026-11-13 (deck): REC on pages D-F / G-H was greyed out and did nothing,
- * so "impossible to record the new hot cues". REC there now sets the FIRST
- * EMPTY pad of the page at the playhead (what stock REC does for A-C), in
- * RAM like a press on an empty pad -- the stick is never written. Called by
- * the hot cue swipe module (tools/hcpad) on a REC tap. 1 = a cue was set. */
-u32 hc_rec(void)
+ * so "impossible to record the new hot cues".
+ * 2026-11-18b (deck: "click REC and it creates a D cue without clicking D"):
+ * stock REC is a MODE on this deck (manual, Setting Hot Cue: touch REC, the
+ * A/B/C pads light red, then touch the pad at the point to record; touch REC
+ * again to leave). So REC here only arms/disarms that mode -- nothing is
+ * written until a pad is pressed. Called by the hot cue swipe module
+ * (tools/hcpad) on a REC tap (k > 2) and on a pad press while armed
+ * (k = 0..2): the pad press is stored HERE, at the playhead, in RAM (the
+ * stick is never written), and the swipe module swallows it so the stock
+ * pad does not recall anything -- stock record mode does not recall either.
+ * Storing from the touch chain also avoids the two-frame forwarded-press
+ * window that scan_pads would have to catch. 1 = mode changed / cue set. */
+u32 hc_rec(u32 k)
 {
     u32 page = R8(HCPAGE);
     if (!page || page >= HCPAGES) return 0;
     if (R8(MSOFF) || R32(MODEW) != 7 || R8(PMODE) != 0) return 0;
+    if (k > 2u) {                          /* REC tap: record mode on/off */
+        hc_recarm = hc_recarm ? 0 : 1;
+        return 1;
+    }
+    if (!hc_recarm) return 0;
     u32 pos = R32(UNCACHED(POS150));
     if (pos == 0xFFFFFFFFu) return 0;
-    for (u32 k = 0; k < 3; k++)
-        if (set_pad(k, page, pos)) { hc_recs++; return 1; }
-    return 0;
+    if (!set_pad(k, page, pos, 1)) return 0;
+    hc_recs++;
+    return 1;
 }
 
 /* ------------------------------------------------------- 8-pad view ---- */
@@ -645,7 +700,7 @@ static u16 mix(u16 bg, u16 fg, int a)          /* a 0..32 */
     return (u16)(r << 11 | g << 5 | b);
 }
 
-static void __attribute__((noinline, optimize("Os"))) letter(u16 *lay, int stride, int k, int idx, int have)
+static void __attribute__((noinline, optimize("Os"))) letter(u16 *lay, int stride, int k, int idx, int have, int rec)
 {
     int px = PAD_X[k], cx = px + PAD_W / 2, cy = PAD_Y + PAD_H / 2;
     /* Repaint the whole pad face. A 26x22 box over the middle left the
@@ -664,7 +719,17 @@ static void __attribute__((noinline, optimize("Os"))) letter(u16 *lay, int strid
         for (int x = px + 3 + 24; x < px + PAD_W - 3; x++)
             row[x] = row[px + 3 + ((x - px - 3) % 24)];
     }
-    if (idx < 0 || idx > 7) return;
+    if (idx < 0 || idx > 7) {
+        /* 2026-11-20 (user: "shouldn't we have a symbol on the empty pad?
+         * ... blank one after H"): the G-H page carries only two cues, so its
+         * third pad has no letter -- the face repaint above left it bare.
+         * A short white dash says "nothing here", in the letters' colour. */
+        for (int y = cy - 1; y <= cy + 1; y++) {
+            u16 *row = lay + y * stride;
+            for (int x = cx - 7; x <= cx + 7; x++) row[x] = 0xFFFF;
+        }
+        return;
+    }
     /* 2026-11-17 (deck): a cue set on D-H stays pad state 3 ("load on
      * press"); the firmware draws the green "cue set" strip only for state 1
      * (loaded), and the only stock way there (PADREQ 0x0B6C42C8 = 1 + PADEVAL
@@ -672,7 +737,22 @@ static void __attribute__((noinline, optimize("Os"))) letter(u16 *lay, int strid
      * the stock strip ourselves: rows PAD_Y+4..+7, x px+5..px+93, the exact
      * pixels of a lit stock pad (emulator capture); state 3 stays as it is, so
      * the press still loads the right cue. */
-    if (have && R32(PADST + 4u * (u32)k) != 1u) {
+    if (rec) {
+        /* REC record mode: all three pads lit RED, as stock A-C light up in
+         * it (manual). The pad is fully repainted above, so this replaces
+         * the green cue-set strip while the mode is on.
+         * 2026-11-18 (deck: "why is it orange and red when you click rec?"):
+         * the shade was made by subtracting 0x0200/0x0400 per row, which in
+         * RGB565 borrows out of the RED field into GREEN (0xF800 - 0x0200 =
+         * 0xF600 = orange). Shades now step the red field itself (0x0800),
+         * so every row stays pure red; the edge columns use the same step. */
+        for (int r = 0; r < 4; r++) {
+            u16 *row = lay + (PAD_Y + 4 + r) * stride + px;
+            u16 g = (u16)(0xF800 - r * 0x0800 - (r == 3 ? 0x1000 : 0));
+            for (int x = 5; x <= 93; x++) row[x] = g;
+            row[5] = row[93] = (u16)(g - 0x0800);
+        }
+    } else if (have && R32(PADST + 4u * (u32)k) != 1u) {
         /* green 202,215,227,247 (G6 50,53,56,61); edge columns dimmer */
         for (int r = 0; r < 4; r++) {
             u16 *row = lay + (PAD_Y + 4 + r) * stride + px;
@@ -681,7 +761,11 @@ static void __attribute__((noinline, optimize("Os"))) letter(u16 *lay, int strid
             row[5] = row[93] = (u16)(g - 0x0100);
         }
     }
-    u16 fg = 0xFFFF;      /* white, set or empty, like stock A B C (2026-11-16) */
+    /* White, set or empty, like stock A B C (2026-11-16).
+     * 2026-11-20 (deck: "the DEF text is going red too, only the top bit
+     * should"): record mode reddens the TOP STRIP only -- the letter keeps
+     * its stock white, as on A-C. */
+    u16 fg = 0xFFFF;
     int w = gl_w[idx], gx = cx - w / 2, gy = cy - GL_H / 2 + 1;   /* stock row */
     for (int y = 0; y < GL_H; y++) {
         u16 *row = lay + (gy + y) * stride;
@@ -745,13 +829,16 @@ void hc_hook(u32 dev, u32 req)
     if (h != hc_hash) {                 /* new track: firmware loaded A-C */
         hc_hash = h;
         R8(HCPAGE) = 0;
+        hc_pagewas = 0;
         hc_view = 0;                    /* a new track = the stock row */
         hc_borrow = 0;
         hc_restore = 0;
         hc_held = 0;
+        hc_recarm = 0;
         for (u32 i = 0; i < 8; i++) hc_ram_set[i] = 0;   /* drop deck cues */
         hc_cap = 0; hc_st = 4;                     /* D-H: prove the ctx again */
         hc_p1ok = 0;
+        for (u32 i = 0; i < 3; i++) hc_p1used[i] = 0;
         hc_count = cue_count();
     }
     /* page 1 showing and nothing borrowed: the live slots are the deck's own
@@ -760,6 +847,15 @@ void hc_hook(u32 dev, u32 req)
         p1_save();
         capture();
     }
+    /* record mode lives on a page of the PERFORM hot cue screen and nowhere
+     * else: another page, screen, mode or the TOUCH FX panel cancels it, so
+     * a pad press there can never store a cue by accident */
+    if (R8(MSOFF) || R32(MODEW) != 7 || R8(PMODE) != 0 || R8(HCPAGE) == 0
+#ifdef TFX_MODE
+        || R32(TFX_MODE)
+#endif
+       )
+        hc_recarm = 0;
     scan_pads();
     if (R8(HCPAGE) >= HCPAGES) {        /* uninitialised page byte: never
                                          * letter the pads off a bad page */
@@ -770,6 +866,7 @@ void hc_hook(u32 dev, u32 req)
      * engine may still be reading the slot on the release frame) */
     if (hc_restore && !hc_held && --hc_restore == 0) restore_slot();
     u32 page = R8(HCPAGE);
+    if (page) hc_pagewas = page;       /* remember what the pads are showing */
     if (R8(MSOFF) || R32(MODEW) != 7 || R8(PMODE) != 0) return;
 #ifdef TFX_MODE
     /* 2026-11-16 (deck): TOUCH FX open = its panel covers the pad row; the
@@ -777,7 +874,12 @@ void hc_hook(u32 dev, u32 req)
     if (R32(TFX_MODE)) return;
 #endif
 #ifndef HC_GRID
-    if (!page) return;
+    /* 2026-11-18 (deck: "switching pages makes the A-B-C cues disappear"):
+     * page 2/3 are repainted by this module, and a deck that does not redraw
+     * the stock row by itself then keeps showing the empty paged faces after
+     * the page goes back to A-C. On the way back, repaint the stock row
+     * (the same letters, cue strips and texture the pages use). */
+    if (!page && hc_pagewas == 0) return;
 #else
     if (!page && !hc_view) return;
 #endif
@@ -793,13 +895,24 @@ void hc_hook(u32 dev, u32 req)
         for (int i = 0; i < 8; i++)
             pad8(lay, stride, i, have_cue(i + 1), hc_held == (u32)(i + 1));
         hc_draws8++;
+        hc_pagewas = 0;
+        return;
+    }
+#endif
+#ifndef HC_GRID
+    if (!page) {                     /* back on A-C: put the stock row back */
+        for (int k = 0; k < 3; k++)
+            letter(lay, stride, k, k, have_cue(k + 1), 0);
+        hc_draws++;
+        hc_pagewas = 0;
         return;
     }
 #endif
     for (int k = 0; k < 3; k++) {
         int n = 3 * (int)page + k;                 /* 0-based letter */
-        letter(lay, stride, k, n < 8 ? n : -1, have_cue(n + 1));
+        letter(lay, stride, k, n < 8 ? n : -1, have_cue(n + 1), (int)hc_recarm);
     }
-    /* REC now works on these pages (hc_rec, via tools/hcpad): not greyed */
+    /* REC works on these pages (hc_rec, via tools/hcpad): a REC tap arms the
+     * record mode and the pads light red until a pad stores at the playhead */
     hc_draws++;
 }

@@ -12,6 +12,7 @@ cd "$ROOT/tools/centre"
   -DCTX_TAB=${CTX_TAB:?}u -DIDX_OFF=${IDX_OFF:?}u -DTAG_PWV5=${TAG_PWV5:?}u \
   -DTAG_PWV7=${TAG_PWV7:?}u -DSLOT7=${SLOT7:?}u -DSLOT7_MAX=${SLOT7_MAX:?}u \
   -DTS_DATA=${TS_DATA:-0x09779000}u -DTS_END=${TS_END:-0x09790000}u \
+  -DPAL_LO=${PAL_LO:-0x0E7355E0}u -DPAL_HI=${PAL_HI:-0x0E736170}u \
   -ffunction-sections -fdata-sections -nostdlib -Wl,--gc-sections -Wl,-e,_cw_col -Wl,-u,_cw_col2 \
   -Wl,-Ttext=$BASE \
   -o "$OUT/cw.elf" cw.c -lgcc

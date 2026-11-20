@@ -1,3 +1,59 @@
+# XDJ Mod Studio v1.1.1
+
+Install the mods again after updating (cable, USB-stick file or a flash).
+
+## Hot cues D–H
+
+- **The A–C pads stay on screen now.** Coming back from D–F or G–H could
+  leave the empty paged pads showing even though the cues were still there
+  (your deck does not redraw that row by itself). The mod repaints it once,
+  on the way back.
+- **No pause on the first press.** Paging back marked all three pads "load
+  me", so the first press re-cued the track. Now only a pad you actually
+  used on the other page is reloaded; the others keep what they had.
+- **REC is the deck's own record mode.** Touching REC puts the deck in its
+  record mode (the top strip of the three pads turns red) and stores nothing
+  by itself; touch a pad to record that pad at the playhead; touch REC again
+  to leave. That also fixes "touch REC and swipe
+  set a D cue by itself" — a swipe that starts on REC now pages instead.
+- **The spare pad on the G–H page shows a dash.** That page holds only two
+  cues, so the third pad used to come out as a completely blank face.
+- **Only the top strip turns red while recording**, the way the pads show
+  it on A–C, and the pad letters stay white — they were going red along with
+  the strip. The strip itself is red, not orange: its shading was being taken
+  out of the wrong colour field, so the lower rows came out orange.
+
+## Waveforms
+
+- **LINK tracks stay blue.** A track loaded over Pro DJ Link has no colour
+  data of its own, so the deck drew it from the palettes the theme
+  rewrites — the waveforms came out in the theme colour. With RGB or 3-BAND
+  selected the fallback is the deck's blue again; only BLUE/THEME follows
+  the theme, which is what that label promises.
+
+## App
+
+- **The cable install says what it is.** Before it runs, and again when it
+  finishes, the log says that the mods go into the deck's memory only, that
+  the deck must stay switched on, and where to look (hold MENU › UTILITY,
+  scroll to the end; PERFORM for the pads and TOUCH FX; UTILITY › THEME).
+  The activity note ends with "Installed -- leave the deck switched on"
+  instead of "Finished".
+- **USB-stick page:** step 2 now says that a deck still showing **1.15** in
+  UTILITY ignores the mods file completely — that is what step 1 (or "Send
+  the loader over the cable") is for. A deck with the reader shows 1.16 or
+  higher.
+
+## Tested how
+
+- Emulator gates: `hcpad_test`, `hotcue8_repaint_test`, `hotcue8_test`,
+  `hotcue8_browse_test`, `hotcue8_jump_emu`, `touchfx_hc_test`,
+  `theme_wave_test` (LINK stays stock blue), `cw_unit_test` (theme tint on,
+  LINK fallback stock).
+- The two new hot-cue modules were installed on a real XDJ-700 and read
+  back byte for byte before the tap check; the deck result is recorded in
+  `docs/HOTCUE8_GRID.md` §10.
+
 # XDJ Mod Studio v1.1
 
 Install the mods again after updating (cable, USB-stick file or a flash).

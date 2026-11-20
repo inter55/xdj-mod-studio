@@ -42,7 +42,8 @@ def build():
                IDX_OFF="0x13B8", TAG_PWV5=hex(TAG_PWV5),
                TAG_PWV7=hex(TAG_PWV7),
                SLOT7="0x0B500000", SLOT7_MAX="0x10000",
-               TS_DATA=hex(TS_ADDR), TS_END=hex(TS_ADDR + 0x8000))
+               TS_DATA=hex(TS_ADDR), TS_END=hex(TS_ADDR + 0x8000),
+               PAL_LO=hex(PAL[0]), PAL_HI=hex(PAL[0] + 0x1000))
     subprocess.run(["sh", "tools/centre/build.sh"], check=True, env=env,
                    capture_output=True, cwd=ROOT)
     syms = {n.lstrip("_"): int(a, 16) for a, _, n in
@@ -69,21 +70,34 @@ def pwv7_section(entries3, count=None):
 STUB = struct.pack("<4H", 0x400B, 0x0009, 0x000B, 0x0009)   # jsr @r0; nop; rts; nop
 
 
-def theme_blob(maps, cur):
+PAL = (0x0B460000, 0x0B460002, 0x0B460004)   # sandbox "blue palettes"
+
+
+def theme_blob(maps, cur, wave=None):
     """Fake ts.c blob: S = sorted stock colours, one D row per theme.
-    maps = list of {stock_colour: theme_colour}."""
+    maps = list of {stock_colour: theme_colour}; wave = (n, m, addrs, rows)
+    fills the +68 waveform table (tools/theme_switch.py wave_section)."""
     s = sorted({c for m in maps for c in m})
     nt = len(maps)
     ns = len(s)
-    hdr_len = 56
-    s_off = hdr_len
+    s_off = 80                                 # +16 reg_off, +20 s_off
     d_off = s_off + 2 * ns
-    b = bytearray(b"\0" * (d_off + 2 * nt * ns))
+    end = d_off + 2 * nt * ns
+    wb = b""
+    if wave:
+        n, m, addrs, rows = wave
+        wb = (struct.pack("<II", n, m) + struct.pack(f"<{n}I", *addrs) +
+              b"".join(struct.pack(f"<{m}H", *r) for r in rows))
+    b = bytearray(b"\0" * (end + len(wb)))
     struct.pack_into("<I", b, 0, struct.unpack("<I", b"XTSW")[0])
     struct.pack_into("<III", b, 4, 1, ns, nt)
-    struct.pack_into("<I", b, 16, s_off)
+    struct.pack_into("<I", b, 16, 72)           # reg_off (no regions here)
+    struct.pack_into("<I", b, 20, s_off)
     struct.pack_into("<I", b, 24, d_off)
     b[32] = cur
+    if wave:
+        struct.pack_into("<I", b, 68, end)
+        b[end:] = wb
     for i, v in enumerate(s):
         struct.pack_into("<H", b, s_off + 2 * i, v)
     for t, m in enumerate(maps):
@@ -135,6 +149,17 @@ def col(binimg, syms, entries, rate, first, step):
     tbl = syms["cw_tbl"]
     colours = [mem.r16(tbl + 2 * k) for k in range(min(rows or 0, 64))]
     return rows, colours
+
+
+def pal_run(binimg, syms, mode, ts, pal):
+    """cw_col(0, 1, 0) with the given waveform mode, theme blob and palette
+    words; returns the palette words afterwards."""
+    mem_data = {CW_BASE: binimg, MODE_ADDR: bytes([mode]), TS_ADDR: ts}
+    for a, v in pal.items():
+        mem_data[a] = struct.pack("<H", v)
+    c, mem, _ = run_code(STUB, regs={0: syms["cw_col"], 4: 0, 5: 1, 6: 0},
+                         data=mem_data, limit=5_000_000)
+    return {a: mem.r16(a) for a in pal}
 
 
 def expected(entries, first, step):
@@ -190,8 +215,32 @@ def main():
         if got != want or r0 != r1 or r0 != r2 or not c0:
             bad += 1
             print(f"FAIL {tag}: got {got[:6]} rows {r0}/{r1}/{r2}")
+    # 4. LINK fallback (2026-11-18): a track with no colour data draws the
+    #    deck's own blue. The theme row may only tint it in BLUE/THEME (0).
+    stock = [0x0010, 0x0210, 0x0410]
+    theme = [0x1234, 0x2345, 0x3456]
+    wave = (3, 6, PAL, [stock + [C_CORE, C_MIDC, C_OUTER],
+                        theme + [0x1111, 0x2222, 0x3333]])
+    wts = theme_blob([tint], 1, wave)
+    for mode, want in ((1, stock), (2, stock), (0, theme)):
+        got = pal_run(binimg, syms, mode, wts, dict(zip(PAL, theme)))
+        if [got[a] for a in PAL] != want:
+            bad += 1
+            print(f"FAIL LINK palette mode {mode}: "
+                  f"{[hex(got[a]) for a in PAL]} != {[hex(v) for v in want]}")
+    got = pal_run(binimg, syms, 0, wts, dict(zip(PAL, stock)))   # already stock
+    if [got[a] for a in PAL] != theme:
+        bad += 1
+        print(f"FAIL LINK palette BLUE from stock: {[hex(got[a]) for a in PAL]}")
+    foreign = dict(zip(PAL, theme))
+    foreign[PAL[1]] = 0x7777
+    got = pal_run(binimg, syms, 1, wts, foreign)
+    if got[PAL[0]] != stock[0] or got[PAL[1]] != 0x7777 or got[PAL[2]] != stock[2]:
+        bad += 1
+        print(f"FAIL LINK foreign palette word: {[hex(got[a]) for a in PAL]}")
     print(f"cw unit: {'PASS' if not bad else f'{bad} FAILURES'} "
-          f"(count {N}, wrap 34464, theme tint {'on' if c1 != c0 else 'OFF'})")
+          f"(count {N}, wrap 34464, theme tint {'on' if c1 != c0 else 'OFF'}, "
+          f"LINK fallback {'stock' if not bad else '?'})")
     return 1 if bad else 0
 
 

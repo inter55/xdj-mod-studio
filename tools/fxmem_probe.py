@@ -79,9 +79,17 @@ def ring_build():
     return int(b, 0), int(f)
 
 
-def ring_fits(frames):
-    """A stereo float ring needs 2 words per frame; one page is 4,096."""
-    return 0 < frames and frames * 2 <= PAGE_WORDS
+def ring_fits(base, frames, page=PAGE):
+    """2 words per frame, and the ring must lie inside a region this probe
+    walks every word of: the 52 KB block for the shipping engine, or the one
+    page a short fallback ring would live on. (The old check demanded a page
+    for every ring, which refused the shipping 6,500-frame geometry.)
+    """
+    if frames <= 0:
+        return False
+    if base == BLK_LO:
+        return base + frames * 8 <= BLK_HI
+    return page <= base and base + frames * 8 <= page + PAGE_WORDS * 4
 
 
 def write_ring_ok(base, frames):
@@ -132,11 +140,16 @@ def main():
             page = int(sys.argv[i + 1], 0)
     if ring:
         page, frames = ring_build()
-        if not ring_fits(frames):
-            sys.exit(f"REFUSED: the built ring is {frames * 8} B but one page "
-                     f"is {PAGE_WORDS * 4} B. Rebuild shorter: "
-                     f"FX_RING_FRAMES={PAGE_WORDS // 2} sh tools/fx_dsp/build.sh")
+        if not ring_fits(page, frames):
+            sys.exit(f"REFUSED: the built ring is {frames * 8} B at "
+                     f"{page:#010x} and does not fit a region this probe "
+                     f"walks every word of ({BLK_LO:#010x}..{BLK_HI:#010x} "
+                     f"= {(BLK_HI - BLK_LO) // 8} frames, or one "
+                     f"{PAGE_WORDS * 4} B page = {PAGE_WORDS // 2} frames).")
         print(f"ring {page:#010x}, {frames} frames ({frames * 8} B)")
+        rbase = page          # keep the ring base: 'page' is reused below
+    else:
+        rbase = None
     S = syms()
     base, blob = S["sv_entry"], open(BIN, "rb").read()
     if base != 0x09800000:
@@ -274,9 +287,18 @@ def main():
             print("RESULT: FAIL - the survey did not complete (nothing was "
                   "written to the DSP; power-cycle if the deck looks odd)")
             return 1
-        if slow == 0:
+        if ring:
+            taken = slow if rbase == BLK_LO else pnz
+            if taken:
+                where = (f"block 0x{BLK_LO:08X}..0x{BLK_HI:08X}"
+                         if rbase == BLK_LO else f"page 0x{rbase:08X}")
+                print(f"RESULT: IN USE - do NOT ship Echo to this deck; "
+                      f"{where} still holds data ({taken} of "
+                      f"{words if rbase == BLK_LO else pwords} words).")
+                return 2
+        if slow == 0 or (ring and rbase != BLK_LO):
             if ring:
-                write_ring_ok(page, frames)
+                write_ring_ok(rbase, frames)
             print("RESULT: PASS - the delay-line block is FREE on this deck. "
                   "Echo/Flanger can be installed.")
             return 0

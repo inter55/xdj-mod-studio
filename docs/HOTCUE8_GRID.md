@@ -385,3 +385,133 @@ Proof:
 - hotcue8_test x3 fixtures, browse x2, set: PASS (expectations changed from
   "slot number = cue number" to "pad number + the cue's time").
 Not tested: Gate Cue on (held-press only in tests), a real deck.
+
+## 9. 2026-11-18: paging back to A-C ("the ABC cues disappear")
+
+Deck report (LingonberryMurky5767, 1.1, installed over the cable): "switching
+pages on the hot cues causes the ABC cues to disappear and when pressing the
+hot cue button ABC again it pauses the track then goes to the cue point".
+
+- **The cue data is not lost.** Emulator (8-cue rekordbox fixture): after a
+  full A-C -> D-F -> G-H -> A-C round trip the three live slots and BOTH pad
+  models hold A-C byte-exact (`hotcue8_test.py`), and the A-C row is
+  pixel-identical to the row before paging when the stock firmware redraws it
+  (`hotcue8_repaint_test.py`).
+- **The visible fault was a repaint.** Pages 2/3 are painted by this module;
+  page 1 was left entirely to the stock firmware. A deck that does not redraw
+  the pad row by itself therefore kept the empty paged faces on screen after
+  the page byte went back to 0 -- the pads look cue-less even though pressing
+  one jumps to the right place.
+- **Fix** (`tools/hotcue8/hc.c`, `hc_pagewas`): the flush hook remembers the
+  page it last painted; on the first flush after coming back to page 1 it
+  repaints the three stock pads once with the same routine pages 2/3 use
+  (letters A/B/C, cue-set strip, pad texture), then leaves the row alone.
+  New track, MODS OFF and the TOUCH FX panel behave as before.
+- **Gate**: `tools/hotcue8_repaint_test.py` -- PERFORM, baseline row, page 2,
+  page 3, page 1: row after the round trip is **0 px different** from the
+  baseline, exactly one paint on the return, none on later frames, pads still
+  A-C. PASS. Also re-ran hotcue8_test, hotcue8_browse_test, touchfx_hc_test
+  and hcpad_test (hcpad_test needs the emulator clock build:
+  `HP_CFLAGS="-DHOLD_MS=900u -DREC_GAP_MS=2400u" sh tools/hcpad/build.sh`;
+  rebuild with the default flags before a deck install).
+- **Second half of the report, answered by the tester**: "after paging back
+  to ABC all three pads do the pause when pressed, than the next press it
+  goes back to normal" -- so it is the first press of each pad, not every
+  press.
+- **Cause**: a pad at state 3 ("cue set, load it") makes the deck load the
+  cue on the press, and that load re-cues the track -- the pause. Paging
+  wrote 3 into all three pads. Nothing pre-loads them in the background: the
+  poll loop 0x8D38E80 is gated on PADREQ/PADEVAL, and nothing sets those
+  (writing them by hand re-cues the track, 2026-11-17).
+- **Fix** (`p1_restore`): the pads keep their engine cue while we are away
+  unless something pressed them, so an untouched pad does not need a reload
+  at all. `p1_save` now also stores each pad's state word and triggered flag;
+  `p1_restore` puts them back when the pad is untouched (word still 3, or 0
+  when the other page's pad was empty) and only writes 3 (`pad_reload`) for a
+  pad that was used -- that one really does hold another cue now. Only the
+  settled values 0/1 are restored; anything transient takes the reload.
+- **Gate**: `tools/hotcue8_repaint_test.py` now also checks the states: a
+  round trip with no presses gives back `[0,0,0]` (the values it started
+  with), a pad marked loaded on page 3 gives `[0,3,0]`, the row stays
+  pixel-identical and the pads still hold A-C. PASS. `hotcue8_jump_emu` still
+  lands all 10 jumps (the A press after the round trip reads 5.00 s, i.e. no
+  load first); hotcue8_test and hotcue8_browse_test PASS.
+- **Not deck-verified.** The reasoning is that the engine cue survives a page
+  change, which the emulator cannot show (it never loads pads either way);
+  the deck reading that would settle it is: page away, page back, press A on
+  a track that was already playing -- no pause = the fix works.
+
+## 10. 2026-11-18b REC on pages 2/3 is the deck's RECORD MODE (not a store)
+
+Deck report: "when i click REC and swipe it creates a D cue without me even
+clicking d". That was our own 2026-11-13 shortcut: a REC tap called
+`hc_rec()`, which set the FIRST EMPTY pad of the page at the playhead.
+
+- The XDJ-700 manual (Setting Hot Cue) says what REC actually is: touching
+  [HOT CUE (REC)] switches the deck into the hot cue **recording mode** (the
+  A/B/C pads light red), then you touch the pad at the point to record; touch
+  REC again to leave. Nothing is recorded by the REC touch itself.
+- **Fix 1** (`hc.c hc_rec`): REC arms/disarms the mode (`hc_recarm`) and
+  writes nothing. A pad press while armed stores THAT pad at the playhead
+  (`set_pad(..., force)`), over an existing cue as stock does. The store runs
+  from the touch chain (`hc_rec(k)`), and `hp.c` swallows that press, so the
+  pad does not recall anything in record mode -- stock does not either. The
+  mode is cancelled by a page change, another screen/mode, MODS OFF, the
+  TOUCH FX panel and a new track.
+- **Fix 2** (`hcpad/hp.c`): a finger landing on REC is now only a REC tap if
+  it lifts without sliding (`st == 5`). A slide that starts on REC pages
+  (left = next, right = previous) and neither arms the mode nor stores a cue;
+  one mode change per `REC_GAP_MS` (the panel reports a long press as quick
+  lift/press bounces -- the 2026-11-16 "three cues" bug).
+- **Pads light red while armed** (`hc.c letter()`): the strip and the letter
+  of all three pads go red, the same colour change stock makes on A-C, so the
+  mode is visible.
+- **Fix 3, found by the gate** (`hc.c p1_restore`, `hc_p1used`): a pad used
+  on page 2/3 leaves the deck's engine holding THAT page's cue while its
+  state can read 1 ("loaded"), so returning to page 1 restored the saved
+  state and the pad never reloaded -- A played D. `hp.c` now marks the pad
+  used (it sees every press on the row), `scan_pads` marks it too, and
+  `p1_restore` writes 3 (reload) for a used pad instead of restoring.
+- **Gate**: `tools/hcpad_test.py` (emulator clock build
+  `HP_CFLAGS="-DHOLD_MS=900u -DREC_GAP_MS=2400u" sh tools/hcpad/build.sh`) --
+  REC tap leaves the cues untouched and arms; REC again disarms; armed pad 1
+  stores D at the playhead with E/F untouched; a swipe starting on REC pages
+  to G-H and stores nothing; three quick REC taps change the mode once;
+  after all of that the return to A-C plays A at 5.00 s. RESULT: PASS.
+  Also PASS: hotcue8_repaint_test, touchfx_hc_test. Not run:
+  hotcue8_set_test (its fixture is missing from $TMPDIR).
+- **Not on a deck.** Deck check: PERFORM, page D-F, touch REC (pads go red,
+  nothing stored), touch D (D set at the playhead), touch REC (red off);
+  then swipe A-C -> D-F from anywhere on the row, including from REC, and
+  confirm no cue appears.
+
+## 11. 2026-11-20 deck result (1.1.1 build): paging / REC / D store PASS
+
+Deck <deck serial>, fw 1.15, RAM-only install in the documented order
+(pads -> hotcue8 -> hcpad, one shell open each, >=30 s apart; all three
+`RESULT: PASS`, LW self-test OK, no read-back mismatch). Test on a playing
+track, PERFORM > HOT CUE:
+
+- page 2 shows **D E F** (swipe/tap on the tab pages, letters correct).
+- REC tap: all three pads light **red**, letters stay D E F, **no cue is
+  stored**. Awaiting the pad press is the record mode from the manual.
+- armed pad 1 press: **D is stored at the playhead**, D plays it, E/F stay
+  empty and page-1 A stays empty (nothing is written to the stick).
+- counters read back after the test: `MSOFF 0, MODEW 7, hc_armed 1,
+  HCPAGE 1, hc_pagewas 1, hc_draws 2559, hp_pages 1, hp_taps 1,
+  hc_recs 1, hc_sets 1` -- the paging, REC and store paths all ran on the
+  deck, not just in the emulator.
+
+**Known cosmetic limit confirmed in the same test: the hot cue marker on
+the WAVEFORM still reads A, not D.** The cue is stored in the deck's slot 1
+(the `k = (n-1) % 3` borrow rule), and the waveform marker's label is the
+firmware's own name for that slot; the deck's vocabulary is A/B/C only.
+The only way to make the deck itself say D is 4..8 in the number word, which
+§10 measured as "jumps, then playback stops". The pad row and playback are
+correct; relabelling the marker needs a hook in the waveform marker painter
+(new RE, cosmetic only) -- not in 1.1.1.
+
+Not covered by this run: the LINK colour fallback (no second Pro DJ Link
+player was available; recorded as untested) and a pad-colour comparison
+against stock orange (the user reported red, the 2026-11-18 orange report
+was not repeated).

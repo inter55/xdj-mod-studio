@@ -22,6 +22,11 @@ The shipping engine is built **without** a delay line (`ring.txt` = `0x0 0`);
 the command above builds the experiment that would carry Echo. If `ring.txt`
 is missing, rebuild it first with that command.
 
+Preflight done 2026-11-18: `FX_RING=1 sh tools/fx_dsp/build.sh` → `ring.txt`
+= `0xC0073400 6500`, `tools/fxring_gate_test.py` = `RESULT: PASS` (2,496 B
+experiment engine in `build/fx/fx.bin`). Rebuild **without** `FX_RING` before
+any release — the shipping engine is ring-free.
+
 Current state: the Echo experiment uses the 52 KB block at `0xC0073400`, and
 the deck survey found **all 13,056 words there non-zero**.
 The install gate therefore refuses, by design. That is what this session

@@ -108,11 +108,42 @@ def main():
                 _tfx_touch = int(a_, 16)
     except OSError:
         pass
+    # hot-cue swipe module (tools/hcpad, in 1.1): it chains in FRONT of the
+    # pads' touch hook, so the pool holds hp_touch_entry and hp_prev_touch
+    # holds the pads' own hook. Without this the verifier failed a correct
+    # install (2026-11-18).
+    _hp = {}
+    try:
+        for ln in open("build/hcpad/hp.syms"):
+            a_, _, n_ = ln.split()
+            _hp[n_.lstrip("_")] = int(a_, 16)
+    except OSError:
+        pass
+    _hp_touch = _hp.get("hp_touch_entry")
+    _hc_touch_entry = _hc_tprev = None
+    try:
+        for ln in open("build/hotcue8/hc.syms"):
+            a_, _, n_ = ln.split()
+            if n_ == "_hc_tentry":
+                _hc_touch_entry = int(a_, 16)
+            elif n_ == "_hc_tprev":
+                _hc_tprev = int(a_, 16)
+    except OSError:
+        pass
     for pool, old, new in PP.hooks():
         if pool == 0x08C92E20:            # flush hook: hot cues -> phase? -> pads
             continue
         if pool == 0x08D5278C and _tfx_touch and mem.r32(pool) == _tfx_touch:
             continue                      # TOUCH FX in front: checked below
+        if pool == 0x08D5278C and _hp_touch and mem.r32(pool) == _hp_touch:
+            # hcpad -> (hot cues' touch entry -> hc_tprev ->) the pads' hook
+            head = mem.r32(_hp["hp_prev_touch"])
+            if head == _hc_touch_entry:
+                head = mem.r32(_hc_tprev)
+            if head == new:
+                print(f"  ok   PERFORM pads touch hook behind the hot-cue "
+                      f"swipe ({_hp_touch:#x})")
+                continue
         hook("PERFORM pads", pool, new)
     # theme switching: code (entry word = on-switch) + tables
     (cb, code), (db, data) = TS.plan(TS.default_names())
@@ -163,7 +194,8 @@ def main():
         ok &= g
         t = mem.r32(0x08D5278C)
         pads_touch = PP.hooks()[0][2]
-        g = t == tf["tfx_touch_entry"] and mem.r32(tf["tfx_prev_touch"]) == pads_touch
+        g = (t == tf["tfx_touch_entry"] and
+             mem.r32(tf["tfx_prev_touch"]) in (pads_touch, _hp_touch))
         print(f"  {'ok  ' if g else 'FAIL'} TOUCH FX touch hook -> pads ({t:#x})")
         ok &= g
         e = mem.r32(tf["tfx_engine"])

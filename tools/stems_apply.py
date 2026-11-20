@@ -31,13 +31,20 @@ OUT = "build/stems"
 #           the audio chip's memory is never touched
 #   stock   (default, 1.1) no short read-ahead: the 1.0 read path, ~30 s, known
 #           clean on hardware -- the fallback
-#   instant clean + the rewrite of the chip's buffered audio (~2 s);
-#           glitched on every deck test so far, experiments only
-#   fast    the rewrite started 0.5 s ahead with a 2 ms pause between blocks
-#           (emulator 0.52 s). At the deck's speed it only just keeps up with
-#           playback, so a slow moment can still let playback catch it.
-BUILDS = {"clean": "-DSM_AHEAD=340u", "stock": "-DSM_AHEAD=0u", "instant": "-DSM_DR -DDR_FIRST=160u",
-          "fast": "-DSM_DR -DDR_PACE_MS=2u -DDR_FIRST=40u"}
+#   instant clean + the rewrite of the chip's buffered audio, STARTING AT THE
+#           PLAYHEAD (8 blocks = 0.1 s ahead) and paced 2 ms/block: the blocks
+#           the chip plays next are rewritten first, so the mute is heard in
+#           ~0.1 s instead of DR_FIRST/75 s. Needs the pass to outrun playback
+#           (~7 ms/block vs playback's 13.3 ms); emulator gate 2026-11-17.
+#   fast    the old instant start (40 blocks = 0.5 s ahead, 2 ms pace),
+#           kept for comparison: emulator 0.52 s -- that 0.52 s was DR_FIRST
+#           itself, not the rewrite speed.
+#   NOTE: both DR builds keep -DSM_AHEAD=340u. The read-ahead bounds the
+#   window the rewrite has to cover (4.5 s); without it the rewrite faces the
+#   deck's whole ~20 s buffer and cannot win.
+BUILDS = {"clean": "-DSM_AHEAD=340u", "stock": "-DSM_AHEAD=0u",
+          "instant": "-DSM_AHEAD=340u -DSM_DR -DDR_FIRST=8u -DDR_PACE_MS=2u",
+          "fast": "-DSM_AHEAD=340u -DSM_DR -DDR_PACE_MS=2u -DDR_FIRST=40u"}
 
 
 def build():

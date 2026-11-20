@@ -15,7 +15,8 @@ _hc_table:
         .long   _hc_next
         .long   _hc_prev_page   /* +8 (2026-10-13: swipe right) */
         .long   _hc_toggle      /* +12 (2026-11-07: tap = 8-pad view) */
-        .long   _hc_rec         /* +16 (2026-11-13: REC on pages 2-3, tools/hcpad) */
+        .long   _hc_rec         /* +16 (2026-11-18b: REC = the deck's record
+                                 * mode on pages 2-3, tools/hcpad) */
 _hc_entry:
         sts.l   pr,@-r15
         mov.l   r4,@-r15

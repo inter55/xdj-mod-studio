@@ -43,10 +43,12 @@ def main():
         print(("  ok   " if good else "CHECK FAIL: ") + label, flush=True)
         ok &= bool(good)
 
-    # the 3-band overview module (its colour literals are theme entries too)
+    # the 3-band overview module (its colour literals are theme entries too).
+    # BLUE/THEME (mode 0) is the mode the waveform palettes belong to: RGB and
+    # 3-BAND now keep the deck's blue for tracks with no colour data (LINK).
     import rgb_overview as RO
     if os.environ.get("NO_OVERVIEW") is None:
-        for a, b in RO.plan(2)[1]:
+        for a, b in RO.plan(0)[1]:
             mem.w8(a, b)
     for a in range(TS.TS_BASE, TS.TS_DATA, 4):
         mem.w32(a, 0)

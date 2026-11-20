@@ -12,6 +12,9 @@
  *     deck's own hot cue and HOT CUE GATE work as before, just HOLD_MS later);
  *   - lifted sooner (a tap)      -> passed on as a short press on release
  *     (REPLAY hit-tester calls), so the cue fires on lift like a BEAT JUMP pad.
+ * A finger landing on REC is held back the same way: it is a REC tap only if
+ * it lifts without sliding (hc_rec then arms the deck's own record mode, the
+ * pad press stores); a slide from there pages instead.
  * Everything else goes down the chain untouched. Page changes call the 8
  * hot cue module's own hc_next / hc_prev_page (addresses at build time).
  *
@@ -38,6 +41,12 @@ typedef unsigned short u16;
 #ifndef REC_GAP_MS
 #define REC_GAP_MS 400u
 #endif
+#ifndef RECARM
+#error "build with -DRECARM=... (hotcue8 hc_recarm: 1 = REC record mode)"
+#endif
+#ifndef P1USED
+#error "build with -DP1USED=... (hotcue8 hc_p1used: pad used off page 1)"
+#endif
 #ifndef REPLAY
 #define REPLAY   2u
 #endif
@@ -47,8 +56,8 @@ typedef unsigned short u16;
 typedef void (*fn_t)(void);
 u32 hp_fwd[3];
 u32 hp_taps, hp_holds, hp_pages, hp_seen, hp_recs;    /* diagnostics */
-static u32 st, x0, y0, t0, replay, rec_t = 0x80000000u;
-u32 hp_recbounce;           /* st: 0 idle 1 pending 2 held 3 swiped 4 tap */
+static u32 st, x0, y0, t0, replay, rec_t = 0x80000000u, pk = 0;
+u32 hp_recbounce;   /* st: 0 idle 1 pending 2 held 3 swiped 4 tap 5 rec pending */
 
 static int pad_at(int x, int y)
 {
@@ -147,24 +156,24 @@ u32 hp_touch(u32 down, u32 x, u32 y)
 #ifdef TFX_MODE
             if (R32(TFX_MODE)) return 0;         /* TOUCH FX panel open: its pad */
 #endif
-            /* REC on pages D-F / G-H: set the next empty cue (hc_rec) --
-             * the pads mod blocks stock REC there (it would save as A-C) */
+            /* REC on pages D-F / G-H: hc_rec toggles the deck's record mode
+             * (the pads mod blocks stock REC there, it would save as A-C).
+             * 2026-11-18 (deck: "click REC and swipe creates a D cue"): the
+             * tap is only decided on LIFT, like a pad -- a finger that landed
+             * on REC and then slid is a page swipe, not a REC press, so it
+             * can neither arm record mode nor store a cue. */
             if (R8(HCPAGE) && (int)y >= PAD_Y && (int)y < PAD_Y + PAD_H &&
                 (int)x >= 460 && (int)x < 538) {
-                /* 2026-11-16 (deck): one REC press made three cues -- the
-                 * panel reports a long press as quick lift/press bounces and
-                 * each "press" set the NEXT empty pad. One cue per REC_GAP_MS. */
-                u32 now = R32(MSCLK);
-                st = 3;
-                if (now - rec_t >= REC_GAP_MS) {
-                    rec_t = now;
-                    hp_recs += ((u32 (*)(void))HC_REC)();
-                } else
-                    hp_recbounce++;
+                st = 5; x0 = x; y0 = y; t0 = R32(MSCLK);
                 return 1;
             }
-            if (pad_at((int)x, (int)y) < 0) return 0;
-            st = 1; x0 = x; y0 = y; t0 = R32(MSCLK); hp_seen++;
+            int k = pad_at((int)x, (int)y);
+            if (k < 0) return 0;
+            /* this pad was used away from page 1: hc.c must reload it when
+             * page 1 comes back (its engine cue is this page's now) */
+            if (R8(HCPAGE)) R8(P1USED + k) = 1;
+            st = 1; x0 = x; y0 = y; t0 = R32(MSCLK); pk = (u32)k;
+            hp_seen++;
             return 1;
         }
         if (st == 1) {
@@ -174,14 +183,45 @@ u32 hp_touch(u32 down, u32 x, u32 y)
                 st = 3; hp_pages++;
                 return 1;
             }
+            /* REC record mode: stock does not recall while recording, so
+             * hold this press back (no forward at all) and store on lift */
+            if (R32(RECARM)) return 1;
             if (R32(MSCLK) - t0 < HOLD_MS) return 1;
             st = 2; hp_holds++;
+        }
+        if (st == 5) {                        /* REC: still a tap? */
+            int dx = (int)x - (int)x0;
+            if (dx <= -SWIPE_PX || dx >= SWIPE_PX) {
+                ((fn_t)(dx < 0 ? HC_NEXT : HC_PREV))();
+                st = 3; hp_pages++;
+            }
+            return 1;
         }
         if (st == 2) return fwd(1);
         if (st == 4) { st = 0; return 0; }      /* new touch during a replay */
         return 1;                                /* swiped: until lifted */
     }
-    if (st == 1) { st = 4; replay = REPLAY; hp_taps++; }
+    if (st == 5) {                        /* REC tap: one mode change */
+        /* 2026-11-16 (deck): one REC press made three cues -- the panel
+         * reports a long press as quick lift/press bounces and each "press"
+         * set the next empty pad. One change per REC_GAP_MS. */
+        u32 now = R32(MSCLK);
+        st = 0;
+        if (now - rec_t >= REC_GAP_MS) {
+            rec_t = now;
+            hp_recs += ((u32 (*)(u32))HC_REC)(~0u);
+        } else
+            hp_recbounce++;
+        return 1;
+    }
+    if (st == 1) {                        /* lift without a slide = a tap */
+        if (R32(RECARM)) {                /* record mode: this pad stores */
+            st = 0;
+            hp_recs += ((u32 (*)(u32))HC_REC)(pk);
+            return 1;
+        }
+        st = 4; replay = REPLAY; hp_taps++;
+    }
     if (st == 4) {
         if (replay) { replay--; return fwd(1); }
         st = 0;

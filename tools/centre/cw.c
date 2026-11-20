@@ -51,7 +51,17 @@ u32 cw_calls;
 #ifndef TS_END
 #define TS_END 0x09790000u
 #endif
-static u32 last_cur_t = 0xFFFFFFFFu;
+/* 2026-11-18: the three firmware palettes the theme switcher recolours
+ * (blue overview 12, PERFORM strip 8, centre 8; tools/theme_switch.py
+ * WAVE_PAL). Only these may be written from the blob's address list --
+ * an old or short theme blob leaves h[17] pointing at other data. */
+#ifndef PAL_LO
+#define PAL_LO 0x0E7355E0u
+#endif
+#ifndef PAL_HI
+#define PAL_HI 0x0E736170u
+#endif
+static u32 last_cur_t = 0xFFFFFFFFu, last_mode_t = 0xFFFFFFFFu;
 static u16 t_core = C_CORE, t_midc = C_MIDC, t_outer = C_OUTER;
 
 static u16 tmap(u16 v, const u16 *S, const u16 *D, u32 ns)
@@ -69,38 +79,68 @@ static void theme_sync(void)
     const u32 *h = (const u32 *)TS_DATA;
     if (R32(TS_DATA) != 0x57535458u) {       /* no theme blob installed */
         if (last_cur_t != 0xFFFFFFFFu) {
-            last_cur_t = 0xFFFFFFFFu;
+            last_cur_t = last_mode_t = 0xFFFFFFFFu;
             t_core = C_CORE; t_midc = C_MIDC; t_outer = C_OUTER;
         }
         return;
     }
     u32 ns = h[2], nt = h[3], cur = ((const u8 *)h)[32];
-    u32 s_off = h[4], d_off = h[6];
+    u32 s_off = h[5], d_off = h[6], mode = R8(MODE_ADDR);   /* +20, +24 */
     if (!ns || ns > 4096 || !nt || cur > nt) return;
     if (s_off + 2 * ns > TS_END - TS_DATA) return;
     if (d_off + 2 * nt * ns > TS_END - TS_DATA) return;
-    if (cur == last_cur_t) return;
-    last_cur_t = cur;
-    if (!cur) {
-        t_core = C_CORE; t_midc = C_MIDC; t_outer = C_OUTER;
-        return;
-    }
-    u32 w_off = h[17];                       /* +68: waveform table (2026-11-12) */
+    if (cur == last_cur_t && mode == last_mode_t) return;
+    const u32 *w = 0;                        /* +68: waveform table (2026-11-12) */
+    u32 n = 0, m = 0, w_off = h[17];
     if (w_off && !(w_off & 3) && w_off + 8 <= TS_END - TS_DATA) {
-        const u32 *w = (const u32 *)(TS_DATA + w_off);
-        u32 n = w[0], m = w[1];
-        if (n && n <= 64 && m >= n + 3 && m <= 72 &&
-            w_off + 8 + 4 * n + 2 * m * (nt + 1) <= TS_END - TS_DATA) {
-            const u16 *r = (const u16 *)(w + 2 + n) + m * cur;
-            t_core = r[n]; t_midc = r[n + 1]; t_outer = r[n + 2];
-            return;
+        const u32 *p = (const u32 *)(TS_DATA + w_off);
+        u32 nn = p[0], mm = p[1];
+        if (nn && nn <= 64 && mm >= nn + 3 && mm <= 72 &&
+            w_off + 8 + 4 * nn + 2 * mm * (nt + 1) <= TS_END - TS_DATA) {
+            w = p;
+            n = nn; m = mm;
         }
     }
-    const u16 *S = (const u16 *)(TS_DATA + s_off);
-    const u16 *D = (const u16 *)(TS_DATA + d_off + (cur - 1) * 2 * ns);
-    t_core = tmap(C_CORE, S, D, ns);
-    t_midc = tmap(C_MIDC, S, D, ns);
-    t_outer = tmap(C_OUTER, S, D, ns);
+    if (cur != last_cur_t) {
+        last_cur_t = cur;
+        if (!cur) {
+            t_core = C_CORE; t_midc = C_MIDC; t_outer = C_OUTER;
+        } else if (w) {
+            const u16 *r = (const u16 *)(w + 2 + n) + m * cur;
+            t_core = r[n]; t_midc = r[n + 1]; t_outer = r[n + 2];
+        } else {
+            const u16 *S = (const u16 *)(TS_DATA + s_off);
+            const u16 *D = (const u16 *)(TS_DATA + d_off + (cur - 1) * 2 * ns);
+            t_core = tmap(C_CORE, S, D, ns);
+            t_midc = tmap(C_MIDC, S, D, ns);
+            t_outer = tmap(C_OUTER, S, D, ns);
+        }
+    }
+    last_mode_t = mode;
+    /* 2026-11-18 (fw 1.1 report: LINK tracks show the THEME's colour).
+     * The theme rewrites the blue palettes (row cur); a track loaded over
+     * Pro DJ Link has no colour data, so the deck falls back to its own
+     * blue waveform -- drawn from those palettes, i.e. in the theme colour
+     * (forest green). The blue belongs to the theme only when BLUE/THEME
+     * is selected (mode 0); in RGB and 3-BAND the fallback must be the
+     * deck's own blue, exactly like stock. Put the palettes on the stock
+     * row (0) in those modes, and back on the theme's row in mode 0.
+     * A word holding anything other than a known row is left alone. */
+    if (!w) return;
+    const u16 *rows = (const u16 *)(w + 2 + n);
+    const u16 *to = rows;                    /* deck blue, stock row 0 */
+    if (!mode && cur)                        /* BLUE/THEME follows the theme */
+        to = rows + m * cur;
+    for (u32 i = 0; i < n; i++) {
+        u32 a = w[2 + i];
+        if (a & 1) continue;                 /* the overview's 3-band literals */
+        if (a < PAL_LO || a >= PAL_HI) continue;
+        volatile u16 *q = (volatile u16 *)a;
+        u16 v = *q;
+        if (v == to[i]) continue;
+        for (u32 t = 0; t <= nt; t++)
+            if (v == rows[m * t + i]) { *q = to[i]; break; }
+    }
 }
 
 static u32 be32(const u8 *p) { return (u32)p[0] << 24 | p[1] << 16 | p[2] << 8 | p[3]; }

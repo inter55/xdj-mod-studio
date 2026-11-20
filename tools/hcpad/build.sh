@@ -12,7 +12,7 @@ import sys; sys.path[:0]=['tools']
 import perform_pads as PP, mysettings as MS
 s={l.split()[2].lstrip('_'): l.split()[0] for l in open('build/hotcue8/hc.syms')}
 t={l.split()[2].lstrip('_'): l.split()[0] for l in open('build/touchfx/tfx.syms')}
-print(f'-DPST={PP.PST:#x}u -DMSOFF={MS.MSOFF:#x}u -DHC_NEXT=0x{s[\"hc_next\"]}u -DHC_PREV=0x{s[\"hc_prev_page\"]}u -DHC_REC=0x{s[\"hc_rec\"]}u -DHCPAGE={PP.HCPAGE:#x}u -DTFX_MODE=0x{t[\"tfx_mode\"]}u')")
+print(f'-DPST={PP.PST:#x}u -DMSOFF={MS.MSOFF:#x}u -DHC_NEXT=0x{s[\"hc_next\"]}u -DHC_PREV=0x{s[\"hc_prev_page\"]}u -DHC_REC=0x{s[\"hc_rec\"]}u -DRECARM=0x{s[\"hc_recarm\"]}u -DP1USED=0x{s[\"hc_p1used\"]}u -DHCPAGE={PP.HCPAGE:#x}u -DTFX_MODE=0x{t[\"tfx_mode\"]}u')")
 "$SH/sh-elf-gcc" -m4-nofpu -mdiv=call-div1 -ml -O2 -Wall -ffreestanding -fno-builtin $V ${HP_CFLAGS:-} \
   -ffunction-sections -fdata-sections -nostdlib -Wl,--gc-sections -Wl,-e,_hp_touch_entry \
   -Wl,--section-start=.entry=$BASE -Wl,-Ttext=$(printf '0x%X' $((BASE + 0x80))) \

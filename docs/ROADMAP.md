@@ -512,3 +512,18 @@ Echo, Pitch, Flanger, Roll, Reverb.
 - TOUCH FX: already v1 scope (see APPROVED TOUCH FX section).
 - 8 hot cue report ("many set, don't work"): verify on deck 2026-10-31;
   failure with an exported analysis = bug, capture the stick.
+
+## 1.2 / 1.3 plan (user, 2026-11-17 after the 1.1 release)
+- 1.2: deck-confirm 1.1 (green strip, USB corner), faster stem mute via the
+  chip-level throttle if the deck holds ~4-5 s, phase meter linked (#15),
+  two-decimal BPM display (user wants it in 1.2; research first: is the
+  precise BPM in RAM and only the text rounded?).
+- Flanger + PHASER (user: the DJM-A7 has no flanger): phaser needs no delay
+  line (allpass state only) but the FX engine code window is full; flanger
+  needs ~2 KB of line. Both hinge on tools/ddr_size_probe.py (read-only,
+  never run): firmware never touches >= 0xC2000000; if the chip has 64 MB
+  there is room for lines AND code (needs a register trampoline). RUN IT
+  FIRST at the next deck visit.
+- 1.3: track filter (playlists), RGB over LINK, boot logo button. Then
+  maintenance.
+- Windows emulator speed never measured (no Windows PC): ask testers.

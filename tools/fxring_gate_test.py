@@ -67,9 +67,17 @@ def main():
     chk("no-ring message says why", "no delay line" in msg, msg)
 
     # geometry must fit ONE page: 4,096 words = 2,048 stereo float frames
-    chk("2,048 frames fit a page", P.ring_fits(2048))
-    chk("4,096 frames do not", not P.ring_fits(4096))
-    chk("zero frames refused", not P.ring_fits(0))
+    chk("2,048 frames fit a page", P.ring_fits(0xC006C000, 2048))
+    chk("4,096 frames do not", not P.ring_fits(0xC006C000, 4096))
+    chk("zero frames refused", not P.ring_fits(0xC006C000, 0))
+    chk("shipping 6,500-frame ring fits the 52 KB block",
+        P.ring_fits(0xC0073400, 6500))
+    chk("6,529 frames overrun that block",
+        not P.ring_fits(0xC0073400, 6529))
+    chk("6,500 frames must use the block, not a page address",
+        not P.ring_fits(0xC006C000, 6500))
+    chk("a ring outside both regions is refused",
+        not P.ring_fits(0xC0030000, 64))
     chk("page is 16 KB", P.PAGE_WORDS * 4 == 16384)
 
     # the shipping default is the 52 KB block the deck survey found in use

@@ -95,7 +95,7 @@ UIHTML = os.path.join(BUNDLE, "studio", "ui.html") if FROZEN else os.path.join(H
 
 APP_SUPPORT = app_support_dir()
 # the app's own release number (GitHub release tag v<APP_VERSION>)
-APP_VERSION = "1.1"
+APP_VERSION = "1.1.1"
 RELEASES_API = "https://api.github.com/repos/inter55/xdj-mod-studio/releases/latest"
 RELEASES_PAGE = "https://github.com/inter55/xdj-mod-studio/releases/latest"
 SETTINGS = os.path.join(APP_SUPPORT, "studio.json")
@@ -1821,6 +1821,13 @@ def j_stick_pack(log, prog, sel):
         "the stick goes in. The deck needs the loader in memory first: send "
         "it over the cable (5 seconds, no flash) or build the loader update "
         "once if you never want the cable again.")
+    # 2026-11-18 (salvofly, Windows): "still unable to install mods via cable
+    # or USB; it doesn't work". A deck that never had the reader update says
+    # 1.15 in UTILITY and ignores XDJMODS/PACK.BIN silently -- say so in the
+    # log instead of leaving the file looking broken.
+    log("A deck whose UTILITY still shows 1.15 has no stick reader yet and "
+        "ignores this file completely -- do step 1 (or 'Send the loader over "
+        "the cable') first. A deck with the reader shows 1.16 or higher.")
     three_band_note(log, sel.get("mode"))
     prog(1.0, "Mods file written to your stick")
 
@@ -2015,6 +2022,12 @@ def j_deck_install(log, prog, mode, pads=True,
             st["waiting"] = False
 
     prog(0.0, "Starting", eta=sum(plan.values()) * SESSION_S)
+    # 2026-11-18 (salvofly, Windows): "installation completes, but the mods
+    # don't show up" -- this mode only ever patches the deck's RAM, so a
+    # switch-off (or the deck rebooting for any reason) is stock again. Say
+    # it before and after instead of leaving "Finished" as the last word.
+    log("Cable install: the mods go into the deck's memory only. Leave the "
+        "deck switched on -- switching it off and on puts it back to stock.")
     rc, out = run_tool(tlog, args)
     if rc and "still in the deck's memory" in out:
         # the deck kept this power-up's mods (cable re-plugged, no restart)
@@ -2026,7 +2039,13 @@ def j_deck_install(log, prog, mode, pads=True,
     if rc or "DONE" not in out:
         raise RuntimeError("deck session stopped -- see log")
     three_band_note(log, mode)
-    prog(1.0, "Finished")
+    log("Installed. The mods are on the deck NOW and stay there while it is "
+        "switched on. Where to look: hold MENU > UTILITY and scroll to the "
+        "end (MODS, WAVEFORM COLOR, ...); PERFORM has the pads and TOUCH FX; "
+        "UTILITY > THEME has the themes. If none of that is there, the log "
+        "above says which step stopped -- send it along with the deck's "
+        "UTILITY version.")
+    prog(1.0, "Installed -- leave the deck switched on")
 
 
 UPD_ACKS = ("brick", "recovery", "power")

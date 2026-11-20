@@ -1194,3 +1194,55 @@ nearly got lost that way). It is `nh` now.
 
 **Next deck visit:** the same Test 1 (no jump), then read `holds:` -- `chip
 buffer` should dominate and `position fallback` stay 0.
+
+## 2026-11-17 late: the delay was DR_FIRST, not the rewrite speed (0.09 s in the emulator)
+
+Every "instant" measurement we had was just the start distance. The rewrite
+begins at `PLAYBLK + DR_FIRST` and walks forward, so the blocks between the
+playing block and that start are **never rewritten** and the drums keep playing
+for them. `DR_FIRST / 75` is the delay, exactly:
+
+| build | DR_FIRST | predicted | measured (emulator) |
+|---|---|---|---|
+| instant (old) | 160 | 2.13 s | 2.12 s |
+| fast (old) | 40 | 0.53 s | 0.52 s |
+| **instant (new)** | **8** | **0.11 s** | **0.09 s** |
+
+Rewriting faster never helped the first second because those blocks were not
+being rewritten at all. Starting AT the playhead is what makes it instant; the
+rewrite only has to stay ahead of playback from there.
+
+**Changes (tools/stems/sm.c unchanged; flags + build table):**
+
+* `instant` = `-DSM_AHEAD=340u -DSM_DR -DDR_FIRST=8u -DDR_PACE_MS=2u`
+  (8 blocks = 0.11 s of lead, 2 ms pause between blocks).
+* `fast` kept as the old 40-block start for comparison.
+* **Build-table bug found and fixed:** neither DR build passed `-DSM_AHEAD=340u`,
+  so a `STEMS_BUILD=instant/fast` deck run would have had NO short read-ahead
+  and NO level gate -- the rewrite would have faced the deck's whole ~20 s
+  buffer (the 11-07 situation) instead of the 4.5 s window it can cover.
+  Both entries now carry it.
+
+**Emulator gate** (`stems_shortahead_emu.py`, `DR=1`, real DSP, settled at the
+level gate: buffer 2073 -> 340 blocks, 89 reads held):
+
+    mute heard after: 0.09 s
+    chg: rewrite blocks 352 sub 351 bump 0 wfail 0 batches 352
+      first second after the change: control rms 7249, muted rms 5558, difference rms 2317
+      ctl/chg: play counter +638 in 8 s (real speed = 600), buffer 340..362 blocks,
+               longest flat 0 ms, err None
+    RESULT: PASS [358 s wall]
+
+So: the whole 352-block window is rewritten, 351 of them by the one-plane
+path, playback never overtaken, never slowed, no flat stretch, mute confirmed
+as the new mix. `tools/stems_native_test.py` PASS (run rule + every mask, 0
+wrong). Module ends 0x09843FEC, 20 B left of the 0x09844000 (TOUCH FX) limit.
+
+**What is NOT proven: the deck.** The emulator writes blocks ~3x faster than
+playback, so it cannot show whether the pass keeps up on hardware. The budget
+says it should: playback consumes one block per 13.3 ms and the deck's rewrite
+costs ~7 ms/block (5.1 ms work + 2 ms pace, 11-16 counters), i.e. ~1.9x
+headroom. If a stick or CPU stall eats more than ~6 ms per block on average,
+playback overtakes and the drums return until the pass restarts -- visible as
+`bump` > 0 in `tools/stems_mute_deck.py` and `stems_probe.py`. That counter is
+the deck's verdict.

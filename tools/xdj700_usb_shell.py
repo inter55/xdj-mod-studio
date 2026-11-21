@@ -42,6 +42,11 @@ if (not os.environ.get("XDJ_MOCK_SOCK")
         and os.path.isdir(os.path.join(VENDOR, "hid"))
         and VENDOR not in sys.path):
     sys.path.insert(0, VENDOR)
+# Windows source checkout: Python >= 3.8 ignores PATH / the venv folder for
+# ctypes DLL loads; a hidapi.dll dropped in vendor/ (the app ships one in
+# _internal/) is found once vendor/ is a registered DLL directory.
+if os.name == "nt" and os.path.isfile(os.path.join(VENDOR, "hidapi.dll")):
+    os.add_dll_directory(VENDOR)
 
 try:
     import hid

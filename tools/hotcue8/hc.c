@@ -122,8 +122,10 @@ static const short PAD_X[3] = {116, 231, 345};
 
 /* key bit of live slot k (zone handlers 0x8DD0BA4..: KEYB+86 bit 0x40 /
  * 0x80, KEYB+87 bit 0x01) */
+#ifdef HC_GRID
 static const u8 KEY_OFF[3] = {86, 86, 87};
 static const u8 KEY_BIT[3] = {0x40, 0x80, 0x01};
+#endif
 #define PST      (PMODE - 2u)    /* PERFORM pads state (latch @PST) */
 #define ZSTATE   0x0C0E75BCu     /* 0x1E = the stock hit-tester is idle */
 
@@ -158,12 +160,23 @@ u32 hc_view;                     /* 1 = all 8 pads (tap on the tab) */
 u32 hc_armed;                    /* 1 = the touch hook is installed */
 u32 hc_presses, hc_swallowed, hc_restores, hc_draws8;
 static u32 hc_pagewas;           /* page drawn last (0 = the stock A-C row) */
+#ifdef HC_GRID
 static u32 hc_held;              /* 1 + pad index, or HG_DEAD */
 static u32 hc_bslot;             /* live slot the held pad borrows */
 static u32 hc_borrow;            /* 1 = hc_bslot holds borrowed bytes */
 static u32 hc_restore;           /* flushes left until the restore */
 static u32 hc_saved[16];         /* the borrowed slot's 64 bytes */
 static u32 hc_savedm[2][14];     /* ... and its two pad-model records */
+#else
+/* 2026-11-22: the grid's press borrowing is unreachable without HC_GRID
+ * (hc_touch passes every touch on), so its state and code are compiled out
+ * too -- the room pays for the overview cue markers */
+#define hc_held 0u
+#define hc_borrow 0u
+#define hc_restore 0u
+#define restore_slot() ((void)0)
+#define drop_press() ((void)0)
+#endif
 
 /* THE LOADED TRACK'S CUES (2026-11-09, Reddit report: "C on track Y jumps to
  * track X's C", some tracks "dominate"). The ANLZ ctx is ONE buffer per
@@ -537,6 +550,7 @@ u32 hc_rec(u32 k)
 }
 
 /* ------------------------------------------------------- 8-pad view ---- */
+#ifdef HC_GRID
 static void key(u32 k, int on)
 {
     u32 a = KEYB + KEY_OFF[k];
@@ -572,6 +586,8 @@ static int active8(void)
            R8(HCPAGE) == 0;
 }
 
+#endif
+
 /* r4 down, r5 x, r6 y (stock hit-tester args). 0 = pass on, 2 = swallow.
  * Only runs in the 8-pad view: any other view leaves the stock row whole. */
 u32 hc_touch(u32 down, u32 x, u32 y)
@@ -579,7 +595,7 @@ u32 hc_touch(u32 down, u32 x, u32 y)
 #ifndef HC_GRID          /* 2026-11-17: the grid is unreachable (pages only); */
     (void)down; (void)x; (void)y;   /* compiled out to make room in the slot */
     return 0;
-#endif
+#else
     if (!hc_view) return 0;
     if (hc_held == HG_DEAD) {              /* swallowed press: no slide-on */
         if (!down) hc_held = 0;
@@ -639,6 +655,7 @@ u32 hc_touch(u32 down, u32 x, u32 y)
     hc_presses++;
     key(k, 1);
     return 2;
+#endif
 }
 
 void hc_next(void);              /* defined below; the fallback uses it */
@@ -825,6 +842,116 @@ static void __attribute__((unused)) pad8(u16 *lay, int stride, int i, int have, 
     }
 }
 
+/* ------------------------------------------- overview cue markers ----
+ * 2026-11-22 (1.1.2 reports: "D-H only appear on the bar when we enter the
+ * page, show all eight in different colours"; "a cue recorded on D is
+ * labelled A"). The deck draws its hot cue markers into a layer of its own,
+ * 528x60, presented at (108,399) over the overview by its own small flush
+ * list (measured in the emulator: WPR 0x4C = layer, WPR 0x58 = stride 528,
+ * then one quad: src 528x60, top-left (108,399)). Per set live slot it draws
+ * a 9x5 triangle (sprite 0x083BA610, 16x5) at (col+4, 4) and its slot's
+ * 8x9 label picture (A/B/C) at (col+15, 0), col = 1/150 s * 500 / track
+ * length (0x0C0E6D1C), all in 0x0700 on the 0xF81F key. It knows only its
+ * three slots, so on pages D-F / G-H those markers sit at D-F / G-H and say
+ * A B C, and the cues of the other pages have no marker at all.
+ * Now, on the flush that presents that layer, we draw every cue the track
+ * has, coloured per UTILITY > HOT CUE COLORS (below); "stock" is the deck's
+ * colour read from the triangle sprite, so a theme that recoloured it is
+ * followed. The deck's slot markers are erased first and redrawn by us
+ * (on pages 2/3 they are at the very spots we draw D-F / G-H, same time
+ * word, labelled A-C) -- nothing doubles up. Only with A-C in the stock
+ * colour does page 1 keep the deck's own A-C markers untouched. Main screen and PERFORM only, MODS OFF = stock. The
+ * layer is below the TOUCH FX panel (y 66..311), never under it. */
+#define MK_LAYWH 0x0210003Cu         /* 528 x 60 */
+#define MK_TL    0x006C018Fu         /* (108, 399) */
+#define MK_TRI   0x083BA610u         /* stock triangle sprite (16x5) */
+#define TRACKLEN 0x0C0E6D1Cu         /* 1/150 s */
+#define MK_KEY   0xF81Fu
+static const u8 MK_PAT[8][9] = {     /* bit 7 = left column (stock A B C) */
+    { 0x18, 0x18, 0x24, 0x24, 0x24, 0x7E, 0x42, 0x42, 0x42 },
+    { 0x7C, 0x42, 0x42, 0x42, 0x7C, 0x42, 0x42, 0x42, 0x7C },
+    { 0x38, 0x44, 0x82, 0x80, 0x80, 0x80, 0x82, 0x44, 0x38 },
+    { 0x78, 0x44, 0x42, 0x42, 0x42, 0x42, 0x42, 0x44, 0x78 },
+    { 0x7E, 0x40, 0x40, 0x40, 0x7C, 0x40, 0x40, 0x40, 0x7E },
+    { 0x7E, 0x40, 0x40, 0x40, 0x7C, 0x40, 0x40, 0x40, 0x40 },
+    { 0x38, 0x44, 0x82, 0x80, 0x80, 0x8E, 0x82, 0x46, 0x3A },
+    { 0x42, 0x42, 0x42, 0x42, 0x7E, 0x42, 0x42, 0x42, 0x42 },
+};
+/* 2026-11-22 (user: "do A-C in different colours too and have a utility
+ * setting for the colours"): UTILITY > HOT CUE COLORS, byte MSHCCOL
+ * (MS + 0x7FB, tools/mysettings.py): 0 = 8 COLORS (every letter its own),
+ * 1 = A-C STOCK (deck colour for A-C, own colours for D-H),
+ * 2 = ALL STOCK (all eight in the deck's colour). Anything else = 0.
+ * A green, B red, C blue, D orange, E cyan, F pink, G yellow, H lavender
+ * (none is the 0xF81F key). */
+#ifndef MSHCCOL
+#error MSHCCOL
+#endif
+static const u16 MK_COL[8] = { 0x07E0, 0xF8C3, 0x4C9F, 0xFC60,
+                               0x07FF, 0xF8B6, 0xFFE0, 0xA41F };
+u32 hc_mkdraws;                       /* marker layers drawn (test/diag) */
+
+static int mk_col(u32 n, u32 len)     /* marker column of cue n, or -1 */
+{
+    u32 t;
+    if (n <= 3) {                     /* the deck's own A-C (page-1 copy) */
+        if (!p1_have(n)) return -1;
+        t = hc_p1ok ? hc_p1s[n - 1][5] : R32(SLOTS + (n - 1) * 0x40 + 0x14);
+    } else {
+        if (!have_cue(n)) return -1;
+        t = cue_ms(n) * 3u / 20u;     /* what load_page puts in the slot */
+    }
+    return t < len ? (int)(t * 500u / len) : -1;
+}
+
+static void __attribute__((noinline, optimize("Os"))) mk_draw(u16 *lay, int st, int c, u32 n, u16 col, int erase)
+{
+    for (int y = 0; y < 9; y++) {
+        u16 *row = lay + y * st;
+        if (y >= 4) {                 /* triangle rows 4..8 */
+            int r = y - 4;
+            for (int x = 0; x < 9; x++) {
+                int on = x >= r && x <= 8 - r;
+                if (erase) row[c + 4 + x] = MK_KEY;
+                else if (on) row[c + 4 + x] = col;
+            }
+        }
+        for (int x = 0; x < 8; x++) {
+            int on = (MK_PAT[n - 1][y] >> (7 - x)) & 1;
+            if (erase) row[c + 15 + x] = MK_KEY;
+            else if (on) row[c + 15 + x] = col;
+        }
+    }
+}
+
+static void markers(u16 *lay, int st)
+{
+    u32 mw = R32(MODEW);
+    if (R8(MSOFF) || (mw != 1 && mw != 7)) return;
+    u32 len = R32(UNCACHED(TRACKLEN)), page = R8(HCPAGE);
+    if (!len || len > 0x00FFFFFFu || page >= HCPAGES) return;
+    u16 green = R16(UNCACHED(MK_TRI));
+    if (green == MK_KEY) green = 0x0700;
+    u32 cm = R8(MSHCCOL);
+    if (cm > 2) cm = 0;
+    /* the deck's three slot markers: on page 1 they are A-C and stay as the
+     * deck drew them unless A-C get colours of their own; on pages 2/3 they
+     * sit at our D-F / G-H labelled A-C and always go */
+    int keep = !page && cm != 0;
+    if (!keep)
+        for (u32 n = 3 * page + 1; n <= 3 * page + 3 && n <= 8; n++) {
+            int c = mk_col(n, len);
+            if (c >= 0) mk_draw(lay, st, c, n, 0, 1);
+        }
+    for (u32 n = 1; n <= 8; n++) {
+        if (keep && n <= 3) continue;
+        int c = mk_col(n, len);
+        if (c >= 0)
+            mk_draw(lay, st, c, n, cm == 2 || (cm == 1 && n <= 3) ? green : MK_COL[n - 1], 0);
+    }
+    hc_mkdraws++;
+}
+
 /* r4 = dev, r5 = req (FUN_08E7D278 args) */
 void hc_hook(u32 dev, u32 req)
 {
@@ -835,9 +962,11 @@ void hc_hook(u32 dev, u32 req)
         R8(HCPAGE) = 0;
         hc_pagewas = 0;
         hc_view = 0;                    /* a new track = the stock row */
+#ifdef HC_GRID
         hc_borrow = 0;
         hc_restore = 0;
         hc_held = 0;
+#endif
         hc_recarm = 0;
         for (u32 i = 0; i < 8; i++) hc_ram_set[i] = 0;   /* drop deck cues */
         hc_cap = 0; hc_st = 4;                     /* D-H: prove the ctx again */
@@ -868,7 +997,18 @@ void hc_hook(u32 dev, u32 req)
     }
     /* the borrowed slot goes back HC_HOLDOFF flushes after the release (the
      * engine may still be reading the slot on the release frame) */
+#ifdef HC_GRID
     if (hc_restore && !hc_held && --hc_restore == 0) restore_slot();
+#endif
+    {   /* the flush that presents the cue-marker layer: all eight markers */
+        const u32 *mw = (const u32 *)R32(req);
+        if (mw && mw[13] == 0x4C && mw[16] == 0x58 && (mw[27] >> 24) == 0x82 &&
+            mw[29] == MK_LAYWH && mw[31] == MK_TL) {
+            int st = (int)mw[17];
+            if (st >= 528 && st <= 1024) markers((u16 *)UNCACHED(mw[14]), st);
+            return;
+        }
+    }
     u32 page = R8(HCPAGE);
     if (page) hc_pagewas = page;       /* remember what the pads are showing */
     if (R8(MSOFF) || R32(MODEW) != 7 || R8(PMODE) != 0) return;

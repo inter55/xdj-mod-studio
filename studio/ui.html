@@ -426,6 +426,10 @@ dialog h2 { font-size: 16px; margin-bottom: 6px; }
         <input type="checkbox" id="pk-phase-on" checked>
         <div class="body"><b>Phase meter</b><div class="d">Beat meter like the XDJ-1000MK2.</div></div>
       </div>
+      <div class="pick" id="pk-tfilter">
+        <input type="checkbox" id="pk-tfilter-on">
+        <div class="body"><b>Track filter <span class="faint">beta</span></b><div class="d">The XDJ-1000MK2's TRACK FILTER on the 700: BPM (± a range), key, rating, colour, My Tag and MASTER PLAYER. In a track list, tap the funnel at the right of the list header to switch it on or off; hold it for the filter screen. Saved on the stick.</div></div>
+      </div>
       <div class="pick" id="pk-themes">
         <input type="checkbox" id="pk-themes-on" checked>
         <div class="body"><b>Themes</b><div class="d">Change colours on the deck.</div></div>
@@ -1018,6 +1022,7 @@ function renderPick() {
   if (padsOn && $('#pk-touchfx-on').checked) parts.push('Touch FX');
   if (padsOn && $('#pk-stems-on').checked) parts.push('Live stems');
   if (padsOn && $('#pk-phase-on').checked) parts.push('Phase meter');
+  if ($('#pk-tfilter-on').checked) parts.push('Track filter');
   if ($('#pk-flac-on').checked) parts.push((ST.lib_formats || {}).opus ? 'FLAC & Opus' : 'FLAC');
   $('#modsum').innerHTML = parts.map(p => `<span>${esc(p)}</span>`).join('') || '<span>nothing selected</span>';
 }
@@ -1049,6 +1054,7 @@ function modSel() {               /* the Mods page choices (cable + stick file) 
   const stems = pads && $('#pk-stems-on').checked;
   const phase = pads && $('#pk-phase-on').checked;
   const flac = $('#pk-flac-on').checked, opus = flac && !!(ST.lib_formats || {}).opus;
+  const tfilter = $('#pk-tfilter-on').checked;
   const parts = [wave === 'rgb' ? 'colour waveforms' : 'stock waveforms'];
   if (pads) parts.push('PERFORM pads');
   if (themes) parts.push('themes');
@@ -1056,8 +1062,9 @@ function modSel() {               /* the Mods page choices (cable + stick file) 
   if (touchfx) parts.push('Touch FX');
   if (stems) parts.push('live stems');
   if (phase) parts.push('phase meter');
+  if (tfilter) parts.push('track filter');
   if (flac) parts.push(opus ? 'FLAC & Opus playback' : 'FLAC playback');
-  return {mode: wave, pads, themes, liveks, touchfx, stems, phase, flac, opus, label: parts.join(' · ')};
+  return {mode: wave, pads, themes, liveks, touchfx, stems, phase, flac, opus, tfilter, label: parts.join(' · ')};
 }
 function stickInit() {
   $('#sticksel').textContent = modSel().label;
@@ -1101,7 +1108,7 @@ $('#stickload').onclick = async () => {
     banner: ($('#stickver').value || '1.16').trim()}).then(r => r && (toast('Building + boot-testing — about 6 minutes.'), watch()));
 };
 $('#deckgo').onclick = async () => {
-  const {mode: wave, pads, themes, liveks, touchfx, stems, phase, flac, opus} = modSel();
+  const {mode: wave, pads, themes, liveks, touchfx, stems, phase, flac, opus, tfilter} = modSel();
   const parts = [wave === 'rgb' ? 'colour waveforms' : 'stock waveforms'];
   if (pads) parts.push('PERFORM pads');
   if (themes) parts.push('themes');
@@ -1109,12 +1116,13 @@ $('#deckgo').onclick = async () => {
   if (touchfx) parts.push('Touch FX');
   if (stems) parts.push('live stems');
   if (phase) parts.push('phase meter');
+  if (tfilter) parts.push('track filter');
   if (flac) parts.push(opus ? 'FLAC & Opus playback' : 'FLAC playback');
   // same session plan as the server (studio/app.py INSTALL_STEPS, ~50 s each)
-  const mins = Math.round(((ST.surveyed ? 1 : 5) + 3 + 1 + 1 + 1 + 1 + 2 + (pads ? (stems ? 3 : 2) : 0) + (themes ? 4 : 0) + (liveks ? 2 : 0) + (touchfx ? 4 : 0) + (phase ? 3 : 0) + (flac ? (opus ? 5 : 2) : 0)) * 70 / 60);
+  const mins = Math.round(((ST.surveyed ? 1 : 5) + 3 + 1 + 1 + 1 + 1 + 2 + (pads ? (stems ? 3 : 2) : 0) + (themes ? 4 : 0) + (liveks ? 2 : 0) + (touchfx ? 4 : 0) + (phase ? 3 : 0) + (tfilter ? 2 : 0) + (flac ? (opus ? 5 : 2) : 0)) * 70 / 60);
   if (await ask('Install mods on the deck?',
     `${parts.join(' · ')}. It takes about ${mins} minutes, plus the moment you eject the stick when asked. Keep the USB stick out of the deck until the log asks for it. Nothing is written to the deck, so when it finishes the mods are in its memory: LEAVE THE DECK SWITCHED ON — switching it off returns it to stock.`, 'Install'))
-    api('/api/deck/install', {mode: wave, pads, themes, liveks, touchfx, stems, phase, flac, opus}).then(r => r && watch());
+    api('/api/deck/install', {mode: wave, pads, themes, liveks, touchfx, stems, phase, flac, opus, tfilter}).then(r => r && watch());
 };
 
 /* ---- Theme Builder */
@@ -1620,6 +1628,7 @@ function modsLabel(m) {
   if (m.touchfx) p.push('Touch FX');
   if (m.pads && m.stems !== false) p.push('live stems');
   if (m.phase) p.push('phase meter');
+  if (m.tfilter) p.push('track filter');
   return p.join(' · ');
 }
 async function reinstall() {
@@ -1628,6 +1637,7 @@ async function reinstall() {
   if (js.some(j => j.state === 'running')) return toast('Something is already running: wait for it to finish.', true);
   api('/api/deck/install', {mode: m.mode, pads: m.pads, themes: m.themes, liveks: m.liveks,
     touchfx: !!m.touchfx, stems: m.stems !== false, phase: m.phase, brake: m.brake,
+    tfilter: !!m.tfilter,
     flac: !!m.flac, opus: !!m.opus}).then(r => r && watch());
 }
 async function offerReinstall() {

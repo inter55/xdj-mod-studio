@@ -54,7 +54,7 @@ TAG_PWV6 = RO.TAG_PWV6
 TAG_PWV7 = struct.unpack("<I", b"PWV7")[0]
 CW_BASE = int(os.environ.get("CW_BASE", "0x098A0000"), 0)   # deck-free all states
 SLOT7 = 0x098B0000                      # PWV7 snapshot (3 B x 150/s)
-SLOT7_MAX = 0xB0000                     # ~26 min; ends 0x09960000
+SLOT7_MAX = 0x90000                     # ~21 min; ends 0x09940000 (1.2: the track filter lives at 0x09940000)
 ROWINC = (0x08DC3B9E, 0x6291, 0x6295)   # row loop: mov.w @r9,r2 -> @r9+,r2
 # 2026-10-18: the PERFORM-screen strip = twin painter FUN_08DC2754 (50 rows,
 # own palette 0x0E735FA8 via pool 0x08DC2A18, single user 0x08DC2922; same

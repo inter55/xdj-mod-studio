@@ -14,7 +14,7 @@ DEFS=$("$ROOT/.venv/bin/python" -c "
 import sys; sys.path[:0] = ['$ROOT/tools', '$ROOT']
 import mysettings as M, rgb_overview as RO, vredirect as VR, theme_switch as TS
 d = dict(MSOFF=M.MSOFF, MSSAVE=M.MSSAVE, MODEB=RO.MODE_ADDR, VSELB=VR.VSEL,
-         BRAKE_LIT=M.BRAKE_LIT, MSBRAKE=M.MSBRAKE, MSGATE=M.MSGATE,
+         BRAKE_LIT=M.BRAKE_LIT, MSBRAKE=M.MSBRAKE, MSGATE=M.MSGATE, MSHCCOL=M.MSHCCOL,
          TS_BASE=TS.TS_BASE, TS_DATA=TS.TS_DATA, BRAKE_STOCK=M.BRAKE_STOCK)
 pm = {l.split()[2].lstrip('_'): int(l.split()[0], 16)
       for l in open('$ROOT/build/phasemeter/pm.syms')}
@@ -22,6 +22,9 @@ d.update(PM_MODE=pm['pm_mode'], PM_PREV=pm['pm_prev'])
 lt = {l.split()[2].lstrip('_'): int(l.split()[0], 16)
       for l in open('$ROOT/build/lighttext/lt.syms')}
 d.update(LT_IDX=lt['lt_idx'])
+tf = {l.split()[2].lstrip('_'): int(l.split()[0], 16)
+      for l in open('$ROOT/build/trackfilter/tf.syms')}
+d.update(TF_HEAD=tf['tf_head'], TF_CFG=tf['tf_cfg'], TF_PREV=tf['tf_prev'])
 print(' '.join(f'-D{k}={v:#x}u' for k, v in d.items()))")
 "$SH/sh-elf-gcc" -m4-nofpu -mdiv=call-div1 -ml -O2 -Wall -ffreestanding -fno-builtin \
   $DEFS -ffunction-sections -fdata-sections -nostdlib -Wl,--gc-sections -Wl,-e,_ut_head \

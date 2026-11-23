@@ -1246,3 +1246,19 @@ headroom. If a stick or CPU stall eats more than ~6 ms per block on average,
 playback overtakes and the drums return until the pass restarts -- visible as
 `bump` > 0 in `tools/stems_mute_deck.py` and `stems_probe.py`. That counter is
 the deck's verdict.
+
+## 2026-11-23 DECK (<deck serial>): clean build = 5 s, no crackle (HARDWARE PROVEN)
+
+- instant build (SM_AHEAD 340 + DR, DR_FIRST 8, pace 2): mute after a few
+  seconds of CRACKLE, unmute crackles, vocals "randomly coming back".
+  Counters: 202 blocks rewritten, drbump 2 (playback overtook the pass twice),
+  avg batch 5.2 ms / longest 21 ms, 1.0 ms chip read + 1.7 ms stick read +
+  1.0 ms chip write per block. The rewrite race is the crackle.
+- clean build (STEMS_BUILD=clean = -DSM_AHEAD=340u, level gate, NO rewrite):
+  user "drums muted after about 5 seconds, no crackle". Counters: 63 reads
+  held (14.5 s), lowest read-ahead 344 at a read, chip buffer lowest 323
+  since the tap (deck slows near 240), 225 muted reads avg 21.9 ms / max 34,
+  holds that ran out 0, holds by chip level 62 / position fallback 2. The
+  level word 0x11837CD0 works on the deck.
+- => recommended default for 1.2: STEMS_BUILD=clean (stems_apply default is
+  still "stock" = 1.0 path, ~30 s). Unmute not reported yet.

@@ -1210,9 +1210,9 @@ u32 dr_pieces(u32 *sections, u32 *total, u32 *longest)
  *    continue the one before: load, jump, loop) pass at once. This only
  *    ever lets a read through SOONER than before.
  * SM_AHEAD 0 = no hold at all (the 1.0 read path: ~30 s mute, known clean). */
-#ifndef SM_AHEAD            /* 2026-11-17: 0 = off by default for 1.1 (the     */
-#define SM_AHEAD 0u         /* 1.0 read path, ~30 s mute, deck-proven clean);  */
-#endif                      /* -DSM_AHEAD=340u = the short read-ahead (testing) */
+#ifndef SM_AHEAD            /* 1.2 (2026-11-23): 340 = 4.5 s read-ahead, held   */
+#define SM_AHEAD 340u       /* on the chip's buffer level; deck: mute + unmute */
+#endif                      /* ~5 s, no crackle. -DSM_AHEAD=0u = the 1.0 path  */
 u32 sm_runs;                            /* runs of reads started (loads, jumps) */
 
 /* a read [pos, pos+n) of the current file is about to be made */
@@ -1281,7 +1281,7 @@ static u32 thr_lvl(void)
 
 static void throttle(u32 pos, u32 n)
 {
-    u32 last = ~0u, t0 = R32(MSCLK_U), tl = t0, w = SM_AHEAD * BLKF * 4u;
+    u32 last = ~0u, lastlv = ~0u, t0 = R32(MSCLK_U), tl = t0, w = SM_AHEAD * BLKF * 4u;
     int held = 0;
     thr_note(pos, n);
     for (;;) {
@@ -1303,7 +1303,13 @@ static void throttle(u32 pos, u32 n)
             }
             break;
         }
-        if (p != ~0u && p != last) { last = p; tl = now; }
+        /* "still playing" = the play block moved OR the chip's buffer level
+         * changed. 2026-11-23 deck: the play block only updates now and
+         * then while playing, so 150 ms without a change let 613 reads
+         * through as "paused" and the read-ahead crept to 1281 blocks (17 s:
+         * the very slow unmute). The level drains ~1 block per 13 ms while
+         * playing and stands still when paused. */
+        if ((p != ~0u && p != last) || lv != lastlv) { last = p; lastlv = lv; tl = now; }
         if (now - tl >= STILL_MS) { sm_thrpause++; break; }
         if (now - t0 >= MAXW_MS) { sm_thrmaxw++; break; }
         if (!held) {

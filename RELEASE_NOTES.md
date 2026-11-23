@@ -1,3 +1,42 @@
+# XDJ Mod Studio v1.2
+
+Install the mods again after updating (cable, USB-stick file or a flash).
+
+## Track filter (new)
+
+The XDJ-1000MK2's TRACK FILTER, on the 700. Tick **Track filter** on the
+Mods page.
+
+- In any track list a small funnel sits at the right end of the list
+  header. **Tap** it to switch the filter on or off (the bar then shows how
+  many tracks match, e.g. `[48]`); **hold** it for the TRACK FILTER screen.
+- Conditions like the 1000MK2: **BPM** ± 0–6 %, **KEY** (related keys),
+  **RATING**, **COLOR**, **MY TAG** (AND / OR per column) and **MASTER
+  PLAYER** (takes the loaded track's BPM and key). Hold RESET to clear.
+- Leave the screen with BACK or the funnel in its title; the list redoes
+  itself with the filter.
+- BPM / key / rating / colour are saved on the stick (the deck's own
+  RBFLTR.DAT), My Tag choices are not -- same as on the 1000MK2.
+
+Tested on the deck. The filter checks itself on every frame: if anything
+ever disturbs it, it switches itself off and the deck behaves stock instead
+of misbehaving.
+
+## Stems: mute and unmute in about 5 seconds
+
+Muting or unmuting a stem used to take about 30 seconds, because the deck
+had that much audio queued up with the old mix. Now it keeps only about
+4.5 seconds queued while a STEMS file plays, so a mute or unmute is heard
+in about 5 seconds, cleanly (no crackle). Tested on the deck. Instant
+mute is still being worked on.
+
+## Hot cues: all eight on the waveform
+
+The overview waveform shows markers for all eight cues A-H, each in its own
+colour, on every hot cue page. UTILITY has a new row **HOT CUE COLORS**:
+`8 COLORS` (default), `A-C STOCK` (A-C in the deck's colour) or `ALL
+STOCK`. Emulator-tested; installed on the deck but not checked by eye yet.
+
 # XDJ Mod Studio v1.1.2
 
 Install the mods again after updating (cable, USB-stick file or a flash).

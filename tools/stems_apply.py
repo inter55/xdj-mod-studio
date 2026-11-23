@@ -29,8 +29,8 @@ OUT = "build/stems"
 # an explicit SM_CFLAGS in the environment still wins):
 #   clean   short read-ahead only: mute heard ~4.5 s after the tap,
 #           the audio chip's memory is never touched
-#   stock   (default, 1.1) no short read-ahead: the 1.0 read path, ~30 s, known
-#           clean on hardware -- the fallback
+#   stock   no short read-ahead: the 1.0/1.1 read path, ~30 s -- the fallback
+#   (1.2 default = clean: deck 2026-11-23 mute + unmute ~5 s, no crackle)
 #   instant clean + the rewrite of the chip's buffered audio, STARTING AT THE
 #           PLAYHEAD (8 blocks = 0.1 s ahead) and paced 2 ms/block: the blocks
 #           the chip plays next are rewritten first, so the mute is heard in
@@ -50,7 +50,7 @@ BUILDS = {"clean": "-DSM_AHEAD=340u", "stock": "-DSM_AHEAD=0u",
 def build():
     import perform_pads as PP
     env = dict(os.environ, PMASK=hex(PP.PMASK))
-    which = os.environ.get("STEMS_BUILD", "stock")     # 1.1: the proven 1.0 path
+    which = os.environ.get("STEMS_BUILD", "clean")     # 1.2: deck-proven 2026-11-23 (~5 s, clean)
     if which not in BUILDS:
         sys.exit(f"STEMS_BUILD={which}: use one of {', '.join(BUILDS)}")
     env.setdefault("SM_CFLAGS", BUILDS[which])

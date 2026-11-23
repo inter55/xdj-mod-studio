@@ -73,7 +73,12 @@ static u32 fwd(u32 down)
     return 2;
 }
 
-/* ------------------------------------------------ cue marker labels ----
+#ifdef HP_LBL
+/* RETIRED 2026-11-22: tools/hotcue8/hc.c now draws all eight cue markers on
+ * the overview itself (each letter in its own colour) and replaces the deck's
+ * slot markers on pages 2/3, so the stock label pictures are never rewritten
+ * any more (they are shared artwork). Build with -DHP_LBL for the old way.
+ * ------------------------------------------------ cue marker labels ----
  * 2026-11-16 (deck): the markers above the bottom waveform are labelled by
  * the slot's PAD number (1..3, which the deck needs to play the cue -- see
  * hc.c PADNUM), so cues D-F showed as "A B C". The 700 only has three label
@@ -145,10 +150,13 @@ static void lbl_update(void)
     hp_lbl = page;
     hp_lblw++;
 }
+#endif
 
 u32 hp_touch(u32 down, u32 x, u32 y)
 {
+#ifdef HP_LBL
     lbl_update();
+#endif
     if (down) {
         if (st == 0) {
             if (R32(MODEW) != 7 || R8(MSOFF) || R8(PST + 2) != 0 || R32(ZSTATE) != 30)

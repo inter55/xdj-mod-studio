@@ -543,3 +543,133 @@ Three deck reports on the shipped 1.1.1 build, in the order they came:
 Still open from the same session: the **waveform marker says A** for a cue
 recorded as D (the deck's own slot name; see §11), which needs a hook in the
 waveform marker painter — queued as a later release, unstarted.
+
+## 13. 2026-11-22: "has to load the cues again" / "D-H work with some initial delay"
+
+Two 1.1.2 reports (stick-file user, cable tester) describe the same thing:
+after paging, the first press on a pad is slow / pauses ("loads"), the second
+press is normal.
+
+Emulator (real audio chip, `$TMPDIR/hc_rb_s0_loaded.pkl`, scratch script
+`hcpause.py` in the 11-22 session) -- pad state words `0x0B6C3C78+4k`:
+
+    after CALL           [3,3,3]   (stock: "cue known, not loaded")
+    press A              jumps, plays on, A -> 1 (loaded)
+    page 2 (D-F)         [3,3,3]   (pad_reload: our cues need a load)
+    press D              jumps late in the hold (= the load), D -> 1
+    back on page 1       the pad used on page 2 -> 3 (correct, its engine
+                         holds D), the others restored
+    press a state-1 pad  jumps ~0.3 s earlier in the same hold (no load)
+
+So a state-3 press = load + jump: the delay the testers hear. On the deck it
+sounds like a pause. Not new; it was there since paging exists, and 1.1.1
+only removed it for pads NOT used on the other page.
+
+What the deck does to preload (decompiled, Ghidra `~/ghidra-work/out`):
+- `FUN_08D38E80` (poll, gated PADREQ `0x0B6C42C8`==1 && PADEVAL
+  `0x0BA14ADC`==1 at caller `0x08D4BDB2`): per pad `FUN_08D38BEC` -> 3 =
+  "needs load" -> state 5 (both arrays `0x0B6C3C78`/`0x0B6C3C68`) and
+  `FUN_08D3880A(pad)` = append the pad number to the 3-word queue
+  `0x0B6C3C94`. State 4 (loop cue) goes to a second path that sets PADEVAL=2
+  and runs `FUN_08D38696` -- most likely the "re-cue" the deck did on
+  2026-11-17 when both gates were forced.
+- `FUN_08D385B4` = load-complete consumer: pops the queue, 5 -> 1.
+- `FUN_08D3974A(pad)` = the press-side loader (DSP command via
+  `[0x08D39878]`, state 5, queue) followed by jump bookkeeping.
+
+TRIED (emulator only, never on a deck): mark the paged pads 5 and queue them
+directly. Result: the queue is never serviced (no DSP load command was sent),
+pads stay 5 and presses are DEAD. Do not ship that. The preload needs the
+DSP command that `FUN_08D3974A` sends without its jump part, or the poll
+path above with PADEVAL kept out of the state-4 branch. Both need one
+read-only deck capture first: after CALL on a stock deck, log PADREQ,
+PADEVAL, the two state arrays and the queue at ~20 Hz (the emulator never
+runs the poll after CALL, so the deck is the only ground truth).
+
+Overview markers for D-H ("only appear when you enter the page; show all
+eight in different colours"): the stock bar draws markers for the three
+live slots only; our module relabels them D/E/F while page 2 is up (hp.c
+lbl_update). Showing all eight at once = drawing our own five extra
+markers on the overview layer. Feature work, not started.
+
+### 13b. 2026-11-22 user: "when I put a hot cue on D it calls it A etc"
+
+This is the known §11 limit, and it is not new. The deck keeps only three cue
+slots and labels them by slot. A cue recorded on D lives in slot 1, so the
+marker says A. Our relabel (hp.c `lbl_update`) only applies while page 2 is
+showing on PERFORM or the main screen. Everywhere else, and once you page
+back to A-C, the deck's own A B C labels come back.
+
+The real fix is the same job as the cable tester's request ("show all eight
+on the bar, in different colours"): draw markers D-H ourselves on the
+overview (and later the centre waveform), from `hc_x*` / `hc_ram_*` times and
+the track length, independent of the three slots. Then the slot labels can
+stay stock. Not started.
+
+## 14. 2026-11-22: all eight cue markers on the overview, each in its own colour
+
+Fix for §13's "show all eight on the bar" request and §13b's "D is labelled
+A". Emulator only; not on a deck, nothing committed.
+
+Where the deck draws its markers (emulator, `draw_log` + list dump): a layer
+of its own, **528x60**, repainted every frame and presented at **(108,399)**
+by its own small flush list -- the same shape as the UI composite list
+(`w[13]=0x4C` src = layer, `w[16]=0x58` stride = 528, quad `w[27]` op 0x82,
+`w[29]=0x0210003C`, `w[31]=0x006C018F`). Per set live slot: triangle sprite
+`0x083BA610` (16x5, a 9-px triangle) at `(col+4, 4)`, the slot's label
+picture (8x9, `0x083B9130/0x083BA330/0x083BA450`) at `(col+15, 0)`, colour
+`0x0700` on key `0xF81F`, `col = slot +0x14 (1/150 s) * 500 / 0x0C0E6D1C`
+(checked against all three stock markers).
+
+`tools/hotcue8/hc.c` `markers()` runs on the flush that presents that layer
+(main screen + PERFORM only, MODS OFF = stock):
+- page 1: the stock A-C are left untouched; D-H are drawn.
+- pages 2/3: the deck's three slot markers sit exactly at our D-F / G-H
+  (same time word) and say A B C, so they are erased first, then all eight
+  are drawn -- every cue once, with its own letter.
+- A-C use the stock colour read from the triangle sprite (so a theme that
+  recoloured it is followed); D orange `0xFC60`, E cyan `0x07FF`, F pink
+  `0xF8B6`, G yellow `0xFFE0`, H lavender `0xA41F`.
+- The layer is below the TOUCH FX panel (y 66..311), never under it.
+
+`hp.c lbl_update` is **retired** (kept behind `-DHP_LBL`): it rewrote the
+deck's shared label artwork, and the markers above make it pointless. The
+stock pictures now always read A B C.
+
+Room: the 8-pad grid's press-borrow state and code (`hc_saved`,
+`restore_slot`, `drop_press`, `key`, …) were still compiled although the grid
+is out (`HC_GRID`); now they are out with it. hc.bin 7,190 B, `_end`
+0x09791EF0 (272 B under 0x09792000).
+
+Gates (fixture `$TMPDIR/hc_rb_s0_loaded.pkl`): new
+`tools/hotcue8_markers_test.py` PASS (BROWSE: nothing drawn; PERFORM pages
+1/2/3/1 and the main screen on page 2: all eight markers, right letter, right
+colour; stock pictures never rewritten; MODS OFF: the deck's three only);
+`hotcue8_test`, `hcpad_test` (label check now "pictures stay stock"),
+`hotcue8_repaint_test`, `touchfx_hc_test` PASS. Screenshots
+`screenshots/hotcue8/markers_p{1,2,3}.png`, `markers_main_p2.png`,
+`markers_pages_bar.png`.
+
+Not covered: BROWSE also shows the bar but is out of scope (gated off, so it
+shows the deck's own slot markers there); the centre waveform's markers are
+untouched; deck timing (we draw at present time, the same pattern the pad
+letters and the phase meter use on the deck).
+
+### 14b. 2026-11-22 later: A-C coloured too + UTILITY > HOT CUE COLORS
+
+User: "do A-C in different colours too and have a utility setting for the
+colours". New byte `MSHCCOL = MS + 0x7FB` (tools/mysettings.py; free, next to
+HOT CUE GATE / VINYL BRAKE). New UTILITY row **HOT CUE COLORS** (after HOT
+CUE GATE; NOURS 12 -> 13, count 16 -> 29) with three values:
+- `8 COLORS` (0, default): every letter its own colour -- A green `0x07E0`,
+  B red `0xF8C3`, C blue `0x4C9F`, D orange, E cyan, F pink, G yellow,
+  H lavender. On page 1 the deck's A-C markers are now erased and redrawn too.
+- `A-C STOCK` (1): A-C in the deck's colour (page 1 keeps the deck's own
+  markers untouched), D-H coloured -- the first version above.
+- `ALL STOCK` (2): all eight in the deck's colour.
+hc.c build gets `-DMSHCCOL` (build.sh default MSOFF + 10, so existing callers
+need no change); hc.bin 7,206 B, `_end` 0x09791F00. utility/build.sh passes
+MSHCCOL; ut ends 0x09795B78. `tools/hotcue8_markers_test.py` now checks all
+three settings on pages 1 and 2 (PASS); `tools/utility.py` row positions from
+the end shifted by one and the new row is edited both ways.
+Screenshot comparison: `screenshots/hotcue8/markers_settings_bar.png`.

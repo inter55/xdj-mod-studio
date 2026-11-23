@@ -90,6 +90,11 @@ cp build/xflac_flac/vfile.bin build/xflac_flac/vfile.syms "$REPO/build/xflac_fla
 # (the THEME row's LIGHT entry), so light-text is built FIRST: a clean
 # checkout has no build/ and failed here (found building 1.0.5).
 sh tools/lighttext/build.sh >/dev/null
+# ... and reads build/trackfilter/tf.syms (the TRACK FILTER rows), so the
+# track filter is built before it too
+sh tools/trackfilter/build.sh >/dev/null
+mkdir -p "$REPO/build/trackfilter"
+cp build/trackfilter/tf.bin build/trackfilter/tf.syms "$REPO/build/trackfilter/"
 sh tools/utility/build.sh >/dev/null
 mkdir -p "$REPO/build/utility"
 cp build/utility/ut.bin build/utility/ut.syms "$REPO/build/utility/"
@@ -200,6 +205,7 @@ _stale=0
 stale build/phasemeter/pm.bin          tools/phasemeter     || _stale=1
 stale build/hotcue8/hc.bin             tools/hotcue8        || _stale=1
 stale build/utility/ut.bin             tools/utility        || _stale=1
+stale build/trackfilter/tf.bin         tools/trackfilter    || _stale=1
 stale build/stems/sm.bin               tools/stems          || _stale=1
 stale build/xflac/vfile.bin            tools/xflac          || _stale=1
 stale build/centre/cw.bin              tools/centre         || _stale=1

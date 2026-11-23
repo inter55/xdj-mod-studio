@@ -130,9 +130,24 @@ def main():
                 _hc_tprev = int(a_, 16)
     except OSError:
         pass
+    # TRACK FILTER screen (5t, installed last): in FRONT of both chains
+    import trackfilter as TFL
+    tfi, tfs = TFL.build()
+    tf_in = mem.r32(tfs["tf_head"]) == TFL.MAGIC
+
+    def touch_head():
+        t = mem.r32(0x08D5278C)
+        if tf_in and t == tfs["tfs_touch_entry"]:
+            t = mem.r32(tfs["tfs_prev_touch"])
+        return t
     for pool, old, new in PP.hooks():
         if pool == 0x08C92E20:            # flush hook: hot cues -> phase? -> pads
             continue
+        if pool == 0x08D5278C and tf_in and mem.r32(pool) == tfs["tfs_touch_entry"]:
+            t = touch_head()
+            if t in (new, _tfx_touch, _hp_touch):
+                print(f"  ok   TRACK FILTER screen in front of the touch chain ({t:#x})")
+                continue
         if pool == 0x08D5278C and _tfx_touch and mem.r32(pool) == _tfx_touch:
             continue                      # TOUCH FX in front: checked below
         if pool == 0x08D5278C and _hp_touch and mem.r32(pool) == _hp_touch:
@@ -145,10 +160,16 @@ def main():
                       f"swipe ({_hp_touch:#x})")
                 continue
         hook("PERFORM pads", pool, new)
-    # theme switching: code (entry word = on-switch) + tables
+    # theme switching: code (entry word = on-switch) + tables. Only when
+    # the install profile selected it: deck_session --no-themes leaves the
+    # whole (surveyed all-zero) area untouched, which is a correct install,
+    # not a broken theme module (false FAIL until 2026-11-23).
     (cb, code), (db, data) = TS.plan(TS.default_names())
-    region("theme switch code", cb, code)
-    region("theme tables", db, data, skip=range(db + 32, db + 52))
+    if any(mem.r8(cb + i) for i in range(len(code))):
+        region("theme switch code", cb, code)
+        region("theme tables", db, data, skip=range(db + 32, db + 52))
+    else:
+        print("  ok   theme switching not installed (not selected)")
     # hot cue pages: hooked into the flush chain
     syms = {}
     for ln in open("build/hotcue8/hc.syms"):
@@ -172,6 +193,8 @@ def main():
     tf = _syms("build/touchfx/tfx.syms")
     heads = {pm.get("pm_entry"): ("phase meter", pm.get("pm_prev")),
              lt.get("lt_flush"): ("light add-on", lt.get("lt_prev"))}
+    if tf_in:
+        heads[tfs["tfs_flush_entry"]] = ("TRACK FILTER screen", tfs["tfs_prev_flush"])
     heads.pop(None, None)
     for _ in range(4):
         if flush not in heads:
@@ -192,7 +215,7 @@ def main():
         g = b == tf["tfx_flush_entry"] and mem.r32(tf["tfx_prev_flush"]) == PP.ORIG_BLIT
         print(f"  {'ok  ' if g else 'FAIL'} TOUCH FX flush entry behind the pads ({b:#x})")
         ok &= g
-        t = mem.r32(0x08D5278C)
+        t = touch_head()
         pads_touch = PP.hooks()[0][2]
         g = (t == tf["tfx_touch_entry"] and
              mem.r32(tf["tfx_prev_touch"]) in (pads_touch, _hp_touch))
@@ -214,6 +237,17 @@ def main():
     pads_flush = [n for p, o, n in PP.hooks() if p == 0x08C92E20][0]
     print(f"  {'ok  ' if prev == pads_flush else 'FAIL'} chain: hot cues -> {prev:#x} (pads)")
     ok &= prev == pads_flush
+    # TRACK FILTER (5t, opt-in): checked when its module is in RAM
+    if tf_in:
+        skip = set()
+        for k in ("tfs_prev_flush", "tfs_prev_touch", "tfs_prev_txt"):
+            skip |= set(range(tfs[k] - tfs["tf_head"], tfs[k] - tfs["tf_head"] + 4))
+        region("TRACK FILTER module", tfs["tf_head"], tfi, skip={tfs["tf_head"] + i for i in skip})
+        hook("TRACK FILTER prev", tfs["tf_prev"], TFL.STOCK_COPY)
+        for p_ in TFL.POOLS:
+            hook("TRACK FILTER copy", p_, tfs["tf_copy"])
+        for p_ in TFL.TEXT_POOLS:
+            hook("TRACK FILTER text hook", p_, tfs["tfs_txt_entry"])
     print("RESULT:", "PASS" if ok else "FAIL")
     return 0 if ok else 1
 

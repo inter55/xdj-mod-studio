@@ -95,7 +95,7 @@ UIHTML = os.path.join(BUNDLE, "studio", "ui.html") if FROZEN else os.path.join(H
 
 APP_SUPPORT = app_support_dir()
 # the app's own release number (GitHub release tag v<APP_VERSION>)
-APP_VERSION = "1.1.2"
+APP_VERSION = "1.2"
 RELEASES_API = "https://api.github.com/repos/inter55/xdj-mod-studio/releases/latest"
 RELEASES_PAGE = "https://github.com/inter55/xdj-mod-studio/releases/latest"
 SETTINGS = os.path.join(APP_SUPPORT, "studio.json")
@@ -1704,6 +1704,7 @@ INSTALL_STEPS = [          # sessions per step (mock-deck measured 2026-10-12)
     ("5e", "Theme switching", 4),
     ("5v", "Vinyl brake length", 1),
     ("5m", "Phase meter", 3),                                # survey + 2
+    ("5t", "Track filter", 2),                               # survey + install
     ("5k", "Live key shift (no audio-chip restart)", 2),     # probe + install
     ("5x", "TOUCH FX (no audio-chip restart)", 4),   # engine probe + install, screen survey + install
 ]
@@ -1746,7 +1747,8 @@ def j_filter_playlists(log, prog, opts):
 
 
 def install_args(mode, pads=True, themes=True, liveks=False, stems=True,
-                 phase=False, brake=0.0, flac=True, opus=False, touchfx=False):
+                 phase=False, brake=0.0, flac=True, opus=False, touchfx=False,
+                 tfilter=False):
     """tools/deck_session.py options for a Mods-page selection (the cable
     install and the USB-stick pack record the very same install)."""
     args = ["--mode", mode]
@@ -1763,6 +1765,8 @@ def install_args(mode, pads=True, themes=True, liveks=False, stems=True,
         args.append("--no-stems")
     if phase and pads:
         args.append("--phasemeter")
+    if tfilter:
+        args.append("--trackfilter")         # BROWSE track filter (UTILITY rows)
     if not flac:
         args.append("--no-flac")
     elif not opus:
@@ -1927,7 +1931,7 @@ not look stock refuses the whole file and stays as it is).
 
 def j_deck_install(log, prog, mode, pads=True,
                    themes=True, liveks=False, stems=True, phase=False,
-                   brake=0.0, flac=True, opus=False, touchfx=False):
+                   brake=0.0, flac=True, opus=False, touchfx=False, tfilter=False):
     if deck_ready():
         raise RuntimeError(deck_ready())
     try:
@@ -1936,12 +1940,14 @@ def j_deck_install(log, prog, mode, pads=True,
                      "liveks": bool(liveks), "stems": bool(stems),
                      "phase": bool(phase),
                      "brake": float(brake or 0), "flac": bool(flac),
-                     "opus": bool(opus), "touchfx": bool(touchfx and pads)}
+                     "opus": bool(opus), "touchfx": bool(touchfx and pads),
+                     "tfilter": bool(tfilter)}
         save_settings(s)
     except Exception:
         pass
     args = ["tools/deck_session.py"] + install_args(mode, pads, themes, liveks, stems,
-                                                    phase, brake, flac, opus, touchfx)
+                                                    phase, brake, flac, opus, touchfx,
+                                                    tfilter)
     if touchfx and pads:
         liveks = False
     plan = {pre: n for pre, _, n in INSTALL_STEPS}
@@ -1961,6 +1967,8 @@ def j_deck_install(log, prog, mode, pads=True,
         plan["5x"] = 0
     if not (phase and pads):
         plan["5m"] = 0
+    if not tfilter:
+        plan["5t"] = 0
     if not flac:
         plan["5h"] = 0
     elif not opus:
@@ -2783,7 +2791,8 @@ class H(BaseHTTPRequestHandler):
                                              extras, logo)})
             if p == "/api/stick/pack":
                 sel = {k: b[k] for k in ("mode", "pads", "themes", "liveks", "stems",
-                                         "phase", "brake", "flac", "opus", "touchfx")
+                                         "phase", "brake", "flac", "opus", "touchfx",
+                                         "tfilter")
                        if k in b}
                 return self.send({"job": job("Write mods file to the USB stick",
                                              j_stick_pack, sel)})
@@ -2813,7 +2822,8 @@ class H(BaseHTTPRequestHandler):
                                              float(b.get("brake") or 0),
                                              bool(b.get("flac", False)),
                                              bool(b.get("opus", False)),
-                                             bool(b.get("touchfx", False)))})
+                                             bool(b.get("touchfx", False)),
+                                             bool(b.get("tfilter", False)))})
         except (BrokenPipeError, ConnectionResetError):
             raise
         except Exception as e:

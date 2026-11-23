@@ -67,7 +67,6 @@ def main():
 
     STOCK_LBL = [bytes(mem.r8(a + i) for i in range(144))
                  for a in (0x083B9130, 0x083BA330, 0x083BA450)]
-    STOCK_COLOURS = {mem.r16(0x083B9130 + 2 * k) for k in range(72)}
     run(20_000_000)
     tap(709, 37, after=30_000_000)              # PERFORM
     run(250_000_000)
@@ -93,29 +92,14 @@ def main():
     check("swipe left across pads -> page 2", page=1)
     print(f"   (no jump during the swipe: {p0:.2f} -> {p1:.2f})")
     ok &= p1 >= p0 - 0.05
-    # cue marker labels: the three label pictures now read D E F
+    # cue marker labels: since 2026-11-22 hc.c draws all eight markers on the
+    # overview itself (tools/hotcue8_markers_test.py checks the screen), so
+    # the deck's three label pictures are never rewritten any more
     from ghosttap_emu import fb_png
-    LBL = (0x083B9130, 0x083BA330, 0x083BA450)
-
-    def letters():
-        out = []
-        for a in LBL:
-            bits = tuple(sum(1 << (7 - x) for x in range(8)
-                             if mem.r16(a + 2 * (y * 8 + x)) != 0xF81F) for y in range(9))
-            out.append(bits)
-        return out
-    PATS = {(0x78, 0x44, 0x42, 0x42, 0x42, 0x42, 0x42, 0x44, 0x78): "D",
-            (0x7E, 0x40, 0x40, 0x40, 0x7C, 0x40, 0x40, 0x40, 0x7E): "E",
-            (0x7E, 0x40, 0x40, 0x40, 0x7C, 0x40, 0x40, 0x40, 0x40): "F",
-            (0x18, 0x18, 0x24, 0x24, 0x24, 0x7E, 0x42, 0x42, 0x42): "A",
-            (0x7C, 0x42, 0x42, 0x42, 0x7C, 0x42, 0x42, 0x42, 0x7C): "B",
-            (0x38, 0x44, 0x82, 0x80, 0x80, 0x80, 0x82, 0x44, 0x38): "C"}
     run(30_000_000)
-    lab = "".join(PATS.get(b, "?") for b in letters())
-    colour = {mem.r16(a + 2 * k) for a in LBL for k in range(72)}
-    good = lab == "DEF" and colour == STOCK_COLOURS
-    print(f"marker labels on page 2: {lab}  colours {sorted(hex(c) for c in colour)}  "
-          f"{'ok' if good else 'WRONG'}")
+    good = [bytes(mem.r8(a + i) for i in range(144))
+            for a in (0x083B9130, 0x083BA330, 0x083BA450)] == STOCK_LBL
+    print(f"marker label pictures on page 2 stay stock: {good}  {'ok' if good else 'WRONG'}")
     ok &= good
     fb_png(m, "screenshots/hotcue8/markers_page2.png")
     tap(PAD_X[0], ROW)
@@ -187,9 +171,8 @@ def main():
     run(30_000_000)
     back = [bytes(mem.r8(a + i) for i in range(144))
             for a in (0x083B9130, 0x083BA330, 0x083BA450)] == STOCK_LBL
-    print(f"marker labels back to stock A B C byte for byte: {back}  "
-          f"(rewrites {v('hp_lblw')}, refusals {v('hp_lblbad')})")
-    ok &= back and v("hp_lblbad") == 0
+    print(f"marker label pictures stock A B C byte for byte: {back}")
+    ok &= back
     tap(PAD_X[0], ROW)
     # every pad was touched on page 2, so the return to page 1 must make it
     # reload (hcpad_test 2026-11-18: without that, A played D after a REC store)

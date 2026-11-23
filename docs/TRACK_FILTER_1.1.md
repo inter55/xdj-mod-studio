@@ -497,3 +497,373 @@ response / row array), then hook it to drop rows that fail the filter.
   0x096FB1C0, 0x0970D004/0x0970D804 (4 KB, 0x2E20.. records), 0x0981xxxx
   (DB task working memory, pointers 0x0E0B5C38 / 0x08E04BB8), 0x0B6DDF44
   (480 B), 0x0A4E17A4.. (row widgets). Inspect those first.
+
+## 2026-11-22: ON-DECK TRACK FILTER BUILT (emulator PASS on the user's library)
+
+The 700 now has its own filter, a RAM mod like the others. Nothing is
+copied from the 1000MK2; its behaviour (categories AND'ed, BPM = a typed
+value plus or minus a range, KEY, COLOR, RATING, a reset) is the model.
+
+### How the 700 builds a browse list (found this session, emulator)
+
+* Entering a category, the DB task (`DBSMain_TASK`) copies a query result
+  into the browse list buffer with **`FUN_08CDFC8C(dst, src)`**. In the
+  emulator `dst` = `0x0B0E0FE8` (DJDBLEFTBUF), `src` = `0x0B0E2DD8`.
+  Buffer layout: `+0` u16 capacity (50000), `+2` u16 row count, `+4` u16
+  total, `+0xA` list type (`0x1004` for TRACK), `+0x34` u16 sort
+  permutation (result side only; freed + cleared by the copy when it is
+  the destination), `+0x4C` rows, 20 bytes each.
+* A row is `{u32 id, u32 second id, u32, u32 (byte +0xC = 4), u8 sort
+  letter +0x10, u8 kind +0x12 (column of the left text), u8 kind +0x13
+  (right column)}`. Kinds 1..5 and `0x16..0x18` are DJDBCONTENT columns
+  (3 = title, 1 = file name, 2 = path, 4 = ?, 5 = date), so a row with one
+  of those kinds is a track and `id` is its content id (= export.pdb track
+  id). Category rows have kind `0x1A` (menu items).
+* The copy routine is reached through three literal-pool words:
+  `0x08CE339C` (user `0x08CE3296`), `0x08CE42F8` (`0x08CE41DC`,
+  `0x08CE42BE`), `0x08CE45AC` (`0x08CE4358`, `0x08CE442C`).
+  Only this function and `FUN_08CE2FD6`/`FUN_08CE3EAC` load them.
+* The screen then reads pages with `dbcl_GetLeftBuf` (`FUN_08B742B4`,
+  request `0x3000`, offset/count), so a smaller row count is all the
+  screen needs: the list, the scroll bar and the jump-to-letter search
+  (`FUN_08CE08CC`) all follow `+2`.
+* **BACK saves the shown list back into the result** with the same copy
+  routine (dst = result, src = browse buffer). Re-entering the list copies
+  it back. An in-place filter would therefore become permanent. When the
+  result is still the exact one a filtered list came from (same rows
+  pointer, count and permutation), our wrapper skips that save, so the
+  result keeps the full sorted list and every visit filters it again with
+  the settings of that moment (this is the 700's "Apply").
+* With an empty result the deck copies the buffer onto itself once; that
+  must not end the tracking (found by the empty-list test).
+
+### Reading BPM / key / colour / rating on the deck
+
+The 700's DB engine (a DeviceSQL-style library at `0x08E1xxxx`) keeps the
+export.pdb pages in RAM. The deck's own record fetch `FUN_08C248FA(kind,
+id, &out, 0)` (kind = table/column, 1..0x47; it returns a column as a
+string and is used for the row texts) shows the engine calls, which we
+make the same way from inside the DB task:
+
+    h   = 0x08E120A4(&err, "djdbContent", "idxContent", 0, 0, 0, "=", 1, &key)
+          key = {pointer to the u32 id, 4}
+    rec = 0x08E12C90(h, &err)
+    p   = 0x08E12DB0(rec, column, &len)
+          0x08E129B2(h)                        /* close */
+
+Column 0 of a content record points at the id field (`+0x48`) of the raw
+export.pdb track row, so the row is `p - 0x48` and the fields are read
+directly: `+0x20` key id, `+0x38` tempo (BPM x 100), `+0x58` colour id,
+`+0x59` rating. Measured by calling `0x08E12DB0` for columns 0..47 on two
+tracks: col 8 = `+0x38`, col 20 = `+0x20`, col 22 = `+0x58`, col 15 =
+`+0x59`. Key names come from `djdbKey`/`idxKey` column 1 (UTF-16). This
+library mixes musical names (`Abm`, `F#m`), and Open Key (`1m`, `9d`), so
+every key is turned into a Camelot code before comparing (`8A` = `Am` =
+`1m`).
+
+### The mod
+
+* `tools/trackfilter/tf.c` + `tfentry.S` + `build.sh` ->
+  `build/trackfilter/tf.bin` at **`TF_BASE 0x09960000`** (1.4 KB code,
+  ~2.3 KB with state, limit `0x0996D000`): between the PWV7 snapshot slot
+  (ends `0x09960000`) and the end of the all-states-zero band
+  `0x09836000..0x0996D000` (CLAUDE.md sec. 77). NOT deck-surveyed yet (the
+  installer refuses without its own read-only survey on that deck).
+  Header: `+0` "TFLT", `+4` tf_copy, `+8` &tf_cfg, `+12` &tf_prev.
+* `tf_copy` = the three pools' new target: runs the stock copy, then (when
+  TRACK FILTER is ON, MODS is ON and a condition is set) drops the track
+  rows that fail, compacts the rest in order and lowers `+2` (and `+4`
+  when it was the same count). Non-track rows are never touched; a track
+  without a record is kept. Diagnostics: tf_calls, tf_lists, tf_in,
+  tf_kept, tf_fail, tf_skips, and a ring of the last 8 copies (tf_log).
+* Settings = six rows in hold-MENU **UTILITY** (tools/utility/ut.c, placed
+  before the MODS row so the mod rows keep their places at the end):
+  TRACK FILTER (OFF/ON), FILTER BPM (OFF, 60..200), FILTER BPM RANGE
+  (+-0 = same whole BPM, +-1 .. +-20 BPM), FILTER KEY (OFF, 24 keys shown
+  as `Am (8A)`), FILTER COLOR (OFF + the 8 rekordbox colours), FILTER
+  RATING (OFF, 1..4 OR MORE, 5). They say NOT INSTALLED without the
+  module. All conditions are AND'ed, like the 1000MK2. The filter applies
+  to every list that shows tracks (TRACK, an artist's or album's tracks,
+  playlists, KEY lists...): only rows that are tracks are judged.
+* Range unit: BPM (the 1000MK2's `EDIT BPM RANGE` unit is still unknown;
+  BPM is what DJs mean by "plus or minus 2").
+* MY TAG: not done. The 700's DB does have `djdbexMyTag` (idxExtMyTag
+  MyTagID, FUN_08C248FA kind 0x19), so it is reachable the same way once
+  the track-to-tag table is found; left for later.
+* No 1000-style FILTER screen yet: the UTILITY rows are the first UI (the
+  task allowed it); a BROWSE > FILTER screen is the next step.
+
+### Tests
+
+* `tools/trackfilter.py emu` (user's library, `tl_before.pkl`): drives the
+  real UTILITY rows, then opens BROWSE > TRACK and compares the deck's
+  rows with export.pdb (the deck's own unfiltered order, filtered in
+  Python) after each of: ON / 128 / +-2 / 8A (13 tracks), 124 / +-0 / key
+  OFF (14, changed while inside the list), COLOR PINK (0, empty list),
+  TRACK FILTER OFF (all 263 back, same order). No CPU exceptions.
+  **RESULT: PASS.** Screens: `screenshots/trackfilter/`.
+* Other lists (scratch check, same snapshot, BPM 128 +-2): BROWSE >
+  ARTIST shows all 111 artists (kind 7 rows untouched); Alessandro
+  Calabrese > "Coral City | Vol. 3" (album rows untouched) > its track list
+  is filtered to 0 rows -- correct, its only track is 123 BPM.
+* Deck installer `tools/trackfilter_apply.py` (`--survey` | install |
+  `--revert`; the survey marker is per deck serial, so a mock-deck survey
+  never counts for a real deck), `deck_session.py --trackfilter` = step
+  5t (opt-in until proven on hardware). **Mock deck**
+  (`tools/mock/mock_install.py --mode rgb --trackfilter`, real installers
+  against the emulated deck): every step PASS, 5t survey + write + arm in
+  the shared session; `tools/mock/verify_install.py` (now checks the
+  module bytes, tf_prev and the three pools) **RESULT: PASS**.
+* `tools/utility.py emu` with the new rows (13 mod rows now, together
+  with another session's HOT CUE COLORS row; the mod rows keep their
+  places from the end): **RESULT: PASS**.
+* Build order: `tools/utility/build.sh` reads `build/trackfilter/tf.syms`,
+  so `tools/trackfilter/build.sh` runs first (tools/build_studio.sh does;
+  `make_public_repo.sh` ships `prebuilt/deck/trackfilter/`).
+
+### Open / next
+
+1. Deck: survey `0x09960000..0x0996D000` (read-only, `--survey`) and a first
+   hardware run. On the deck the list copy runs in the DB task like in the
+   emulator; the engine calls are the deck's own, but each lookup is one
+   index query, so time a big TRACK list (thousands of tracks) on the deck.
+2. A 1000-style BROWSE > FILTER screen (the UTILITY rows are the first UI).
+3. MY TAG (djdbexMyTag is in the 700's DB; the track-to-tag table is next).
+4. MASTER FOLLOW (BPM/KEY from the other deck over LINK).
+5. Studio: a "Track Filter (beta)" tick box -> `--trackfilter`.
+6. Permanent UPD: not baked (the rows say NOT INSTALLED in a flashed
+   build until it is).
+
+### 2026-11-22 (later): XDJ-1000MK2 reference in QEMU (started, not finished)
+
+Goal (user): make the 700 filter IDENTICAL to the 1000MK2's, using the
+cdj-nxs2-qemu emulator as the reference deck (no real 1000 here).
+- Firmware: `~/Downloads/ref/cdj-nxs2-qemu/scripts/firmware/prepare_firmware.sh
+  --model xdj1000mk2 XDJ-1000/XDJ1KMK2.UPD ~/Downloads/ref/x1k-fw` -> PASS
+  (main_unpacked.bin sha 16928d8c..).
+- `tools/x1k_qemu.py start|shot|key|touch|mon|stop`: machine `xdj1000mk2`
+  (our ~/qemu-build-fast build has it), user's library over NBD. BOOTS to
+  the main screen. Touch reaches the panel (QEMU log "touch pressed").
+- BLOCKER: the stick does not mount -- BROWSE shows "NO USB" (the NBD
+  server never got a read). Try next: hot-plug the stick after boot
+  (`device_add usb-storage` via `mon`, the 700's boot-attach quirk), or the
+  reference's own `launcher/deck.py` path for this model.
+- Then: BROWSE > FILTER screens, the BPM range unit, rating rule (exact or
+  at least), several colours/keys, AND/OR, Apply -- screenshots into
+  screenshots/x1k_filter/, then build the 700 screen to match.
+
+## 2026-11-22 later: the XDJ-1000MK2's rules, measured, and the 700 made to match
+
+Measured on the real 1000MK2 firmware running in the reference emulator
+(cdj-nxs2-qemu, machine xdj1000mk2; driver `tools/x1k_qemu.py`) with the
+user's library, plus a copy (`cache/x1k_ratestick`) whose export.pdb has
+ratings 1..5 and colours 1..8 set on a few tracks. Counts are the deck's own
+[n] in the list header.
+
+| condition | 1000MK2 result | rule |
+|---|---|---|
+| BPM 130 ±6 % | 234 | value × (100 ± p) %, inclusive |
+| KEY C (RELATED KEY) | 32 | same key, relative minor/major, a fifth up/down (Camelot same number other letter, or ±1 same letter). Tracks whose key is named in Camelot/Open Key ("1m", "8A") never match |
+| BPM + KEY | 28 | conditions are AND'ed |
+| RATING 1 star | 2 (10 tracks rated 1..5) | exactly that many stars |
+| COLOR pink + red | 4 | any picked colour (OR); COLOR ticked with none picked = all |
+
+Screen facts: ± is typed on a keypad, 0..6 % only (7, 8, 9 greyed); BPM is
+typed (integer); KEY picker = 12 majors in circle-of-fifths order + MINOR;
+hold RESET = everything unticked, defaults 130 / ±6 % / C / 3 stars / no
+colour; MY TAG tab = the export's My Tag columns with AND/OR criteria
+(this library has none); tap TRACK FILTER = filter on/off, hold = this
+screen; the list header shows a funnel and [count].
+
+700 module changed to the same rules (`tools/trackfilter/tf.c`,
+`tools/utility/ut.c`): FILTER BPM RANGE is now ±0..±6 %, FILTER RELATED KEY
+matches related keys and only musical key names, FILTER RATING is exact
+(1 STAR .. 5 STARS), the colour setting is a bitmask (the UTILITY row picks
+one colour; the engine ORs any it is given). `tools/trackfilter.py`'s Python
+model reproduces all five 1000MK2 counts above.
+
+Still NOT identical: no TRACK FILTER button or condition screen on the 700
+(settings are UTILITY rows; one colour at a time from the row); conditions
+are not saved to the stick (RBFLTR.DAT) -- they live in RAM until power-off;
+no MY TAG and no MASTER PLAYER (take BPM/KEY from the master deck).
+
+## 2026-11-22 evening: the 700 already has the 1000MK2's filter back end
+
+Found in the 700's own firmware (fw 1.15), only the screen and the list step
+were missing:
+- RBFLTR.DAT reader/writer module 0x08B3646C..0x08B38xxx + FilterFileWrite_TASK
+  (saves the file about a second after a change). Your stick's RBFLTR.DAT was
+  written by the 700 ("XDJ-700 1.15", defaults 130 / ±6 % / C / 3 stars).
+- Condition store TF_ST 0x09603674: own set at +4 (entries 0x1C: +4 ticked,
+  +0xE count, +0x10 values, +0x14 operator), five per-player copies at
+  +0xFC + i*0xE4, change counter at +4.
+- SETCOND 0x08B34D5A(0x300, type, 0, len, block, &changed): the FCND block,
+  LITTLE-endian {flags (bit0 ticked), operator, u16 count, u32 values}.
+- PRED 0x08B357CC(3, player, record): the "does this track pass" check, with
+  0x08B35F6C BPM between (lo == hi means the BPM it rounds to: lo-50..lo+49),
+  0x08B3602A key in list, 0x08B36138 rating equals, 0x08B361F8 colour bit
+  (mask 0 = all).
+- 0x08CE21FA = the 1000's list marker (row +0x0F bit 2, count at +4); nothing
+  on the 700 calls it, so the 700 never filters by itself.
+
+RBFLTR.DAT format (decoded from what the 1000 writes; big-endian on disk):
+FMAI header (0x74 B, device name + version, block count) + four FCND blocks
+{"FCND", hdr 0x14, len, type} + {flags, operator, u16 count, values}:
+BPM type 6 op 6 [lo, hi] x100; KEY 0x0C op 0x11 [key, relative, fifth down,
+fifth up] numbered Camelot nA = 2n-1, nB = 2n (Am 15, C 16); RATING 7 op 0
+[stars, 0]; COLOR 0x0F op 0x11 [bitmask].
+
+The mod now (tools/trackfilter/tf.c + tfs.c, 27.7 KB @0x09960000):
+- list step: tf_copy calls PRED on each track row (so the matching IS the
+  1000's code), conditions read from and written through the store, which the
+  700 saves on the stick itself (per stick; rekordbox-set filters honoured).
+  Never filters a copy FROM the shown list (BACK saves it back).
+- screen + control: in a track list, the right end of the list header shows a
+  funnel + [count] like the 1000 (dim funnel when off: the 700 has no TRACK
+  FILTER button). Tap = filter on/off, hold 1 s = filter on + the TRACK
+  FILTER screen: title + live [count], BPM KEY / MY TAG tabs, hold RESET,
+  BPM / KEY / RATING / COLOR rows with tick boxes, BPM and ± keypads and the
+  key picker over the player strip (CLOSE), MASTER PLAYER button. Leave with
+  BACK, a knob push, or a tap on the title funnel; the list is redone at once
+  (BACK + push injected, waiting for the screen to change between them).
+- installer: checks the 700's own filter code is the fw 1.15 bytes first;
+  chains the screen in front of the flush and hit-tester hooks; deck_session
+  runs 5t LAST of the screen mods (others only accept heads they know).
+
+Tests: trackfilter.py emu PASS (UTILITY rows, PRED lists == model, stick
+file rewritten with the last conditions); trackfilter_screen_emu.py PASS
+(hold opens, keypads + picker by touch, live count 48 = the 1000's, close ->
+list 48, tap -> 263, hold RESET); mock install (rgb + phase meter + TOUCH FX
++ light + filter) + verify_install PASS. Not on a real deck.
+
+Still not done: MY TAG contents (tab is there, empty like the 1000 with no
+tags; needs the My Tag tables read in the DB task + a library with tags to
+test), MASTER PLAYER (button drawn, does nothing yet: needs the master
+deck's BPM/key over LINK).
+
+## 2026-11-22 night: MY TAG and MASTER PLAYER
+
+Measured on the XDJ-1000MK2 firmware (reference emulator) with a test copy of
+the library stick (cache/x1k_ratestick: tag links written into exportExt.pdb
+table 4 as {0, track id, tag id, 3}; the 1000MK2 reads them; your own stick has
+the tags but no track uses them):
+- MY TAG tab: four column tabs (tick box + name, long names cut at the tab
+  edge), each listing only the tags tracks use, in position order, 2 x 3 grid,
+  the knob scrolls a row (2 tags); CRITERIA AND/OR per column; "i" shows all
+  four columns' used tags (chosen white, others grey).
+- Rules: ticked column with no tag chosen = no filter; AND = all chosen tags
+  on the track, OR = any; columns AND'ed with each other and with BPM/KEY/
+  RATING/COLOR. Counts: Acid House 3, + Deep House AND 1 / OR 4, Genre OR +
+  Components Vocal 1.
+- Hold RESET clears only the tab you are on.
+- My Tag choices are NOT saved in RBFLTR.DAT (the 1000MK2 and the 700's own
+  writer write only the BPM/KEY/RATING/COLOR blocks): RAM only.
+- MASTER PLAYER (manual): BPM and KEY of the sync-master deck into the BPM and
+  KEY fields.
+
+700 build (tf.c + tfs.c, 37 KB, ends 0x0996C84C):
+- My Tag data from the deck's own tables in the DB task: djdbexSongMyTag by
+  content id (one record per tag; column 0 -> tag id), djdbexMyTag by id
+  (column 0 -> raw row + 0x14: +0x0C column, +0x10 position, +0x1B is a
+  column, +0x1D name offset). Columns = ids 1..8 with the column flag, in
+  position order. Used tags gathered from each track list (up to 32 for the
+  screen; the filter itself has no limit).
+- Live count cache now 1536 tracks (BPM/key/colour/rating word + tag bits);
+  longer lists filter fine but show no live [count].
+- MASTER PLAYER = this deck's loaded track: BPM = 0x09D24692 (track BPM x100)
+  with the tempo 0x0B6C3ED0 applied, key = the text 0x09D30430 the main
+  screen shows (remembered while the main/PERFORM screen is up -- the browse
+  reuses that buffer); sets both values and ticks BPM and KEY. A LINK master
+  is not read yet.
+- The shown-list detection gained a second rule: the first copy after a BACK
+  press (the deck saving the shown list) copies FROM the shown list (needed
+  when a list comes from a stored result without a sort table).
+
+Tests: tools/trackfilter_mytag_emu.py PASS (snapshot from
+tools/trackfilter_tagstick.py): columns + used tags read, the three 1000MK2
+counts reproduced on the 700, knob scroll, "i", RESET, MASTER PLAYER on
+"Adventure" (124.76 BPM, Abm -> 125 / Abm). trackfilter.py emu PASS,
+trackfilter_screen_emu.py PASS, mock install + verify_install PASS.
+1000MK2 reference screenshots: screenshots/trackfilter/x1k_ref/.
+Not on a real deck. Not done: MASTER PLAYER from a LINK master.
+
+## 2026-11-22 night: first deck run (<deck serial>) and the fixes
+
+Deck result (user photos): the TRACK FILTER screen drew, but parts of it were
+missing (the "i" button, CRITERIA) and the browse list's titles and
+"[TRACK]" header showed through on top. Leaving with BACK crashed the deck;
+the user power-cycled, so no counters survived.
+
+Causes, found in the emulator (it shows the same thing once you look at
+the layer between presents, not at the composed screen):
+- The browse clears the screen EVERY frame with two 2DG fills (0,0 800x480
+  and 4,4 792x472). strip_stock's crop rule wanted `x1 >= 800`, but x1 is
+  the last pixel (799), so neither was cropped: each frame wiped the screen,
+  and the old 8-point damage check (most points on black) mostly missed it.
+  Fix: any A0 fill that starts above the screen and reaches below it is
+  cut to its part below (tfs_cropped). After: idle repaints 0 (were 1 per
+  present).
+- The browse also redraws its header and the selected row's title with the
+  CPU per-pixel text blender FUN_08C2F5C2 (r5 = pixel address), which no
+  2DG strip can catch. New hook tfs_txt_entry (tfentry.S, header +24) on
+  pools 0x08C2F8FC / 0x08C31FC4: while the screen is open, a pixel inside
+  [tfs_tlo, tfs_thi) (the layer's rows 0..319, or 0..479 with a keypad) is
+  dropped like the blender's own en == 0 exit; chained to tfs_prev_txt
+  (stock or the light-mode wrapper). Installed by trackfilter.py install /
+  trackfilter_apply.py (also --revert); verify_install checks it.
+- The knob scrolled the browse list under the screen. keys() now takes the
+  knob's steps for the My Tag grid and puts the counter back (rotacc).
+- Damage check: 19 line checksums (every 3rd pixel, lines 17 px apart)
+  instead of 8 points; tfs_dmg = the lines found changed last time.
+
+The BACK crash did NOT reproduce in the emulator (BACK, with and without a
+track loaded: relist completes, no exception). Best guess: the per-frame
+full repaint (the screen wiped and redrawn on every present, ~256k uncached
+writes) plus the injected BACK/push relist starved the deck. That load is
+gone now; the crash itself is unproven either way. Next deck run: open the
+screen, change nothing, BACK. Then try ticking something and BACK.
+
+## 2026-11-23 DECK: the filter's working memory is in use on this deck
+
+On <deck serial>, after loading an UNANALYSED file (STEMS via FOLDER), the
+firmware wrote 8-bit data centred on 0x80 (values 118..156) over
+0x0996C730..0x0996D0FF -- probably the deck's own analysis buffer. The
+filter's bss (tfs_*/tf_* state, 0x0996C7AC..0x0996C91C) sits inside it:
+tfs_mode read 0x80808080 -> screen opened by itself, went black, crashed on
+BACK. The SURVEY saw zero (idle). Code (0x09960000..0x09969xxx) intact.
+0x0996C000..0x0996C700 and 0x0996DF00.. read zero. The 11-12 "all states
+zero" map never included an unanalysed load. FIX NEEDED: move the state
+(and ideally the module) out of 0x0996C700..0x0996D100 -- find which
+buffer it is and its full extent first (unanalysed load in the emulator +
+write watch). tools/tf_probe.py = read-only state probe.
+
+## 2026-11-23 later: moved + self-check -> HARDWARE PROVEN (<deck serial>)
+
+- Stock deck, unanalysed STEMS file playing: band map 0x09700000..0x09A00000
+  (docs/deck_logs/band_map_2026-11-23.log) shows NOTHING in 0x0996xxxx; the
+  emulator (list + screen + ticks) writes nothing outside the module either.
+  So the writer of 0x0996C730..0x0996D100 is unknown (only seen with our mods
+  in). Not chased further.
+- tf moved: TF_BASE 0x099F0000, end 0x099FCA28, limit 0x09A00000 (after the
+  FLAC+Opus image end 0x099EAA80). tf_sane() at tf_copy/tfs_flush/tfs_touch:
+  tf_cfg.on > 1, tfs_mode > 1, tfs_edit > 3, tfs_tab > 1 or tfs_relist > 3
+  -> tf_dead = 1 (in .data) for good, copy goes to STOCK_COPY directly (tf_prev
+  is state too), screen/touch pass through. Emu test with the deck's
+  0x80808080 garbage: dead 1, no screen, BACK to categories, no exceptions.
+- DECK (install_2026-11-23c.log, all PASS 10 min): tap = on/off ([278]),
+  hold = clean screen that stays clean, BACK with nothing changed = fine,
+  tick BPM + BACK = shorter list + count, tap = full list: ALL PASS (user).
+  tools/tf_probe.py after: tf_dead 0, 3145 draws, 15 full repaints, 29961
+  stripped / 1308 cropped stock commands, 0 damaged lines, 8 relists.
+
+## 2026-11-23 release prep: home moved again, 0x099F0000 -> 0x09940000
+
+The mock install with FLAC+Opus showed 0x099F0000 is inside FLAC+Opus
+(vfile _end 0x099F7478; the "image end 0x099EAA80" note was the code only).
+The deck test above ran without FLAC, so it never met. New home 0x09940000
+(end 0x0994CA28, limit 0x09960000) = the top of the PWV7 snapshot slot,
+which now ends there (rgb_detail SLOT7_MAX 0xB0000 -> 0x90000, 21 min of
+PWV7; longer tracks: 3-band centre falls back to stock). Inside the band
+surveyed zero on both decks and inside the stick loader's band. Same code
+that passed on the deck; only the address differs. The deck install's
+survey checks the area before writing.

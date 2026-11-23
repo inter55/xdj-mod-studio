@@ -34,6 +34,10 @@ RAM-only; a power-cycle always returns the deck to stock):
                                      of the two; then tools/touchfx_apply.py:
                                      the PERFORM > TOUCH FX screen; MASTER
                                      TEMPO ON)
+  5t TRACK FILTER                  (tools/trackfilter_apply.py, opt-in
+                                     --trackfilter: survey, then install;
+                                     UTILITY > TRACK FILTER / FILTER BPM /
+                                     BPM RANGE / KEY / COLOR / RATING)
   5d PERFORM pads                  (tools/perform_pads_apply.py: BEAT JUMP
                                      row + hot-cue swipe, the touchscreen
                                      pads; hooks armed with
@@ -167,6 +171,10 @@ def main():
     ap.add_argument("--phasemeter", action="store_true",
                     help="also 5m: Type 1 phase meter (needs the PERFORM pads; "
                          "opt-in until proven on hardware)")
+    ap.add_argument("--trackfilter", action="store_true",
+                    help="also 5t: TRACK FILTER in BROWSE (BPM +- range, key, "
+                         "colour, rating; set in UTILITY; opt-in until proven "
+                         "on hardware)")
     ap.add_argument("--keyshift", action="store_true",
                     help="also 5k: real-time key shift (live patch of the audio "
                          "chip, no restart; opt-in until proven on hardware)")
@@ -370,6 +378,7 @@ def main():
         if r is not True:
             sys.exit("STOP: key shift install failed - power-cycle the deck "
                      "(everything installed before it is fine after a re-run).")
+    fx_screen = a.touchfx
     if not a.touchfx:
         print("5x  TOUCH FX skipped (opt-in: --touchfx)")
     else:
@@ -387,8 +396,16 @@ def main():
         print("5x  TOUCH FX screen (read-only area check, then install)")
         out = run(["tools/touchfx_apply.py", "--survey"])
         if "SURVEY OK" not in out:
-            print("    TOUCH FX area not empty on this deck - screen skipped "
-                  "(the engine is in but has no screen); tell Claude.")
+            # 2026-11-22 (tester: "TOUCH FX disappears, leaving HOT CUE /
+            # BEAT JUMP / blank / STEMS"): this used to print one line and
+            # carry on, so the install "finished" with an empty tab slot.
+            fx_screen = False
+            print("    WARNING: TOUCH FX NOT INSTALLED -- the deck's memory "
+                  "where its screen goes is in use on this deck, so the "
+                  "screen was skipped (nothing was written there). The "
+                  "PERFORM tab slot under BEAT JUMP stays EMPTY. Switch the "
+                  "deck off and on and install again; if this line comes "
+                  "back, send the install log.", flush=True)
         else:
             r = until_pass(["tools/touchfx_apply.py", "--engine-ok"], "touchfx")
             if r is not True:
@@ -410,6 +427,24 @@ def main():
             if r is not True:
                 sys.exit("STOP: light add-on install failed - switch the "
                          "deck off and on, then install again (once).")
+    if not a.trackfilter:
+        print("5t  track filter skipped (opt-in: --trackfilter)")
+    else:
+        # LAST of the screen mods: its filter screen + header button chain
+        # in FRONT of the flush and hit-tester hooks, and the other
+        # installers only accept the heads they know
+        print("5t  TRACK FILTER (read-only area check, then install)")
+        out = run(["tools/trackfilter_apply.py", "--survey"])
+        if "SURVEY OK" not in out:
+            print("    WARNING: TRACK FILTER NOT INSTALLED -- its memory is in "
+                  "use on this deck (nothing was written there); the UTILITY "
+                  "filter rows say NOT INSTALLED. Everything else is installed.",
+                  flush=True)
+        else:
+            r = until_pass(["tools/trackfilter_apply.py"], "trackfilter")
+            if r is not True:
+                sys.exit("STOP: track filter install failed - switch the deck "
+                         "off and on, then install again (once).")
     # 2026-11-03 deck: FLAC used to sit in the middle and its "a track is
     # loaded" refusal ended the whole run -> the phase meter, TOUCH FX and
     # the light add-on were never installed (LIGHT = white text on a light
@@ -435,9 +470,11 @@ def main():
     print(f"DONE in {(time.time() - t0) / 60:.0f} min: insert the stick and "
           f"load a track. Waveform = {a.mode}; PERFORM has BEAT JUMP / "
           f"HOT CUE{' / KEY SHIFT' if a.keyshift else ''}"
-          f"{'' if a.no_stems else ' / STEMS'}{' / TOUCH FX' if a.touchfx else ''}; hold MENU > UTILITY (scroll to "
+          f"{'' if a.no_stems else ' / STEMS'}{' / TOUCH FX' if fx_screen else ''}; hold MENU > UTILITY (scroll to "
           f"the end) has the mod settings."
-          + ("" if flac_ok else " (FLAC was NOT installed.)"))
+          + ("" if flac_ok else " (FLAC was NOT installed.)")
+          + (" (TOUCH FX was NOT installed -- see the WARNING above.)"
+             if a.touchfx and not fx_screen else ""))
     print("If the stick was in the deck at any point during the install: "
           "eject it and put it back once, so the deck re-reads the file "
           "types (otherwise FLAC/Opus files still show 'unsupported').")

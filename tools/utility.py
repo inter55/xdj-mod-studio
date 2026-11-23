@@ -28,7 +28,7 @@ STOCK_TAB, STOCK_N = 0x0E736410, 16
 COUNT = 0x0E736750
 POOLS = (0x08DD23F4, 0x08DD272C, 0x08DD2A58, 0x08DD2AEC)
 REC = 52
-NOURS = 6
+NOURS = 13
 
 
 def _out():
@@ -155,7 +155,8 @@ def emu():
         fb_png(m, f"{out}/d_{tag}_done.png")
         turn(row_from_end)
 
-    # rows from the end: THEME 0, GATE 1, BRAKE 2, PHASE 3, WAVEFORM 4, MODS 5
+    # rows from the end: THEME 0, HOT CUE COLORS 1, GATE 2, BRAKE 3, PHASE 4,
+    # WAVEFORM 5, MODS 6
     if themes:
         import theme_switch as TS
         cur = lambda: mem.r8(TS.TS_DATA + 32)
@@ -166,31 +167,36 @@ def emu():
         print("THEME cur:", cur())
         ok &= chk("theme off", cur() == 0)
     w0 = mem.r8(RO.MODE_ADDR)
-    edit(4, 1, "wave")
+    edit(5, 1, "wave")
     print("WAVEFORM:", w0, "->", mem.r8(RO.MODE_ADDR), "commits", mem.r32(s["ut_commits"]))
     ok &= chk("waveform +1", mem.r8(RO.MODE_ADDR) == (w0 + 1) % 3)
-    edit(2, 2, "brake")
+    edit(3, 2, "brake")
     print("BRAKE:", mem.r8(MS.MSBRAKE), mem.r32(MS.BRAKE_LIT))
     ok &= chk("brake 4X", mem.r8(MS.MSBRAKE) == 2 and mem.r32(MS.BRAKE_LIT) == 4 * MS.BRAKE_STOCK)
-    edit(1, 1, "gate")
+    edit(2, 1, "gate")
     pms = {l.split()[2].lstrip("_"): int(l.split()[0], 16)
            for l in open("build/phasemeter/pm.syms")}
     if mem.r32(pms["pm_prev"]):
-        edit(3, 1, "phase2")
+        edit(4, 1, "phase2")
         print("PHASE METER mode:", mem.r32(pms["pm_mode"]))
         ok &= chk("phase meter TYPE 2 (stock)", mem.r32(pms["pm_mode"]) == 0)
-        edit(3, -1, "phase1")
+        edit(4, -1, "phase1")
         ok &= chk("phase meter TYPE 1", mem.r32(pms["pm_mode"]) == 1)
     else:
         print("phase meter not installed: row says NOT INSTALLED")
     print("GATE:", mem.r8(MS.MSGATE))
     ok &= chk("gate on", mem.r8(MS.MSGATE) == 1)
+    edit(1, 2, "hccol")                     # HOT CUE COLORS: 8 COLORS -> ALL STOCK
+    print("HOT CUE COLORS:", mem.r8(MS.MSHCCOL))
+    ok &= chk("hot cue colors ALL STOCK", mem.r8(MS.MSHCCOL) == 2)
+    edit(1, -2, "hccol0")
+    ok &= chk("hot cue colors 8 COLORS", mem.r8(MS.MSHCCOL) == 0)
     wave = mem.r8(RO.MODE_ADDR)
-    edit(5, 1, "mods")
+    edit(6, 1, "mods")
     print("MODS:", mem.r8(MS.MSOFF), "mode", mem.r8(RO.MODE_ADDR), "K", mem.r32(MS.BRAKE_LIT))
     ok &= chk("mods off", mem.r8(MS.MSOFF) == 1 and mem.r8(RO.MODE_ADDR) == 0
               and mem.r32(MS.BRAKE_LIT) == MS.BRAKE_STOCK)
-    edit(5, -1, "modson")
+    edit(6, -1, "modson")
     print("MODS:", mem.r8(MS.MSOFF), "mode", mem.r8(RO.MODE_ADDR), "K", mem.r32(MS.BRAKE_LIT))
     ok &= chk("mods back on", mem.r8(MS.MSOFF) == 0 and mem.r8(RO.MODE_ADDR) == wave
               and mem.r32(MS.BRAKE_LIT) == 4 * MS.BRAKE_STOCK)

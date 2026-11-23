@@ -64,6 +64,9 @@ MSBRAKE = MS + 0x7F9                # u8 vinyl brake length index (0 = 1x)
 # row, the other doesn't"); otherwise all five rows, as before.
 # UTILITY (tools/utility.py) always has every row. MSKB = first kind shown.
 MSKB = MS + 0x7FA                   # u8 0 = [THEME] shown, 1 = hidden
+MSHCCOL = MS + 0x7FB                # u8 overview hot cue marker colours
+                                    # (UTILITY HOT CUE COLORS, tools/hotcue8 hc.c):
+                                    # 0 8 colors, 1 A-C stock, 2 all stock
 # [VINYL BRAKE] (2026-10-18): brake length = K / ..., K = the one literal
 # at 0x08D3714C (tools/brake_length_apply.py, CLAUDE.md §120)
 BRAKE_LIT, BRAKE_STOCK = 0x08D3714C, 6_000_000
